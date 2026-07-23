@@ -1,0 +1,393 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SALES
+  PLANNER
+  FOREMAN
+  OPERATOR
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+}
+
+enum WorkOrderStatus {
+  PLANNED
+  WAITING_MATERIAL
+  IN_PRODUCTION
+  COMPLETED
+  CANCELLED
+}
+
+enum PurchaseOrderStatus {
+  ORDERED
+  IN_TRANSIT
+  RECEIVED
+  CANCELLED
+}
+
+enum MaterialType {
+  RAW
+  CONSUMABLE
+}
+
+enum ConsumptionType {
+  RESERVED
+  CONSUMED
+}
+
+enum RunSource {
+  MANUAL
+  MACHINE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+}
+
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id           String   @id @default(uuid())
+  tenantId     String
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokenHash String?
+
+  ncPrograms      NcProgram[]
+  quotes          Quote[]
+  purchaseOrders  PurchaseOrder[]
+  consumptions    MaterialConsumption[]
+  productionRuns  ProductionRun[]
+  finishedEntries FinishedGoodsEntry[]
+  auditLogs       AuditLog[]
+
+  @@index([tenantId])
+}
+
+model Customer {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  taxNo       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  quotes Quote[]
+
+  @@index([tenantId])
+}
+
+model Part {
+  id             String   @id @default(uuid())
+  tenantId       String
+  partNo         String
+  revision       String   @default("A")
+  name           String
+  description    String?
+  drawingFileRef String?
+  stepFileRef    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  ncPrograms      NcProgram[]
+  quoteLines      QuoteLine[]
+  workOrders      WorkOrder[]
+  finishedEntries FinishedGoodsEntry[]
+  stock           PartStock?
+
+  @@unique([tenantId, partNo, revision])
+  @@index([tenantId])
+}
+
+model NcProgram {
+  id          String   @id @default(uuid())
+  tenantId    String
+  partId      String
+  version     Int
+  fileName    String
+  fileRef     String
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  part      Part @relation(fields: [partId], references: [id])
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@unique([partId, version])
+  @@index([tenantId])
+}
+
+model Quote {
+  id          String      @id @default(uuid())
+  tenantId    String
+  quoteNo     String      @unique
+  customerId  String
+  status      QuoteStatus @default(DRAFT)
+  currency    String      @default("TRY")
+  validUntil  DateTime?
+  notes       String?
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  customer  Customer    @relation(fields: [customerId], references: [id])
+  createdBy User        @relation(fields: [createdById], references: [id])
+  lines     QuoteLine[]
+
+  @@index([tenantId])
+}
+
+model QuoteLine {
+  id        String   @id @default(uuid())
+  tenantId  String
+  quoteId   String
+  partId    String
+  quantity  Decimal  @db.Decimal(18, 3)
+  unitPrice Decimal  @db.Decimal(18, 2)
+  dueDate   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quote      Quote       @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  part       Part        @relation(fields: [partId], references: [id])
+  workOrders WorkOrder[]
+
+  @@index([tenantId])
+}
+
+model Machine {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  model      String
+  controller String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  workOrders     WorkOrder[]
+  productionRuns ProductionRun[]
+
+  @@index([tenantId])
+}
+
+model WorkOrder {
+  id          String          @id @default(uuid())
+  tenantId    String
+  woNo        String          @unique
+  quoteLineId String?
+  partId      String
+  quantity    Decimal         @db.Decimal(18, 3)
+  dueDate     DateTime
+  priority    Int             @default(5)
+  status      WorkOrderStatus @default(PLANNED)
+  machineId   String?
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  quoteLine       QuoteLine?            @relation(fields: [quoteLineId], references: [id])
+  part            Part                  @relation(fields: [partId], references: [id])
+  machine         Machine?              @relation(fields: [machineId], references: [id])
+  consumptions    MaterialConsumption[]
+  productionRuns  ProductionRun[]
+  finishedEntries FinishedGoodsEntry[]
+
+  @@index([tenantId])
+  @@index([status])
+}
+
+model Supplier {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  contactName String?
+  email       String?
+  phone       String?
+  address     String?
+  taxNo       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  purchaseOrders PurchaseOrder[]
+
+  @@index([tenantId])
+}
+
+model Material {
+  id        String       @id @default(uuid())
+  tenantId  String
+  code      String
+  name      String
+  type      MaterialType
+  unit      String
+  stockQty  Decimal      @default(0) @db.Decimal(18, 3)
+  minStock  Decimal?     @db.Decimal(18, 3)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  purchaseOrderLines PurchaseOrderLine[]
+  consumptions       MaterialConsumption[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model PurchaseOrder {
+  id           String              @id @default(uuid())
+  tenantId     String
+  poNo         String              @unique
+  supplierId   String
+  status       PurchaseOrderStatus @default(ORDERED)
+  orderDate    DateTime
+  expectedDate DateTime?
+  notes        String?
+  createdById  String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  supplier  Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy User                @relation(fields: [createdById], references: [id])
+  lines     PurchaseOrderLine[]
+
+  @@index([tenantId])
+}
+
+model PurchaseOrderLine {
+  id              String   @id @default(uuid())
+  tenantId        String
+  purchaseOrderId String
+  materialId      String
+  quantity        Decimal  @db.Decimal(18, 3)
+  unitPrice       Decimal  @db.Decimal(18, 2)
+  receivedQty     Decimal  @default(0) @db.Decimal(18, 3)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  material      Material      @relation(fields: [materialId], references: [id])
+
+  @@index([tenantId])
+}
+
+model MaterialConsumption {
+  id          String          @id @default(uuid())
+  tenantId    String
+  workOrderId String
+  materialId  String
+  type        ConsumptionType
+  quantity    Decimal         @db.Decimal(18, 3)
+  date        DateTime        @default(now())
+  createdById String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+  material  Material  @relation(fields: [materialId], references: [id])
+  createdBy User      @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+}
+
+model ProductionRun {
+  id           String    @id @default(uuid())
+  tenantId     String
+  workOrderId  String
+  machineId    String?
+  operatorId   String
+  startedAt    DateTime  @default(now())
+  endedAt      DateTime?
+  goodCount    Int       @default(0)
+  scrapCount   Int       @default(0)
+  downtimeNote String?
+  source       RunSource @default(MANUAL)
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+  machine   Machine?  @relation(fields: [machineId], references: [id])
+  operator  User      @relation(fields: [operatorId], references: [id])
+
+  @@index([tenantId])
+}
+
+model FinishedGoodsEntry {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workOrderId String
+  partId      String
+  quantity    Decimal  @db.Decimal(18, 3)
+  date        DateTime @default(now())
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+  part      Part      @relation(fields: [partId], references: [id])
+  createdBy User      @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+}
+
+model PartStock {
+  id        String   @id @default(uuid())
+  tenantId  String
+  partId    String   @unique
+  qty       Decimal  @default(0) @db.Decimal(18, 3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  part Part @relation(fields: [partId], references: [id])
+
+  @@index([tenantId])
+}
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  tenantId  String
+  userId    String
+  entity    String
+  entityId  String
+  action    AuditAction
+  before    Json?
+  after     Json?
+  createdAt DateTime    @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, entity, entityId])
+}
