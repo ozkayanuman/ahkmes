@@ -1,0 +1,251 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import type { Role } from "@ahkmes/shared-types";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { Button, Input, Label, Modal, Select, Table } from "./ui";
+
+export interface Column<T> {
+  key: string;
+  label: string;
+  render?: (row: T) => ReactNode;
+}
+
+export interface Field {
+  name: string;
+  label: string;
+  type?: "text" | "email" | "password" | "number" | "select" | "checkbox";
+  options?: { value: string; label: string }[];
+  required?: boolean;
+  createOnly?: boolean;
+}
+
+type FormState = Record<string, string | boolean>;
+
+function initialForm(fields: Field[], row?: Record<string, unknown>): FormState {
+  const state: FormState = {};
+  for (const f of fields) {
+    if (f.type === "checkbox") {
+      state[f.name] = row ? Boolean(row[f.name]) : true;
+    } else if (f.type === "password") {
+      state[f.name] = "";
+    } else {
+      state[f.name] = row && row[f.name] != null ? String(row[f.name]) : "";
+    }
+  }
+  return state;
+}
+
+function toPayload(form: FormState): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(form)) {
+    if (v === "") continue; // boş metin alanlarını gönderme (opsiyonel alanlar)
+    payload[k] = v;
+  }
+  return payload;
+}
+
+export function CrudPage<T extends { id: string }>({
+  title,
+  endpoint,
+  columns,
+  fields,
+  writeRoles,
+  deleteRoles = ["ADMIN"],
+  searchable = true,
+}: {
+  title: string;
+  endpoint: string;
+  columns: Column<T>[];
+  fields: Field[];
+  writeRoles: Role[];
+  deleteRoles?: Role[];
+  searchable?: boolean;
+}) {
+  const { user } = useAuth();
+  const canWrite = !!user && writeRoles.includes(user.role);
+  const canDelete = !!user && deleteRoles.includes(user.role);
+  const [q, setQ] = useState("");
+  const [modal, setModal] = useState<{ mode: "create" } | { mode: "edit"; row: T } | null>(null);
+  const [form, setForm] = useState<FormState>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const qc = useQueryClient();
+
+  const query = useQuery({
+    queryKey: [endpoint, q],
+    queryFn: () => apiGet<T[]>(`${endpoint}${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const payload = toPayload(form);
+      if (modal?.mode === "edit") return apiPatch(`${endpoint}/${modal.row.id}`, payload);
+      return apiPost(endpoint, payload);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [endpoint] });
+      setModal(null);
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 409) setFormError("Kayıt çakışması: bu değer zaten kayıtlı");
+      else if (e instanceof ApiError && e.status === 400) setFormError("Doğrulama hatası: alanları kontrol edin");
+      else setFormError("Kaydedilemedi, tekrar deneyin");
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => apiDelete(`${endpoint}/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [endpoint] }),
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 409)
+        alert("Bu kayda bağlı başka kayıtlar var, silinemez.");
+      else alert("Silinemedi.");
+    },
+  });
+
+  function openCreate() {
+    setForm(initialForm(fields));
+    setFormError(null);
+    setModal({ mode: "create" });
+  }
+
+  function openEdit(row: T) {
+    setForm(initialForm(fields, row as unknown as Record<string, unknown>));
+    setFormError(null);
+    setModal({ mode: "edit", row });
+  }
+
+  const visibleFields = fields.filter((f) => !(f.createOnly && modal?.mode === "edit"));
+
+  return (
+    <div>
+      <div className="mb-6 flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold">{title}</h1>
+        {canWrite && (
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4" /> Yeni
+          </Button>
+        )}
+      </div>
+
+      {searchable && (
+        <div className="relative mb-4 max-w-sm">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <Input placeholder="Ara…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+        </div>
+      )}
+
+      {query.isLoading && <p className="text-slate-500">Yükleniyor…</p>}
+      {query.error && <p className="text-red-600">Liste alınamadı.</p>}
+
+      {query.data && (
+        <Table headers={[...columns.map((c) => c.label), ...(canWrite ? ["İşlem"] : [])]}>
+          {query.data.length === 0 && (
+            <tr>
+              <td colSpan={columns.length + 1} className="px-4 py-8 text-center text-slate-400">
+                Kayıt yok
+              </td>
+            </tr>
+          )}
+          {query.data.map((row) => (
+            <tr key={row.id} className="hover:bg-slate-50">
+              {columns.map((c) => (
+                <td key={c.key} className="px-4 py-3">
+                  {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "—")}
+                </td>
+              ))}
+              {canWrite && (
+                <td className="px-4 py-3">
+                  <div className="flex gap-1">
+                    <Button variant="ghost" className="px-2 py-1" onClick={() => openEdit(row)} title="Düzenle">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    {canDelete && (
+                      <Button
+                        variant="ghost"
+                        className="px-2 py-1 text-red-600"
+                        title="Sil"
+                        onClick={() => {
+                          if (confirm("Bu kaydı silmek istediğinize emin misiniz?")) remove.mutate(row.id);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              )}
+            </tr>
+          ))}
+        </Table>
+      )}
+
+      <Modal
+        open={modal !== null}
+        title={modal?.mode === "edit" ? `${title} Düzenle` : `Yeni ${title}`}
+        onClose={() => setModal(null)}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate();
+          }}
+          className="space-y-4"
+        >
+          {visibleFields.map((f) => (
+            <div key={f.name}>
+              {f.type === "checkbox" ? (
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form[f.name])}
+                    onChange={(e) => setForm({ ...form, [f.name]: e.target.checked })}
+                  />
+                  {f.label}
+                </label>
+              ) : f.type === "select" ? (
+                <>
+                  <Label htmlFor={f.name}>{f.label}</Label>
+                  <Select
+                    id={f.name}
+                    value={String(form[f.name] ?? "")}
+                    required={f.required}
+                    onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+                  >
+                    <option value="">Seçin…</option>
+                    {f.options?.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </Select>
+                </>
+              ) : (
+                <>
+                  <Label htmlFor={f.name}>{f.label}</Label>
+                  <Input
+                    id={f.name}
+                    type={f.type ?? "text"}
+                    value={String(form[f.name] ?? "")}
+                    required={f.required && !(f.type === "password" && modal?.mode === "edit")}
+                    onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+                  />
+                </>
+              )}
+            </div>
+          ))}
+          {formError && <p className="text-sm text-red-600">{formError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setModal(null)}>
+              Vazgeç
+            </Button>
+            <Button type="submit" disabled={save.isPending}>
+              {save.isPending ? "Kaydediliyor…" : "Kaydet"}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+}
