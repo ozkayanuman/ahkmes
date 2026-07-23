@@ -1,0 +1,189 @@
+import { z } from "zod";
+import {
+  ConsumptionTypeSchema,
+  MaterialTypeSchema,
+  PurchaseOrderStatusSchema,
+  QuoteStatusSchema,
+  RoleSchema,
+  WorkOrderStatusSchema,
+} from "./enums";
+
+// ---- Ortak yardımcılar ----
+export const idSchema = z.string().uuid();
+const decimalString = z.union([z.number(), z.string()]).pipe(z.coerce.number());
+export const positiveQty = decimalString.refine((n) => n > 0, "Miktar 0'dan büyük olmalı");
+const isoDate = z.coerce.date();
+
+// ---- Auth ----
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+export type LoginDto = z.infer<typeof loginSchema>;
+
+// ---- User ----
+export const createUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().min(1),
+  role: RoleSchema,
+  isActive: z.boolean().default(true),
+});
+export const updateUserSchema = createUserSchema.partial().omit({ password: true }).extend({
+  password: z.string().min(8).optional(),
+});
+export type CreateUserDto = z.infer<typeof createUserSchema>;
+export type UpdateUserDto = z.infer<typeof updateUserSchema>;
+
+// ---- Customer ----
+export const createCustomerSchema = z.object({
+  name: z.string().min(1),
+  contactName: z.string().optional(),
+  email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  taxNo: z.string().optional(),
+  notes: z.string().optional(),
+});
+export const updateCustomerSchema = createCustomerSchema.partial();
+export type CreateCustomerDto = z.infer<typeof createCustomerSchema>;
+export type UpdateCustomerDto = z.infer<typeof updateCustomerSchema>;
+
+// ---- Part ----
+export const createPartSchema = z.object({
+  partNo: z.string().min(1),
+  revision: z.string().min(1).default("A"),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  drawingFileRef: z.string().optional(),
+  stepFileRef: z.string().optional(),
+});
+export const updatePartSchema = createPartSchema.partial();
+export type CreatePartDto = z.infer<typeof createPartSchema>;
+export type UpdatePartDto = z.infer<typeof updatePartSchema>;
+
+// ---- NcProgram ----
+export const createNcProgramSchema = z.object({
+  partId: idSchema,
+  fileName: z.string().min(1),
+  fileRef: z.string().min(1),
+  notes: z.string().optional(),
+});
+export type CreateNcProgramDto = z.infer<typeof createNcProgramSchema>;
+
+// ---- Supplier ----
+export const createSupplierSchema = z.object({
+  name: z.string().min(1),
+  contactName: z.string().optional(),
+  email: z.string().email().optional().or(z.literal("")),
+  phone: z.string().optional(),
+  address: z.string().optional(),
+  taxNo: z.string().optional(),
+  notes: z.string().optional(),
+});
+export const updateSupplierSchema = createSupplierSchema.partial();
+export type CreateSupplierDto = z.infer<typeof createSupplierSchema>;
+export type UpdateSupplierDto = z.infer<typeof updateSupplierSchema>;
+
+// ---- Material ----
+export const createMaterialSchema = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1),
+  type: MaterialTypeSchema,
+  unit: z.string().min(1),
+  minStock: decimalString.optional(),
+});
+export const updateMaterialSchema = createMaterialSchema.partial();
+export type CreateMaterialDto = z.infer<typeof createMaterialSchema>;
+export type UpdateMaterialDto = z.infer<typeof updateMaterialSchema>;
+
+// ---- Machine (sadece referans) ----
+export const createMachineSchema = z.object({
+  name: z.string().min(1),
+  model: z.string().min(1),
+  controller: z.string().optional(),
+  isActive: z.boolean().default(true),
+});
+export const updateMachineSchema = createMachineSchema.partial();
+export type CreateMachineDto = z.infer<typeof createMachineSchema>;
+export type UpdateMachineDto = z.infer<typeof updateMachineSchema>;
+
+// ---- Quote (Faz 0b'de kullanılacak) ----
+export const quoteLineInputSchema = z.object({
+  partId: idSchema,
+  quantity: positiveQty,
+  unitPrice: decimalString,
+  dueDate: isoDate,
+});
+export const createQuoteSchema = z.object({
+  customerId: idSchema,
+  currency: z.string().default("TRY"),
+  validUntil: isoDate.optional(),
+  notes: z.string().optional(),
+  lines: z.array(quoteLineInputSchema).min(1),
+});
+export const quoteStatusUpdateSchema = z.object({ status: QuoteStatusSchema });
+export type CreateQuoteDto = z.infer<typeof createQuoteSchema>;
+
+// ---- WorkOrder (Faz 0b) ----
+export const createWorkOrderSchema = z.object({
+  quoteLineId: idSchema.optional(),
+  partId: idSchema,
+  quantity: positiveQty,
+  dueDate: isoDate,
+  priority: z.number().int().min(1).max(10).default(5),
+  machineId: idSchema.optional(),
+  notes: z.string().optional(),
+});
+export const workOrderStatusUpdateSchema = z.object({ status: WorkOrderStatusSchema });
+export type CreateWorkOrderDto = z.infer<typeof createWorkOrderSchema>;
+
+// ---- PurchaseOrder (Faz 0b) ----
+export const purchaseOrderLineInputSchema = z.object({
+  materialId: idSchema,
+  quantity: positiveQty,
+  unitPrice: decimalString,
+});
+export const createPurchaseOrderSchema = z.object({
+  supplierId: idSchema,
+  orderDate: isoDate,
+  expectedDate: isoDate.optional(),
+  notes: z.string().optional(),
+  lines: z.array(purchaseOrderLineInputSchema).min(1),
+});
+export const receivePurchaseOrderSchema = z.object({
+  lines: z.array(z.object({ lineId: idSchema, receivedQty: positiveQty })).min(1),
+});
+export const purchaseOrderStatusUpdateSchema = z.object({ status: PurchaseOrderStatusSchema });
+export type CreatePurchaseOrderDto = z.infer<typeof createPurchaseOrderSchema>;
+
+// ---- MaterialConsumption (Faz 0c) ----
+export const createConsumptionSchema = z.object({
+  workOrderId: idSchema,
+  materialId: idSchema,
+  type: ConsumptionTypeSchema,
+  quantity: positiveQty,
+  date: isoDate.optional(),
+});
+export type CreateConsumptionDto = z.infer<typeof createConsumptionSchema>;
+
+// ---- ProductionRun (Faz 0c) — source her zaman MANUAL, API girişinde alınmaz ----
+export const startProductionRunSchema = z.object({
+  machineId: idSchema.optional(),
+  notes: z.string().optional(),
+});
+export const updateProductionRunSchema = z.object({
+  goodCount: z.number().int().min(0).optional(),
+  scrapCount: z.number().int().min(0).optional(),
+  downtimeNote: z.string().optional(),
+  notes: z.string().optional(),
+});
+export type StartProductionRunDto = z.infer<typeof startProductionRunSchema>;
+
+// ---- FinishedGoodsEntry (Faz 0c) ----
+export const createFinishedGoodsSchema = z.object({
+  workOrderId: idSchema,
+  quantity: positiveQty,
+  date: isoDate.optional(),
+});
+export type CreateFinishedGoodsDto = z.infer<typeof createFinishedGoodsSchema>;
