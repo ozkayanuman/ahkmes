@@ -1,9 +1,10 @@
 import { Module } from "@nestjs/common";
-import { MachinesController } from "./machines.controller";
+import { MachinesController, MachineTelemetryController } from "./machines.controller";
 import { MachinesService } from "./machines.service";
+import { MachineKeyGuard } from "../common/guards/machine-key.guard";
 
 @Module({
-  controllers: [MachinesController],
-  providers: [MachinesService],
+  controllers: [MachinesController, MachineTelemetryController],
+  providers: [MachinesService, MachineKeyGuard],
 })
 export class MachinesModule {}

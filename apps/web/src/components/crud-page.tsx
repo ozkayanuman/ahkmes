@@ -54,6 +54,7 @@ export function CrudPage<T extends { id: string }>({
   writeRoles,
   deleteRoles = ["ADMIN"],
   searchable = true,
+  rowActions,
 }: {
   title: string;
   endpoint: string;
@@ -62,6 +63,7 @@ export function CrudPage<T extends { id: string }>({
   writeRoles: Role[];
   deleteRoles?: Role[];
   searchable?: boolean;
+  rowActions?: (row: T) => ReactNode;
 }) {
   const { user } = useAuth();
   const canWrite = !!user && writeRoles.includes(user.role);
@@ -140,10 +142,19 @@ export function CrudPage<T extends { id: string }>({
       {query.error && <p className="text-red-600">Liste alınamadı.</p>}
 
       {query.data && (
-        <Table headers={[...columns.map((c) => c.label), ...(canWrite ? ["İşlem"] : [])]}>
+        <Table
+          headers={[
+            ...columns.map((c) => c.label),
+            ...(rowActions ? [""] : []),
+            ...(canWrite ? ["İşlem"] : []),
+          ]}
+        >
           {query.data.length === 0 && (
             <tr>
-              <td colSpan={columns.length + 1} className="px-4 py-8 text-center text-slate-400">
+              <td
+                colSpan={columns.length + (rowActions ? 1 : 0) + (canWrite ? 1 : 0)}
+                className="px-4 py-8 text-center text-slate-400"
+              >
                 Kayıt yok
               </td>
             </tr>
@@ -155,6 +166,7 @@ export function CrudPage<T extends { id: string }>({
                   {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "—")}
                 </td>
               ))}
+              {rowActions && <td className="px-4 py-3">{rowActions(row)}</td>}
               {canWrite && (
                 <td className="px-4 py-3">
                   <div className="flex gap-1">

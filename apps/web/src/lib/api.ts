@@ -76,3 +76,17 @@ export const apiPost = <T,>(path: string, body: unknown) =>
 export const apiPatch = <T,>(path: string, body: unknown) =>
   api<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 export const apiDelete = <T,>(path: string) => api<T>(path, { method: "DELETE" });
+
+// multipart/form-data — Content-Type header'ı tarayıcı boundary ile kendisi ekler
+export async function apiUpload<T = unknown>(path: string, file: File): Promise<T> {
+  const { access } = getTokens();
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers: access ? { Authorization: `Bearer ${access}` } : {},
+    body: form,
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+  return (await res.json()) as T;
+}

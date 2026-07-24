@@ -59,6 +59,12 @@ enum AuditAction {
   STATUS_CHANGE
 }
 
+enum DocumentType {
+  STEP
+  WORK_INSTRUCTION
+  OTHER
+}
+
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -86,6 +92,7 @@ model User {
   productionRuns  ProductionRun[]
   finishedEntries FinishedGoodsEntry[]
   auditLogs       AuditLog[]
+  documents       Document[]
 
   @@index([tenantId])
 }
@@ -188,17 +195,22 @@ model QuoteLine {
 }
 
 model Machine {
-  id         String   @id @default(uuid())
-  tenantId   String
-  name       String
-  model      String
-  controller String?
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                String    @id @default(uuid())
+  tenantId          String
+  name              String
+  model             String
+  controller        String?
+  isActive          Boolean   @default(true)
+  activeWorkOrderId String?
+  connectorKeyHash  String?
+  lastEventAt       DateTime?
+  lastStatus        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  workOrders     WorkOrder[]
-  productionRuns ProductionRun[]
+  workOrders      WorkOrder[]
+  productionRuns  ProductionRun[]
+  activeWorkOrder WorkOrder?      @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
 
   @@index([tenantId])
 }
@@ -218,12 +230,13 @@ model WorkOrder {
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
-  quoteLine       QuoteLine?            @relation(fields: [quoteLineId], references: [id])
-  part            Part                  @relation(fields: [partId], references: [id])
-  machine         Machine?              @relation(fields: [machineId], references: [id])
-  consumptions    MaterialConsumption[]
-  productionRuns  ProductionRun[]
-  finishedEntries FinishedGoodsEntry[]
+  quoteLine        QuoteLine?            @relation(fields: [quoteLineId], references: [id])
+  part             Part                  @relation(fields: [partId], references: [id])
+  machine          Machine?              @relation(fields: [machineId], references: [id])
+  consumptions     MaterialConsumption[]
+  productionRuns   ProductionRun[]
+  finishedEntries  FinishedGoodsEntry[]
+  activeOnMachines Machine[]             @relation("ActiveWorkOrder")
 
   @@index([tenantId])
   @@index([status])
@@ -390,4 +403,23 @@ model AuditLog {
   user User @relation(fields: [userId], references: [id])
 
   @@index([tenantId, entity, entityId])
+}
+
+// entityType/entityId polimorfik: "part" | "work-order" — hard FK yok (AuditLog ile aynı desen)
+model Document {
+  id           String       @id @default(uuid())
+  tenantId     String
+  entityType   String
+  entityId     String
+  docType      DocumentType
+  fileName     String
+  storageKey   String       @unique
+  mimeType     String
+  sizeBytes    Int
+  uploadedById String
+  createdAt    DateTime     @default(now())
+
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([tenantId, entityType, entityId])
 }

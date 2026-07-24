@@ -6,6 +6,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
+import { DocumentsPanel } from "../components/documents-panel";
 import { StatusBadge, WO_STATUS } from "../components/status";
 import { Button, Card, Input, Label, Modal, Select, Table } from "../components/ui";
 import type { WorkOrderRow } from "./work-orders";
@@ -459,6 +460,10 @@ export function WorkOrderDetailPage() {
             ))}
           </Table>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <DocumentsPanel entityType="work-order" entityId={id} />
       </div>
 
       <Modal open={editOpen} title="İş Emri Düzenle" onClose={() => setEditOpen(false)}>

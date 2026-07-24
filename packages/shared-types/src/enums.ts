@@ -29,3 +29,18 @@ export type RunSource = z.infer<typeof RunSourceSchema>;
 
 export const AuditActionSchema = z.enum(["CREATE", "UPDATE", "DELETE", "STATUS_CHANGE"]);
 export type AuditAction = z.infer<typeof AuditActionSchema>;
+
+export const DocumentTypeSchema = z.enum(["STEP", "WORK_INSTRUCTION", "OTHER"]);
+export type DocumentType = z.infer<typeof DocumentTypeSchema>;
+
+export const DocumentEntityTypeSchema = z.enum(["part", "work-order"]);
+export type DocumentEntityType = z.infer<typeof DocumentEntityTypeSchema>;
+
+export const MachineEventTypeSchema = z.enum([
+  "CYCLE_START",
+  "CYCLE_END",
+  "PART_COMPLETE",
+  "ALARM",
+  "IDLE",
+]);
+export type MachineEventType = z.infer<typeof MachineEventTypeSchema>;

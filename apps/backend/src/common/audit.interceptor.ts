@@ -22,6 +22,7 @@ const ROUTE_MODEL: Record<string, string> = {
   consumptions: "materialConsumption",
   runs: "productionRun",
   "finished-goods": "finishedGoodsEntry",
+  documents: "document",
 };
 
 function toJson(value: unknown): object | undefined {

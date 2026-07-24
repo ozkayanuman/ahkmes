@@ -1,6 +1,9 @@
 import { z } from "zod";
 import {
   ConsumptionTypeSchema,
+  DocumentEntityTypeSchema,
+  DocumentTypeSchema,
+  MachineEventTypeSchema,
   MaterialTypeSchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
@@ -205,3 +208,24 @@ export const createFinishedGoodsSchema = z.object({
   date: isoDate.optional(),
 });
 export type CreateFinishedGoodsDto = z.infer<typeof createFinishedGoodsSchema>;
+
+// ---- Document (STEP / Work Instruction dosya deposu) ----
+export const uploadDocumentMetaSchema = z.object({
+  entityType: DocumentEntityTypeSchema,
+  entityId: idSchema,
+  docType: DocumentTypeSchema,
+});
+export type UploadDocumentMetaDto = z.infer<typeof uploadDocumentMetaSchema>;
+
+// ---- Machine Connector (Faz 1) ----
+export const machineTelemetrySchema = z.object({
+  type: MachineEventTypeSchema,
+  timestamp: isoDate.optional(),
+  payload: z.record(z.unknown()).optional(),
+});
+export type MachineTelemetryDto = z.infer<typeof machineTelemetrySchema>;
+
+export const assignActiveWorkOrderSchema = z.object({
+  workOrderId: idSchema.nullable(),
+});
+export type AssignActiveWorkOrderDto = z.infer<typeof assignActiveWorkOrderSchema>;

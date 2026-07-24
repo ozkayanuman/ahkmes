@@ -15,6 +15,38 @@ services:
       timeout: 5s
       retries: 10
 
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ahkmes}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD .env dosyasinda tanimli olmali}
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ahkmes}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ahkmes-documents}
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb -p local/$$MINIO_BUCKET
+      "
+
   backend:
     build:
       context: .
@@ -27,11 +59,21 @@ services:
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@ahkmes.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD .env dosyasinda tanimli olmali}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ahkmes}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-ahkmes-documents}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost}
+      MINIO_PUBLIC_PORT: ${MINIO_PUBLIC_PORT:-9000}
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
   web:
     build:
@@ -46,3 +88,4 @@ services:
 
 volumes:
   pgdata:
+  miniodata:

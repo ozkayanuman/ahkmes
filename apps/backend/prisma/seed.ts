@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
 
 export const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
@@ -27,6 +28,21 @@ async function main() {
       passwordHash: await bcrypt.hash(adminPassword, 10),
       name: "Sistem Yöneticisi",
       role: "ADMIN",
+    },
+  });
+
+  // Makine kaynaklı (source=MACHINE) ProductionRun kayıtları için sistem hesabı —
+  // normal login akışına kapalı (rastgele, bilinmeyen şifre).
+  const connectorEmail = "machine-connector@ahkmes.local";
+  await prisma.user.upsert({
+    where: { email: connectorEmail },
+    update: {},
+    create: {
+      tenantId: DEFAULT_TENANT_ID,
+      email: connectorEmail,
+      passwordHash: await bcrypt.hash(randomUUID(), 10),
+      name: "Makine Bağlantısı",
+      role: "OPERATOR",
     },
   });
 

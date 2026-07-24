@@ -19,6 +19,7 @@ import { ConsumptionModule } from "./consumption/consumption.module";
 import { ProductionModule } from "./production/production.module";
 import { FinishedGoodsModule } from "./finished-goods/finished-goods.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
+import { DocumentsModule } from "./documents/documents.module";
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { DashboardModule } from "./dashboard/dashboard.module";
     ProductionModule,
     FinishedGoodsModule,
     DashboardModule,
+    DocumentsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
