@@ -18,6 +18,7 @@ import {
 import { DocumentsService } from "./documents.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { Roles } from "../common/decorators/roles.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/types";
 
@@ -36,6 +37,7 @@ export class DocumentsController {
   }
 
   @Post()
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
   @UseInterceptors(FileInterceptor("file"))
   upload(
     @CurrentUser() user: AuthUser,
@@ -58,6 +60,7 @@ export class DocumentsController {
   }
 
   @Delete(":id")
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
   remove(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.remove(user.tenantId, id);
   }

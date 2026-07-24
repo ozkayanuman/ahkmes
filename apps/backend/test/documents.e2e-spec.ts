@@ -12,10 +12,13 @@ describe("Documents — STEP/Talimat dosya deposu (e2e)", () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let adminToken: string;
+  let operatorToken: string;
+  let operatorUserId: string;
   let partId: string;
   let docId: string;
 
   const auth = (r: request.Test) => r.set("Authorization", `Bearer ${adminToken}`);
+  const authAs = (r: request.Test) => r.set("Authorization", `Bearer ${operatorToken}`);
   const api = () => request(app.getHttpServer());
 
   beforeAll(async () => {
@@ -34,12 +37,34 @@ describe("Documents — STEP/Talimat dosya deposu (e2e)", () => {
         api().post("/parts").send({ partNo: `DOC-${STAMP}`, revision: "A", name: "Doküman Testi" }),
       )
     ).body.id;
+
+    const opEmail = `doc-op-${STAMP}@ahkmes.local`;
+    const created = await auth(
+      api()
+        .post("/users")
+        .send({ email: opEmail, password: "Operator1234!", name: "Doküman Operatör", role: "OPERATOR" }),
+    );
+    operatorUserId = created.body.id;
+    const opLogin = await api()
+      .post("/auth/login")
+      .send({ email: opEmail, password: "Operator1234!" });
+    operatorToken = opLogin.body.accessToken;
   });
 
   afterAll(async () => {
+    if (operatorUserId) await prisma.user.deleteMany({ where: { id: operatorUserId } }).catch(() => undefined);
     await prisma.document.deleteMany({ where: { entityId: partId } }).catch(() => undefined);
     await prisma.part.deleteMany({ where: { id: partId } }).catch(() => undefined);
     await app.close();
+  });
+
+  it("OPERATOR rolü upload/delete için 403 alır (yalnızca ADMIN/PLANNER/FOREMAN yazabilir)", async () => {
+    await authAs(
+      api()
+        .post(`/documents?entityType=part&entityId=${partId}&docType=STEP`)
+        .attach("file", Buffer.from("test"), { filename: "x.step", contentType: "application/octet-stream" }),
+    ).expect(403);
+    await authAs(api().delete(`/documents/00000000-0000-0000-0000-000000000001`)).expect(403);
   });
 
   it("izin verilmeyen mime tipi 400 ile reddedilir", async () => {
