@@ -155,11 +155,35 @@ export class MachinesService {
         },
       });
       if (activeRun) {
-        await this.prisma.productionRun.update({
-          where: { id: activeRun.id },
-          data: { goodCount: { increment: 1 } },
+        const wo = await this.prisma.workOrder.findFirst({
+          where: { id: machine.activeWorkOrderId, tenantId },
         });
+        const newGoodCount = activeRun.goodCount + 1;
+        // Hedef adede ulaşılınca koşu/iş emri otomatik biter; tezgahın aktif iş
+        // emri temizlenir (ustabaşı yeni bir iş emri atayana kadar bekler).
+        const targetReached = !!wo && newGoodCount >= Number(wo.quantity);
+
+        await this.prisma.$transaction(async (tx) => {
+          await tx.productionRun.update({
+            where: { id: activeRun.id },
+            data: { goodCount: { increment: 1 }, ...(targetReached ? { endedAt: new Date() } : {}) },
+          });
+          if (targetReached) {
+            await tx.workOrder.update({
+              where: { id: machine.activeWorkOrderId! },
+              data: { status: "COMPLETED" },
+            });
+            await tx.machine.update({ where: { id: machine.id }, data: { activeWorkOrderId: null } });
+          }
+        });
+
         this.realtime.emitToTenant(tenantId, "productionrun.updated", { id: activeRun.id });
+        if (targetReached) {
+          this.realtime.emitToTenant(tenantId, "workorder.updated", {
+            id: machine.activeWorkOrderId,
+            status: "COMPLETED",
+          });
+        }
       }
     }
 

@@ -133,4 +133,30 @@ describe("Machine Connector — telemetri (e2e)", () => {
     const runs = await prisma.productionRun.findMany({ where: { workOrderId } });
     expect(runs).toHaveLength(1);
   });
+
+  it("hedef adede (quantity=10) ulaşınca koşu biter, WO COMPLETED olur, tezgahın aktif iş emri temizlenir", async () => {
+    // Bu noktada goodCount=2 (önceki testten); quantity=10'a ulaşmak için 8 olay daha.
+    for (let i = 0; i < 8; i++) {
+      await withKey(
+        api().post(`/machines/${machineId}/telemetry`).send({ type: "PART_COMPLETE" }),
+      ).expect(201);
+    }
+
+    const run = await prisma.productionRun.findFirst({ where: { workOrderId } });
+    expect(run?.goodCount).toBe(10);
+    expect(run?.endedAt).not.toBeNull();
+
+    const wo = await auth(api().get(`/work-orders/${workOrderId}`)).expect(200);
+    expect(wo.body.status).toBe("COMPLETED");
+
+    const machine = await auth(api().get(`/machines/${machineId}`)).expect(200);
+    expect(machine.body.activeWorkOrderId).toBeNull();
+
+    // Koşu bittiği için fazladan PART_COMPLETE artık sayılmaz (aktif run yok).
+    await withKey(
+      api().post(`/machines/${machineId}/telemetry`).send({ type: "PART_COMPLETE" }),
+    ).expect(201);
+    const runAfter = await prisma.productionRun.findFirst({ where: { workOrderId } });
+    expect(runAfter?.goodCount).toBe(10);
+  });
 });
