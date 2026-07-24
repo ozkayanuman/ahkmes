@@ -123,7 +123,15 @@ export const createQuoteSchema = z.object({
   lines: z.array(quoteLineInputSchema).min(1),
 });
 export const quoteStatusUpdateSchema = z.object({ status: QuoteStatusSchema });
+export const updateQuoteSchema = createQuoteSchema.omit({ lines: true }).partial();
+export const updateQuoteLineSchema = quoteLineInputSchema.partial();
+export const convertQuoteSchema = z.object({ lineIds: z.array(idSchema).optional() });
 export type CreateQuoteDto = z.infer<typeof createQuoteSchema>;
+export type UpdateQuoteDto = z.infer<typeof updateQuoteSchema>;
+export type QuoteLineInputDto = z.infer<typeof quoteLineInputSchema>;
+export type UpdateQuoteLineDto = z.infer<typeof updateQuoteLineSchema>;
+export type ConvertQuoteDto = z.infer<typeof convertQuoteSchema>;
+export type QuoteStatusUpdateDto = z.infer<typeof quoteStatusUpdateSchema>;
 
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({
@@ -136,7 +144,10 @@ export const createWorkOrderSchema = z.object({
   notes: z.string().optional(),
 });
 export const workOrderStatusUpdateSchema = z.object({ status: WorkOrderStatusSchema });
+export const updateWorkOrderSchema = createWorkOrderSchema.omit({ quoteLineId: true }).partial();
 export type CreateWorkOrderDto = z.infer<typeof createWorkOrderSchema>;
+export type UpdateWorkOrderDto = z.infer<typeof updateWorkOrderSchema>;
+export type WorkOrderStatusUpdateDto = z.infer<typeof workOrderStatusUpdateSchema>;
 
 // ---- PurchaseOrder (Faz 0b) ----
 export const purchaseOrderLineInputSchema = z.object({
@@ -155,7 +166,14 @@ export const receivePurchaseOrderSchema = z.object({
   lines: z.array(z.object({ lineId: idSchema, receivedQty: positiveQty })).min(1),
 });
 export const purchaseOrderStatusUpdateSchema = z.object({ status: PurchaseOrderStatusSchema });
+export const updatePurchaseOrderSchema = z.object({
+  expectedDate: isoDate.optional(),
+  notes: z.string().optional(),
+});
 export type CreatePurchaseOrderDto = z.infer<typeof createPurchaseOrderSchema>;
+export type UpdatePurchaseOrderDto = z.infer<typeof updatePurchaseOrderSchema>;
+export type ReceivePurchaseOrderDto = z.infer<typeof receivePurchaseOrderSchema>;
+export type PurchaseOrderStatusUpdateDto = z.infer<typeof purchaseOrderStatusUpdateSchema>;
 
 // ---- MaterialConsumption (Faz 0c) ----
 export const createConsumptionSchema = z.object({

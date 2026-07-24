@@ -8,6 +8,12 @@ import { SuppliersPage } from "./pages/suppliers";
 import { MaterialsPage } from "./pages/materials";
 import { MachinesPage } from "./pages/machines";
 import { UsersPage } from "./pages/users";
+import { QuotesPage } from "./pages/quotes";
+import { QuoteDetailPage } from "./pages/quote-detail";
+import { WorkOrdersPage } from "./pages/work-orders";
+import { WorkOrderDetailPage } from "./pages/work-order-detail";
+import { PurchaseOrdersPage } from "./pages/purchase-orders";
+import { PurchaseOrderDetailPage } from "./pages/purchase-order-detail";
 
 export function App() {
   return (
@@ -16,6 +22,12 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/quotes" element={<QuotesPage />} />
+        <Route path="/quotes/:id" element={<QuoteDetailPage />} />
+        <Route path="/work-orders" element={<WorkOrdersPage />} />
+        <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
+        <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+        <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
         <Route path="/parts" element={<PartsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/materials" element={<MaterialsPage />} />

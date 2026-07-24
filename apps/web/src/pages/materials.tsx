@@ -1,4 +1,5 @@
 import { CrudPage } from "../components/crud-page";
+import { useInvalidateOn } from "../lib/socket";
 
 interface MaterialRow {
   id: string;
@@ -11,6 +12,8 @@ interface MaterialRow {
 }
 
 export function MaterialsPage() {
+  // Teslim alma stok değiştirdiğinde liste canlı güncellensin
+  useInvalidateOn(["stock.updated"], ["/materials"]);
   return (
     <CrudPage<MaterialRow>
       title="Malzemeler"

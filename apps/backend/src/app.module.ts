@@ -11,6 +11,10 @@ import { PartsModule } from "./parts/parts.module";
 import { SuppliersModule } from "./suppliers/suppliers.module";
 import { MaterialsModule } from "./materials/materials.module";
 import { MachinesModule } from "./machines/machines.module";
+import { QuotesModule } from "./quotes/quotes.module";
+import { WorkOrdersModule } from "./work-orders/work-orders.module";
+import { PurchasingModule } from "./purchasing/purchasing.module";
+import { RealtimeModule } from "./realtime/realtime.module";
 
 @Module({
   imports: [
@@ -26,6 +30,10 @@ import { MachinesModule } from "./machines/machines.module";
     SuppliersModule,
     MaterialsModule,
     MachinesModule,
+    RealtimeModule,
+    QuotesModule,
+    WorkOrdersModule,
+    PurchasingModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

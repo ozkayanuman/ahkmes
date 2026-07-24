@@ -1,10 +1,13 @@
 import {
   Boxes,
+  ClipboardList,
   Cog,
   Factory,
+  FileText,
   LayoutDashboard,
   LogOut,
   Package,
+  ShoppingCart,
   Truck,
   Users,
   Wrench,
@@ -16,6 +19,9 @@ import { useAuth } from "../lib/auth";
 const NAV = [
   { to: "/", label: "Panel", icon: LayoutDashboard, end: true },
   { to: "/customers", label: "Müşteriler", icon: Users },
+  { to: "/quotes", label: "Teklifler", icon: FileText },
+  { to: "/work-orders", label: "İş Emirleri", icon: ClipboardList },
+  { to: "/purchase-orders", label: "Satınalma", icon: ShoppingCart },
   { to: "/parts", label: "Parçalar", icon: Cog },
   { to: "/suppliers", label: "Tedarikçiler", icon: Truck },
   { to: "/materials", label: "Malzemeler", icon: Boxes },

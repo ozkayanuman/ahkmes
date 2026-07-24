@@ -49,8 +49,13 @@ export class AuditInterceptor implements NestInterceptor {
     const segment: string | undefined = path.split("/").filter(Boolean)[0];
     const model = segment ? ROUTE_MODEL[segment] : undefined;
     const entityId: string | undefined = req.params?.id;
-    const action: AuditAction =
-      req.method === "POST" ? "CREATE" : req.method === "DELETE" ? "DELETE" : "UPDATE";
+    const action: AuditAction = path.endsWith("/status")
+      ? "STATUS_CHANGE"
+      : req.method === "POST"
+        ? "CREATE"
+        : req.method === "DELETE"
+          ? "DELETE"
+          : "UPDATE";
 
     let before: unknown = null;
     if (model && entityId && action !== "CREATE") {
