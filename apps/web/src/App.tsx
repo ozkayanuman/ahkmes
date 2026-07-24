@@ -14,6 +14,7 @@ import { WorkOrdersPage } from "./pages/work-orders";
 import { WorkOrderDetailPage } from "./pages/work-order-detail";
 import { PurchaseOrdersPage } from "./pages/purchase-orders";
 import { PurchaseOrderDetailPage } from "./pages/purchase-order-detail";
+import { ProductionPage } from "./pages/production";
 
 export function App() {
   return (
@@ -28,6 +29,7 @@ export function App() {
         <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
         <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
+        <Route path="/production" element={<ProductionPage />} />
         <Route path="/parts" element={<PartsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/materials" element={<MaterialsPage />} />

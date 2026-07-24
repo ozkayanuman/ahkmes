@@ -15,6 +15,10 @@ import { QuotesModule } from "./quotes/quotes.module";
 import { WorkOrdersModule } from "./work-orders/work-orders.module";
 import { PurchasingModule } from "./purchasing/purchasing.module";
 import { RealtimeModule } from "./realtime/realtime.module";
+import { ConsumptionModule } from "./consumption/consumption.module";
+import { ProductionModule } from "./production/production.module";
+import { FinishedGoodsModule } from "./finished-goods/finished-goods.module";
+import { DashboardModule } from "./dashboard/dashboard.module";
 
 @Module({
   imports: [
@@ -34,6 +38,10 @@ import { RealtimeModule } from "./realtime/realtime.module";
     QuotesModule,
     WorkOrdersModule,
     PurchasingModule,
+    ConsumptionModule,
+    ProductionModule,
+    FinishedGoodsModule,
+    DashboardModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

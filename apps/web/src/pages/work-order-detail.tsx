@@ -2,18 +2,39 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ApiError, apiDelete, apiGet, apiPatch } from "../lib/api";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { StatusBadge, WO_STATUS } from "../components/status";
-import { Button, Card, Input, Label, Modal, Select } from "../components/ui";
+import { Button, Card, Input, Label, Modal, Select, Table } from "../components/ui";
 import type { WorkOrderRow } from "./work-orders";
 
 interface MachineOption {
   id: string;
   name: string;
   isActive: boolean;
+}
+interface MaterialOption {
+  id: string;
+  code: string;
+  name: string;
+  unit: string;
+  stockQty: string;
+}
+interface ConsumptionRow {
+  id: string;
+  type: "RESERVED" | "CONSUMED";
+  quantity: string;
+  date: string;
+  material: MaterialOption;
+  createdBy: { name: string };
+}
+interface FinishedGoodsRow {
+  id: string;
+  quantity: string;
+  date: string;
+  createdBy: { name: string };
 }
 
 // Backend'deki geçiş kurallarının aynası — butonları buna göre göster
@@ -43,6 +64,7 @@ export function WorkOrderDetailPage() {
   const { user } = useAuth();
   const canEdit = !!user && ["ADMIN", "PLANNER"].includes(user.role);
   const canStatus = !!user && ["ADMIN", "PLANNER", "FOREMAN"].includes(user.role);
+  const canConsume = !!user && ["ADMIN", "PLANNER", "FOREMAN"].includes(user.role);
 
   const [editOpen, setEditOpen] = useState(false);
   const [form, setForm] = useState({
@@ -53,8 +75,13 @@ export function WorkOrderDetailPage() {
     notes: "",
   });
   const [err, setErr] = useState<string | null>(null);
+  const [consForm, setConsForm] = useState({ materialId: "", type: "CONSUMED", quantity: "" });
+  const [fgQty, setFgQty] = useState("");
 
-  useInvalidateOn(["workorder.updated"], ["/work-orders"]);
+  useInvalidateOn(
+    ["workorder.updated", "stock.updated", "productionrun.updated"],
+    ["/work-orders", "/consumptions", "/finished-goods", "/materials"],
+  );
 
   const query = useQuery({
     queryKey: ["/work-orders", id],
@@ -64,6 +91,19 @@ export function WorkOrderDetailPage() {
     queryKey: ["/machines"],
     queryFn: () => apiGet<MachineOption[]>("/machines"),
     enabled: editOpen,
+  });
+  const consumptions = useQuery({
+    queryKey: ["/consumptions", id],
+    queryFn: () => apiGet<ConsumptionRow[]>(`/consumptions?workOrderId=${id}`),
+  });
+  const finishedGoods = useQuery({
+    queryKey: ["/finished-goods", id],
+    queryFn: () => apiGet<FinishedGoodsRow[]>(`/finished-goods?workOrderId=${id}`),
+  });
+  const materials = useQuery({
+    queryKey: ["/materials"],
+    queryFn: () => apiGet<MaterialOption[]>("/materials"),
+    enabled: canConsume,
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["/work-orders"] });
@@ -105,6 +145,51 @@ export function WorkOrderDetailPage() {
     onSuccess: () => {
       invalidate();
       navigate("/work-orders");
+    },
+    onError,
+  });
+  const invalidateOps = () => {
+    invalidate();
+    qc.invalidateQueries({ queryKey: ["/consumptions"] });
+    qc.invalidateQueries({ queryKey: ["/finished-goods"] });
+    qc.invalidateQueries({ queryKey: ["/materials"] });
+  };
+  const addConsumption = useMutation({
+    mutationFn: () =>
+      apiPost("/consumptions", {
+        workOrderId: id,
+        materialId: consForm.materialId,
+        type: consForm.type,
+        quantity: Number(consForm.quantity),
+      }),
+    onSuccess: () => {
+      invalidateOps();
+      setConsForm({ materialId: "", type: "CONSUMED", quantity: "" });
+    },
+    onError,
+  });
+  const removeConsumption = useMutation({
+    mutationFn: (consId: string) => apiDelete(`/consumptions/${consId}`),
+    onSuccess: invalidateOps,
+    onError,
+  });
+  const addFinishedGoods = useMutation({
+    mutationFn: () =>
+      apiPost<{ totalProduced: number; completionSuggested: boolean }>("/finished-goods", {
+        workOrderId: id,
+        quantity: Number(fgQty),
+      }),
+    onSuccess: (res) => {
+      invalidateOps();
+      setFgQty("");
+      if (
+        res.completionSuggested &&
+        confirm(
+          `Toplam üretilen (${res.totalProduced}) iş emri miktarına ulaştı. İş emri tamamlansın mı?`,
+        )
+      ) {
+        setStatus.mutate("COMPLETED");
+      }
     },
     onError,
   });
@@ -218,6 +303,162 @@ export function WorkOrderDetailPage() {
           <div className="text-xs uppercase text-slate-500">Notlar</div>
           <div className="mt-1 text-sm">{wo.notes || "—"}</div>
         </Card>
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-2">
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Malzeme Rezervasyon / Tüketim</h2>
+          {canConsume && !terminal && (
+            <Card className="mb-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-52 flex-1">
+                  <Label htmlFor="consMat">Malzeme</Label>
+                  <Select
+                    id="consMat"
+                    value={consForm.materialId}
+                    onChange={(e) => setConsForm({ ...consForm, materialId: e.target.value })}
+                  >
+                    <option value="">Seçin…</option>
+                    {materials.data?.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.code} — {m.name} (stok {fmtQty(m.stockQty)} {m.unit})
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="w-32">
+                  <Label htmlFor="consType">Tür</Label>
+                  <Select
+                    id="consType"
+                    value={consForm.type}
+                    onChange={(e) => setConsForm({ ...consForm, type: e.target.value })}
+                  >
+                    <option value="RESERVED">Rezervasyon</option>
+                    <option value="CONSUMED">Tüketim</option>
+                  </Select>
+                </div>
+                <div className="w-28">
+                  <Label htmlFor="consQty">Miktar</Label>
+                  <Input
+                    id="consQty"
+                    type="number"
+                    step="any"
+                    min="0.001"
+                    value={consForm.quantity}
+                    onChange={(e) => setConsForm({ ...consForm, quantity: e.target.value })}
+                  />
+                </div>
+                <Button
+                  disabled={
+                    !consForm.materialId || !(Number(consForm.quantity) > 0) || addConsumption.isPending
+                  }
+                  onClick={() => addConsumption.mutate()}
+                >
+                  Ekle
+                </Button>
+              </div>
+            </Card>
+          )}
+          <Table headers={["Malzeme", "Tür", "Miktar", "Tarih", "Kaydeden", ""]}>
+            {consumptions.data?.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
+                  Kayıt yok
+                </td>
+              </tr>
+            )}
+            {consumptions.data?.map((c) => (
+              <tr key={c.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3">
+                  {c.material.code} — {c.material.name}
+                </td>
+                <td className="px-4 py-3">
+                  <span
+                    className={
+                      c.type === "CONSUMED"
+                        ? "inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700"
+                        : "inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700"
+                    }
+                  >
+                    {c.type === "CONSUMED" ? "Tüketim" : "Rezervasyon"}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  {fmtQty(c.quantity)} {c.material.unit}
+                </td>
+                <td className="px-4 py-3">{fmtDate(c.date)}</td>
+                <td className="px-4 py-3">{c.createdBy.name}</td>
+                <td className="px-4 py-3">
+                  {canEdit && (
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-red-600"
+                      title="Sil (tüketim geri alınır)"
+                      onClick={() => {
+                        if (confirm("Kayıt silinsin mi? Tüketimse stok iade edilir."))
+                          removeConsumption.mutate(c.id);
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </div>
+
+        <div>
+          <h2 className="mb-3 text-lg font-semibold">Mamul Girişleri</h2>
+          {canConsume && !terminal && (
+            <Card className="mb-3">
+              <div className="flex items-end gap-2">
+                <div className="w-36">
+                  <Label htmlFor="fgQty">Miktar</Label>
+                  <Input
+                    id="fgQty"
+                    type="number"
+                    step="any"
+                    min="0.001"
+                    value={fgQty}
+                    onChange={(e) => setFgQty(e.target.value)}
+                  />
+                </div>
+                <Button
+                  disabled={!(Number(fgQty) > 0) || addFinishedGoods.isPending}
+                  onClick={() => addFinishedGoods.mutate()}
+                >
+                  Mamul Girişi Yap
+                </Button>
+                <div className="ml-auto text-sm text-slate-500">
+                  Toplam üretilen:{" "}
+                  <span className="font-semibold text-slate-900">
+                    {fmtQty(
+                      finishedGoods.data?.reduce((s, f) => s + Number(f.quantity), 0) ?? 0,
+                    )}{" "}
+                    / {fmtQty(wo.quantity)}
+                  </span>
+                </div>
+              </div>
+            </Card>
+          )}
+          <Table headers={["Miktar", "Tarih", "Kaydeden"]}>
+            {finishedGoods.data?.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                  Mamul girişi yok
+                </td>
+              </tr>
+            )}
+            {finishedGoods.data?.map((f) => (
+              <tr key={f.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3">{fmtQty(f.quantity)}</td>
+                <td className="px-4 py-3">{fmtDate(f.date)}</td>
+                <td className="px-4 py-3">{f.createdBy.name}</td>
+              </tr>
+            ))}
+          </Table>
+        </div>
       </div>
 
       <Modal open={editOpen} title="İş Emri Düzenle" onClose={() => setEditOpen(false)}>
