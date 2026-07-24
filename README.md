@@ -42,10 +42,13 @@ pnpm dev:web        # :5173
 ### Test
 
 ```bash
-pnpm test                                # tüm workspace birim testleri
+pnpm test                                # workspace birim testleri (shared-types 12, web 14, backend 3)
 pnpm --filter @ahkmes/backend test:e2e   # 56 e2e testi (auth, CRUD, Faz 0b, Faz 0c akışları)
 pnpm typecheck
 ```
+
+Web testleri Vitest + React Testing Library ile çalışır (jsdom); API istemcisinin token
+yenileme akışı ve satınalma teslim alma ekranı davranış olarak kapsanır.
 
 ## Kullanım Akışı (uçtan uca)
 
