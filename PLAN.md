@@ -135,48 +135,64 @@ Tüm tablolarda: `id` (uuid), `tenantId`, `createdAt`, `updatedAt`. İlişkiler 
 
 **Sonunda:** `docker compose up` → login olunur; User/Customer/Part/Supplier/Material/Machine CRUD ekranları çalışır.
 
-- [ ] **0a.1 Monorepo iskeleti:** root `package.json`, `pnpm-workspace.yaml`, `.gitignore`, `.env.example`; `git init` + ilk commit.
-- [ ] **0a.2 `packages/shared-types`:** enum'lar + Zod şemaları (tüm varlık DTO'ları) + tsup build. Test: tip/şema birim testleri (vitest).
-- [ ] **0a.3 Backend iskeleti:** NestJS app, config modülü (.env), health endpoint. Test: `GET /health` e2e.
-- [ ] **0a.4 Prisma şeması + ilk migration:** Bölüm 2'deki TÜM varlıklar (Faz 0b/0c tabloları dahil — tek migration, sonra ekleme yok). `seed.ts`: tenant, admin (env'den şifre), 2 makine.
-- [ ] **0a.5 Auth:** `POST /auth/login`, `POST /auth/refresh`, JWT strategy, `RolesGuard` + `@Roles()` decorator, `TenantContext` (sabit tenant enjeksiyonu). Test: login başarılı/başarısız, rol reddi e2e.
-- [ ] **0a.6 AuditInterceptor:** tüm mutasyonlarda before/after yakalama. Test: bir CRUD işleminde AuditLog kaydı doğrulanır.
-- [ ] **0a.7 Temel CRUD API'leri:** users, customers, parts (+nc-programs alt kaynağı), suppliers, materials, machines — her biri: controller + service + Zod doğrulama + rol koruması + e2e test (create/list/update/delete).
-- [ ] **0a.8 Web iskeleti:** Vite + Tailwind + shadcn/ui kurulumu, login sayfası, auth store (token yenileme), korumalı layout (sidebar navigasyon).
-- [ ] **0a.9 CRUD ekranları:** her temel varlık için liste (tablo, arama) + form (dialog) sayfası; typed API client.
-- [ ] **0a.10 Docker Compose:** postgres + backend (migration otomatik) + web (nginx). Doğrulama: temiz makinede `docker compose up` → login → müşteri oluştur.
-- [ ] **0a.11 Commit + tag `faz-0a`.**
+- [x] **0a.1 Monorepo iskeleti:** root `package.json`, `pnpm-workspace.yaml`, `.gitignore`, `.env.example`; `git init` + ilk commit.
+- [x] **0a.2 `packages/shared-types`:** enum'lar + Zod şemaları (tüm varlık DTO'ları) + tsup build. Test: tip/şema birim testleri (vitest).
+- [x] **0a.3 Backend iskeleti:** NestJS app, config modülü (.env), health endpoint. Test: `GET /health` e2e.
+- [x] **0a.4 Prisma şeması + ilk migration:** Bölüm 2'deki TÜM varlıklar (Faz 0b/0c tabloları dahil — tek migration, sonra ekleme yok). `seed.ts`: tenant, admin (env'den şifre), 2 makine.
+- [x] **0a.5 Auth:** `POST /auth/login`, `POST /auth/refresh`, JWT strategy, `RolesGuard` + `@Roles()` decorator, `TenantContext` (sabit tenant enjeksiyonu). Test: login başarılı/başarısız, rol reddi e2e.
+- [x] **0a.6 AuditInterceptor:** tüm mutasyonlarda before/after yakalama. Test: bir CRUD işleminde AuditLog kaydı doğrulanır.
+- [x] **0a.7 Temel CRUD API'leri:** users, customers, parts (+nc-programs alt kaynağı), suppliers, materials, machines — her biri: controller + service + Zod doğrulama + rol koruması + e2e test (create/list/update/delete).
+- [x] **0a.8 Web iskeleti:** Vite + Tailwind + shadcn/ui kurulumu, login sayfası, auth store (token yenileme), korumalı layout (sidebar navigasyon).
+- [x] **0a.9 CRUD ekranları:** her temel varlık için liste (tablo, arama) + form (dialog) sayfası; typed API client.
+- [x] **0a.10 Docker Compose:** postgres + backend (migration otomatik) + web (nginx). Doğrulama: temiz makinede `docker compose up` → login → müşteri oluştur.
+- [x] **0a.11 Commit + tag `faz-0a`.**
 
 ## 4. Faz 0b — Teklif, İş Emri, Satınalma
 
 **Sonunda:** Teklif oluştur → onayla → iş emrine dönüştür; PO oluştur → teslim al → hammadde stoğu artar.
 
-- [ ] **0b.1 Quote API:** CRUD + satırlar, `quoteNo` otomatik numaralandırma, durum geçişleri (DRAFT→SENT→APPROVED/REJECTED; geçersiz geçiş 409). Test: durum makinesi e2e.
-- [ ] **0b.2 Teklif→İş Emri dönüşümü:** `POST /quotes/:id/convert` — APPROVED teklifin seçilen satırlarından WorkOrder'lar (transaction). Test: dönüşüm + mükerrer dönüşüm engeli.
-- [ ] **0b.3 WorkOrder API:** CRUD + durum geçişleri + tezgah atama + öncelik. Test: geçiş kuralları e2e.
-- [ ] **0b.4 Purchasing API:** PO + satır CRUD, `POST /purchase-orders/:id/receive` (satır bazlı miktar) → stok artışı aynı transaction'da. Test: teslim al → `Material.stockQty` artışı doğrulanır; fazla teslim reddi.
-- [ ] **0b.5 Realtime gateway:** Socket.IO + JWT el sıkışma; servisler olay yayınlar. Test: birim test (event emit).
-- [ ] **0b.6 Web — Teklif ekranları:** liste + detay (satır ekleme, durum aksiyonları, "İş emrine dönüştür" akışı).
-- [ ] **0b.7 Web — İş Emri ekranları:** liste (durum/öncelik filtresi) + detay (tezgah atama, durum aksiyonları).
-- [ ] **0b.8 Web — Satınalma ekranları:** PO liste + detay (teslim alma formu); Materials sayfasında canlı stok.
-- [ ] **0b.9 Commit + tag `faz-0b`.**
+- [x] **0b.1 Quote API:** CRUD + satırlar, `quoteNo` otomatik numaralandırma, durum geçişleri (DRAFT→SENT→APPROVED/REJECTED; geçersiz geçiş 409). Test: durum makinesi e2e.
+- [x] **0b.2 Teklif→İş Emri dönüşümü:** `POST /quotes/:id/convert` — APPROVED teklifin seçilen satırlarından WorkOrder'lar (transaction). Test: dönüşüm + mükerrer dönüşüm engeli.
+- [x] **0b.3 WorkOrder API:** CRUD + durum geçişleri + tezgah atama + öncelik. Test: geçiş kuralları e2e.
+- [x] **0b.4 Purchasing API:** PO + satır CRUD, `POST /purchase-orders/:id/receive` (satır bazlı miktar) → stok artışı aynı transaction'da. Test: teslim al → `Material.stockQty` artışı doğrulanır; fazla teslim reddi.
+- [x] **0b.5 Realtime gateway:** Socket.IO + JWT el sıkışma; servisler olay yayınlar. Test: birim test (event emit).
+- [x] **0b.6 Web — Teklif ekranları:** liste + detay (satır ekleme, durum aksiyonları, "İş emrine dönüştür" akışı).
+- [x] **0b.7 Web — İş Emri ekranları:** liste (durum/öncelik filtresi) + detay (tezgah atama, durum aksiyonları).
+- [x] **0b.8 Web — Satınalma ekranları:** PO liste + detay (teslim alma formu); Materials sayfasında canlı stok.
+- [x] **0b.9 Commit + tag `faz-0b`.**
 
 ## 5. Faz 0c — Tüketim, Operasyon Takibi, Mamul, Dashboard
 
 **Sonunda:** Spec'teki uçtan uca akış tamamen çalışır ve dashboard'dan izlenir.
 
-- [ ] **0c.1 Consumption API:** iş emrine rezervasyon/tüketim kaydı; tüketimde stok düşümü + yetersiz stok hatası (transaction). Test: stok düşümü + eksi stok reddi e2e.
-- [ ] **0c.2 ProductionRun API:** `POST /work-orders/:id/runs` (başlat), `PATCH /runs/:id` (adet/duruş girişi), `POST /runs/:id/complete` — `source: MANUAL` sabit; WorkOrder durum senkronu. Test: başlat→tamamla akışı e2e.
-- [ ] **0c.3 FinishedGoods API:** iş emrine bağlı mamul girişi → `PartStock` artışı; iş emri tamamlama önerisi. Test: mamul stok artışı e2e.
-- [ ] **0c.4 Dashboard API:** aktif iş emirleri (durum bazlı sayım + liste), bekleyen teklifler, kritik stok (minStock altı), son üretim kayıtları.
-- [ ] **0c.5 Web — Operasyon Takibi:** iş emri seç → başlat/adet gir/duruş notu/tamamla; büyük dokunmatik dostu butonlar (ileriki HMI temeli), responsive.
-- [ ] **0c.6 Web — Tüketim & Mamul ekranları:** iş emri detayında malzeme rezervasyon/tüketim bölümü + mamul giriş bölümü.
-- [ ] **0c.7 Web — Dashboard:** özet kartlar + aktif iş emirleri tablosu + kritik stok listesi; WebSocket ile canlı güncelleme.
-- [ ] **0c.8 Uçtan uca duman testi (e2e):** teklif→onay→iş emri→PO→teslim→tüketim→üretim→mamul girişi tek senaryoda; README'ye kurulum/kullanım bölümü.
-- [ ] **0c.9 Commit + tag `faz-0c`.**
+- [x] **0c.1 Consumption API:** iş emrine rezervasyon/tüketim kaydı; tüketimde stok düşümü + yetersiz stok hatası (transaction). Test: stok düşümü + eksi stok reddi e2e.
+- [x] **0c.2 ProductionRun API:** `POST /work-orders/:id/runs` (başlat), `PATCH /runs/:id` (adet/duruş girişi), `POST /runs/:id/complete` — `source: MANUAL` sabit; WorkOrder durum senkronu. Test: başlat→tamamla akışı e2e.
+- [x] **0c.3 FinishedGoods API:** iş emrine bağlı mamul girişi → `PartStock` artışı; iş emri tamamlama önerisi. Test: mamul stok artışı e2e.
+- [x] **0c.4 Dashboard API:** aktif iş emirleri (durum bazlı sayım + liste), bekleyen teklifler, kritik stok (minStock altı), son üretim kayıtları.
+- [x] **0c.5 Web — Operasyon Takibi:** iş emri seç → başlat/adet gir/duruş notu/tamamla; büyük dokunmatik dostu butonlar (ileriki HMI temeli), responsive.
+- [x] **0c.6 Web — Tüketim & Mamul ekranları:** iş emri detayında malzeme rezervasyon/tüketim bölümü + mamul giriş bölümü.
+- [x] **0c.7 Web — Dashboard:** özet kartlar + aktif iş emirleri tablosu + kritik stok listesi; WebSocket ile canlı güncelleme.
+- [x] **0c.8 Uçtan uca duman testi (e2e):** teklif→onay→iş emri→PO→teslim→tüketim→üretim→mamul girişi tek senaryoda; README'ye kurulum/kullanım bölümü.
+- [x] **0c.9 Commit + tag `faz-0c`.**
 
 ---
 
-## 6. Kapsam Dışı (bilinçli — Faz 1+)
+## 6. Faz 1 — Dosya Deposu + Machine Connector (kullanıcı onayıyla, Faz 0 dışı)
 
-Machine Connector / FOCAS2 / MQTT / OPC UA, tezgah canlı izleme, OEE, kalite modülü, vardiya yönetimi, çizelgeleme takvimi, dosya yükleme (MinIO — Faz 0'da dosya alanları sadece referans string), RLS/multi-tenant ekranları, sevkiyat.
+**Sonunda:** STEP/talimat dosyaları yüklenip indirilebilir; protokol-bağımsız bir Machine Connector mimarisi (Kepware/OPC-UA benzeri) gerçek bir OPC-UA client-server el sıkışmasıyla uçtan uca doğrulanmış durumda, `ProductionRun(source=MACHINE)` otomatik oluşuyor.
+
+- [x] **1.1 Dosya deposu (MinIO):** `Document`/`DocumentType` modeli, MinIO entegrasyonu (upload/list/signed-URL/silme), mime allowlist + zorunlu `attachment` indirme (stored XSS önlemi), rol korumalı upload/delete, web UI (parça + iş emri detayı).
+- [x] **1.2 Machine Connector — veri modeli:** `Machine.activeWorkOrderId`/`connectorKeyHash`/`lastEventAt`/`lastStatus`, "Makine Bağlantısı" sistem kullanıcısı (seed).
+- [x] **1.3 Backend — telemetri alımı:** `X-Machine-Key` korumalı `POST /machines/:id/telemetry` (JWT'siz, `MachineKeyGuard`), `PATCH /machines/:id/active-work-order`, `POST /machines/:id/connector-key`. CYCLE_START→ProductionRun(source=MACHINE) açılışı, PART_COMPLETE→goodCount, ALARM→downtimeNote.
+- [x] **1.4 `apps/connector` paketi:** protokol-bağımsız `MachineAdapter` arayüzü, `SimulatorAdapter` (donanımsız test), retry-kuyruklu `Connector` (backend'e HTTP POST, 409 kalıcı hata olarak düşürülür).
+- [x] **1.5 OPC-UA referans adapter:** `OpcuaAdapter` (node-opcua client, node ID'ler config'den — marka bağımsız), kendi açık kaynak OPC-UA sim sunucumuz (`apps/connector/src/sim-server`), gerçek client-server el sıkışmasıyla entegrasyon testi.
+- [x] **1.6 Web — canlı tezgah paneli:** durum rozeti (Çalışıyor/Boşta/Alarm/Bağlı değil), aktif iş emri atama, connector-key üretme.
+- [x] **1.7 Testler:** 70 backend e2e + 8 connector (vitest) + 3 backend birim + 14 web — hepsi yeşil.
+- [ ] **1.8 Gerçek marka-özel adapter (Fanuc FOCAS2 / MTConnect / Siemens):** SMEC MCV-5500'ün kontrolcü/protokolü netleşmeden yazılamaz — beklemede.
+- [ ] **1.9 `apps/connector`'ın Docker Compose'a opsiyonel servis olarak eklenmesi.**
+
+Tasarım dokümanı: `docs/superpowers/specs/2026-07-24-machine-connector-design.md`.
+
+## 7. Kapsam Dışı (bilinçli — Faz 2+)
+
+Tezgah canlı izleme (geçmiş/grafik), OEE, kalite modülü, vardiya yönetimi, çizelgeleme takvimi, RLS/multi-tenant yönetim ekranları, sevkiyat.

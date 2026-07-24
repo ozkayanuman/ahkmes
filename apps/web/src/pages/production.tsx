@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Play, Save } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -157,6 +157,15 @@ function RunCard({
   const [good, setGood] = useState(String(run.goodCount));
   const [scrap, setScrap] = useState(String(run.scrapCount));
   const [note, setNote] = useState(run.downtimeNote ?? "");
+
+  // Soket üzerinden gelen canlı güncellemeler (ör. makine kaynaklı PART_COMPLETE)
+  // yeniden çekilen run verisiyle senkronlanır — bileşen sayfa içinde mount
+  // kaldığı için useState başlangıç değeri tek başına yeterli değil.
+  useEffect(() => {
+    setGood(String(run.goodCount));
+    setScrap(String(run.scrapCount));
+    setNote(run.downtimeNote ?? "");
+  }, [run.goodCount, run.scrapCount, run.downtimeNote]);
 
   const payload = () => ({
     goodCount: Number(good) || 0,
