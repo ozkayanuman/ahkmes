@@ -84,11 +84,11 @@ describe("Connector", () => {
 
   it("kuyruk taşarsa en eski olay düşürülür", async () => {
     const adapter = new FakeAdapter();
-    let resolveFirst: (() => void) | null = null;
+    const pending: { resolve: ((value: unknown) => void) | null } = { resolve: null };
     const fetchMock = vi.fn().mockImplementation(
       () =>
         new Promise((resolve) => {
-          resolveFirst = () => resolve({ ok: true, status: 201 });
+          pending.resolve = resolve;
         }),
     );
     const connector = new Connector(
@@ -104,7 +104,7 @@ describe("Connector", () => {
     adapter.emit(makeEvent("PART_COMPLETE"));
     adapter.emit(makeEvent("CYCLE_END"));
 
-    resolveFirst?.();
+    pending.resolve?.({ ok: true, status: 201 });
     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(1));
   });
 });

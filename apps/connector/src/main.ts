@@ -1,3 +1,5 @@
+import type { MachineAdapter } from "./adapters/adapter.interface";
+import { OpcuaAdapter } from "./adapters/opcua.adapter";
 import { SimulatorAdapter } from "./adapters/simulator.adapter";
 import { Connector } from "./core/connector";
 import { loadConfig } from "./config";
@@ -5,16 +7,18 @@ import { loadConfig } from "./config";
 async function main() {
   const config = loadConfig();
 
-  if (config.adapter === "opcua") {
-    throw new Error(
-      "OPC-UA adapter henüz uygulanmadı (Faz H, stretch — bkz. docs/superpowers/specs/2026-07-24-machine-connector-design.md). Şimdilik ADAPTER=simulator kullanın.",
-    );
-  }
-
-  const adapter = new SimulatorAdapter({
-    cycleTimeMs: config.simulatorCycleTimeMs,
-    alarmProbability: config.simulatorAlarmProbability,
-  });
+  const adapter: MachineAdapter =
+    config.adapter === "opcua"
+      ? new OpcuaAdapter({
+          endpointUrl: config.opcuaEndpointUrl,
+          cycleStatusNodeId: config.opcuaCycleStatusNodeId,
+          partCountNodeId: config.opcuaPartCountNodeId,
+          alarmMessageNodeId: config.opcuaAlarmMessageNodeId,
+        })
+      : new SimulatorAdapter({
+          cycleTimeMs: config.simulatorCycleTimeMs,
+          alarmProbability: config.simulatorAlarmProbability,
+        });
 
   const connector = new Connector(adapter, {
     backendUrl: config.backendUrl,
