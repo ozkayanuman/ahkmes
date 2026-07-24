@@ -114,6 +114,43 @@ describe("Temel CRUD (e2e)", () => {
       ).expect(201);
       expect(v2.body.version).toBe(2);
     });
+
+    it("POST /nc-programs/:id/file — gerçek G-kod dosyası yüklenir, indirilir (attachment)", async () => {
+      const v1 = await auth(
+        request(app.getHttpServer())
+          .post(`/parts/${partId}/nc-programs`)
+          .send({ fileName: "flans_op20.nc", fileRef: "manuel-referans" }),
+      ).expect(201);
+      const programId = v1.body.id;
+
+      const rejected = await auth(
+        request(app.getHttpServer())
+          .post(`/nc-programs/${programId}/file`)
+          .attach("file", Buffer.from("<script>alert(1)</script>"), {
+            filename: "evil.html",
+            contentType: "text/html",
+          }),
+      );
+      expect(rejected.status).toBe(400);
+
+      const gcode = "O1000\nG90 G54 G0 X0 Y0\nM30\n";
+      const uploaded = await auth(
+        request(app.getHttpServer())
+          .post(`/nc-programs/${programId}/file`)
+          .attach("file", Buffer.from(gcode), { filename: "flans_op20.nc", contentType: "text/plain" }),
+      ).expect(201);
+      expect(uploaded.body.sizeBytes).toBe(Buffer.byteLength(gcode));
+
+      const urlRes = await auth(request(app.getHttpServer()).get(`/nc-programs/${programId}/url`)).expect(
+        200,
+      );
+      expect(urlRes.body.url).toContain("response-content-disposition=attachment");
+
+      const download = await request(urlRes.body.url as string).get("").buffer(true);
+      expect(download.status).toBe(200);
+      expect(Buffer.from(download.body).toString("utf8")).toBe(gcode);
+      expect(download.headers["content-disposition"]).toContain("attachment");
+    });
   });
 
   describe("Suppliers / Materials / Machines", () => {

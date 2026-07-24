@@ -6,5 +6,6 @@ import { MinioService } from "./minio.service";
 @Module({
   controllers: [DocumentsController],
   providers: [DocumentsService, MinioService],
+  exports: [MinioService],
 })
 export class DocumentsModule {}

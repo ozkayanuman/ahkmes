@@ -1,11 +1,19 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { CreateNcProgramDto, CreatePartDto, UpdatePartDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
+import { MinioService } from "../documents/minio.service";
+
+// G-kod dosyaları için MIME allowlist — istemcinin gönderdiği mimeType doğrudan
+// güvenilmez (bkz. documents.service.ts'teki aynı gerekçe: stored XSS riski).
+const ALLOWED_NC_MIME_TYPES = new Set(["text/plain", "application/octet-stream"]);
 
 @Injectable()
 export class PartsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly minio: MinioService,
+  ) {}
 
   findAll(tenantId: string, q?: string) {
     return this.prisma.part.findMany({
@@ -90,5 +98,41 @@ export class PartsService {
       where: { tenantId, partId },
       orderBy: { version: "desc" },
     });
+  }
+
+  private async findNcProgram(tenantId: string, id: string) {
+    const program = await this.prisma.ncProgram.findFirst({ where: { id, tenantId } });
+    if (!program) throw new NotFoundException("NC programı bulunamadı");
+    return program;
+  }
+
+  /** G-kod dosyasını MinIO'ya yükler; mevcut versiyon kaydının dosya alanlarını doldurur/değiştirir. */
+  async uploadNcProgramFile(
+    tenantId: string,
+    id: string,
+    input: { fileName: string; mimeType: string; buffer: Buffer },
+  ) {
+    if (!ALLOWED_NC_MIME_TYPES.has(input.mimeType)) {
+      throw new BadRequestException(`Desteklenmeyen dosya tipi: ${input.mimeType}`);
+    }
+    const program = await this.findNcProgram(tenantId, id);
+    const storageKey = `${tenantId}/nc-programs/${program.partId}/${program.id}-${input.fileName}`;
+    await this.minio.putObject(storageKey, input.buffer, input.mimeType);
+    return this.prisma.ncProgram.update({
+      where: { id: program.id },
+      data: {
+        fileName: input.fileName,
+        storageKey,
+        mimeType: input.mimeType,
+        sizeBytes: input.buffer.length,
+      },
+    });
+  }
+
+  async getNcProgramFileUrl(tenantId: string, id: string) {
+    const program = await this.findNcProgram(tenantId, id);
+    if (!program.storageKey) throw new NotFoundException("Bu NC programı için henüz dosya yüklenmemiş");
+    const url = await this.minio.presignedGetUrl(program.storageKey, program.fileName);
+    return { url, fileName: program.fileName };
   }
 }

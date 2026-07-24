@@ -8,8 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import {
   createNcProgramSchema,
   createPartSchema,
@@ -81,5 +84,32 @@ export class PartsController {
     const parsed = createNcProgramSchema.safeParse({ ...body, partId });
     if (!parsed.success) throw new BadRequestException(parsed.error.issues);
     return this.service.addNcProgram(user.tenantId, user.userId, parsed.data);
+  }
+}
+
+@Controller("nc-programs")
+@UseGuards(JwtAuthGuard, RolesGuard)
+export class NcProgramsController {
+  constructor(private readonly service: PartsService) {}
+
+  @Post(":id/file")
+  @Roles("ADMIN", "PLANNER")
+  @UseInterceptors(FileInterceptor("file"))
+  uploadFile(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException("Dosya gerekli");
+    return this.service.uploadNcProgramFile(user.tenantId, id, {
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      buffer: file.buffer,
+    });
+  }
+
+  @Get(":id/url")
+  getUrl(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.getNcProgramFileUrl(user.tenantId, id);
   }
 }

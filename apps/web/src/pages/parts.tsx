@@ -1,7 +1,8 @@
-import { FileText } from "lucide-react";
+import { FileCode2, FileText } from "lucide-react";
 import { useState } from "react";
 import { CrudPage } from "../components/crud-page";
 import { DocumentsPanel } from "../components/documents-panel";
+import { NcProgramsPanel } from "../components/nc-programs-panel";
 import { Button, Modal } from "../components/ui";
 
 interface PartRow {
@@ -15,6 +16,7 @@ interface PartRow {
 
 export function PartsPage() {
   const [docsFor, setDocsFor] = useState<PartRow | null>(null);
+  const [ncFor, setNcFor] = useState<PartRow | null>(null);
 
   return (
     <>
@@ -38,14 +40,24 @@ export function PartsPage() {
           { name: "stepFileRef", label: "STEP Dosya Referansı" },
         ]}
         rowActions={(row) => (
-          <Button
-            variant="ghost"
-            className="px-2 py-1"
-            title="Dokümanlar (STEP / Talimat)"
-            onClick={() => setDocsFor(row)}
-          >
-            <FileText className="h-4 w-4" />
-          </Button>
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              className="px-2 py-1"
+              title="Dokümanlar (STEP / Talimat)"
+              onClick={() => setDocsFor(row)}
+            >
+              <FileText className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              className="px-2 py-1"
+              title="NC Programları (G-kod)"
+              onClick={() => setNcFor(row)}
+            >
+              <FileCode2 className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       />
       <Modal
@@ -54,6 +66,13 @@ export function PartsPage() {
         onClose={() => setDocsFor(null)}
       >
         {docsFor && <DocumentsPanel entityType="part" entityId={docsFor.id} />}
+      </Modal>
+      <Modal
+        open={ncFor !== null}
+        title={ncFor ? `${ncFor.partNo} — NC Programları` : "NC Programları"}
+        onClose={() => setNcFor(null)}
+      >
+        {ncFor && <NcProgramsPanel partId={ncFor.id} />}
       </Modal>
     </>
   );

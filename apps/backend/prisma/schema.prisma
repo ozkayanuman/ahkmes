@@ -144,6 +144,9 @@ model NcProgram {
   version     Int
   fileName    String
   fileRef     String
+  storageKey  String?  @unique
+  mimeType    String?
+  sizeBytes   Int?
   notes       String?
   createdById String
   createdAt   DateTime @default(now())
