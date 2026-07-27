@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { WorkOrderStatus } from "@prisma/client";
-import type { CreateWorkOrderDto, UpdateWorkOrderDto } from "@ahkmes/shared-types";
+import type { CreateWorkOrderDto, ScheduleWorkOrderDto, UpdateWorkOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { nextDocNo } from "../common/numbering";
@@ -32,6 +32,118 @@ export class WorkOrdersService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
   ) {}
+
+  /**
+   * OEE (Overall Equipment Effectiveness) — yalnızca gerçek veriden hesaplanabilen
+   * kısımlar döner. Quality her zaman hesaplanır. Performance yalnızca Part'ta
+   * `idealCycleTimeSec` girilmişse hesaplanır (yoksa null — sahte sayı üretilmez).
+   * Availability, sistemde süre bazlı duruş takibi olmadığı için şu an hesaplanamıyor
+   * (yalnızca metin notu tutuluyor) — bilinçli olarak null döner.
+   */
+  async oee(tenantId: string, workOrderId: string) {
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id: workOrderId, tenantId },
+      include: { part: { select: { idealCycleTimeSec: true } } },
+    });
+    if (!wo) throw new NotFoundException("İş emri bulunamadı");
+
+    const runs = await this.prisma.productionRun.findMany({ where: { tenantId, workOrderId } });
+    const goodCount = runs.reduce((sum, r) => sum + r.goodCount, 0);
+    const scrapCount = runs.reduce((sum, r) => sum + r.scrapCount, 0);
+    const totalCount = goodCount + scrapCount;
+    const quality = totalCount > 0 ? goodCount / totalCount : null;
+
+    const runtimeSeconds = runs.reduce((sum, r) => {
+      const end = r.endedAt ?? new Date();
+      return sum + Math.max(0, (end.getTime() - r.startedAt.getTime()) / 1000);
+    }, 0);
+
+    const idealCycleTimeSec = wo.part.idealCycleTimeSec ? Number(wo.part.idealCycleTimeSec) : null;
+    const performance =
+      idealCycleTimeSec && runtimeSeconds > 0
+        ? Math.min(1, (idealCycleTimeSec * goodCount) / runtimeSeconds)
+        : null;
+
+    const availability = null; // Süre bazlı duruş takibi eklenene kadar hesaplanamaz.
+    const oeeValue = quality !== null && performance !== null ? quality * performance : null;
+
+    return {
+      workOrderId,
+      goodCount,
+      scrapCount,
+      quality,
+      performance,
+      availability,
+      oee: oeeValue,
+      note:
+        performance === null
+          ? "Performance/OEE hesaplanamadı: parçada ideal çevrim süresi (idealCycleTimeSec) tanımlı değil."
+          : "Availability hesaplanamıyor: sistemde süre bazlı duruş (downtime) takibi yok.",
+    };
+  }
+
+  /**
+   * Genealogy (izlenebilirlik): bir iş emrinin tükettiği malzemeler (backward) ve
+   * ürettiği mamul/koşu kayıtları (forward) — MTU/seri numarası bazlı değil, iş emri
+   * granülaritesinde (mevcut veri modelinde serileştirilmiş birim takibi yok, bu
+   * bilinçli bir kapsam sınırı).
+   */
+  async genealogy(tenantId: string, workOrderId: string) {
+    const wo = await this.prisma.workOrder.findFirst({
+      where: { id: workOrderId, tenantId },
+      include: {
+        part: { select: { id: true, partNo: true, revision: true, name: true } },
+        quoteLine: {
+          select: {
+            id: true,
+            quote: { select: { id: true, quoteNo: true, customer: { select: { id: true, name: true } } } },
+          },
+        },
+      },
+    });
+    if (!wo) throw new NotFoundException("İş emri bulunamadı");
+
+    const [consumptions, productionRuns, finishedGoods] = await Promise.all([
+      this.prisma.materialConsumption.findMany({
+        where: { tenantId, workOrderId },
+        include: { material: { select: { id: true, code: true, name: true } } },
+        orderBy: { date: "asc" },
+      }),
+      this.prisma.productionRun.findMany({
+        where: { tenantId, workOrderId },
+        include: {
+          machine: { select: { id: true, name: true } },
+          operator: { select: { id: true, name: true } },
+        },
+        orderBy: { startedAt: "asc" },
+      }),
+      this.prisma.finishedGoodsEntry.findMany({
+        where: { tenantId, workOrderId },
+        orderBy: { date: "asc" },
+      }),
+    ]);
+
+    return {
+      workOrder: { id: wo.id, woNo: wo.woNo, status: wo.status, quantity: wo.quantity },
+      part: wo.part,
+      customer: wo.quoteLine?.quote.customer ?? null,
+      quoteNo: wo.quoteLine?.quote.quoteNo ?? null,
+      backward: { materialsConsumed: consumptions },
+      forward: { productionRuns, finishedGoodsEntries: finishedGoods },
+    };
+  }
+
+  /** Basit Scheduling/Gantt: bir iş emrinin planlanan başlangıç/bitiş tarihini ayarlar. */
+  async schedule(tenantId: string, id: string, dto: ScheduleWorkOrderDto) {
+    await this.findOne(tenantId, id);
+    const updated = await this.prisma.workOrder.update({
+      where: { id },
+      data: dto,
+      include: WO_INCLUDE,
+    });
+    this.realtime.emitToTenant(tenantId, "workorder.updated", { id });
+    return updated;
+  }
 
   findAll(tenantId: string, status?: WorkOrderStatus, q?: string) {
     return this.prisma.workOrder.findMany({

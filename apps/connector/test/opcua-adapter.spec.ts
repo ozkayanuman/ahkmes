@@ -48,4 +48,18 @@ describe("OpcuaAdapter (sim sunucusuna karşı entegrasyon)", () => {
     },
     20_000,
   );
+
+  it(
+    "readTags() sim sunucudaki CycleStatus/PartCount/AlarmMessage değişkenlerini keşfeder",
+    async () => {
+      server = await startOpcuaSimServer({ port: 4842, cycleTimeMs: 10_000, alarmProbability: 0 });
+      adapter = new OpcuaAdapter({ endpointUrl: server.endpointUrl });
+      await adapter.connect();
+
+      const readings = await adapter.readTags!();
+      const names = readings.map((r) => r.name);
+      expect(names).toEqual(expect.arrayContaining(["CycleStatus", "PartCount", "AlarmMessage"]));
+    },
+    15_000,
+  );
 });

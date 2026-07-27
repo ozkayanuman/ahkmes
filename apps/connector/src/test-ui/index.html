@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<title>AHKMES — M80 Connector Test Paneli</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background: #0f1115; color: #e6e6e6; margin: 0; padding: 24px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: #8a8f98; font-size: 13px; margin-bottom: 20px; }
+  .cards { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  .card { background: #181b21; border: 1px solid #2a2e37; border-radius: 10px; padding: 14px 18px; min-width: 160px; }
+  .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #8a8f98; margin-bottom: 6px; }
+  .card .value { font-size: 22px; font-weight: 600; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .badge.IDLE { background: #2a2e37; color: #c7cbd1; }
+  .badge.RUNNING { background: #113d24; color: #4ade80; }
+  .badge.ALARM { background: #4a1414; color: #f87171; }
+  .badge.conn-ok { background: #113d24; color: #4ade80; }
+  .badge.conn-bad { background: #4a1414; color: #f87171; }
+  .log { background: #101216; border: 1px solid #2a2e37; border-radius: 10px; padding: 10px 14px; height: 420px; overflow-y: auto; font-family: ui-monospace, monospace; font-size: 13px; }
+  .row { padding: 3px 0; border-bottom: 1px solid #1c1f26; display: flex; gap: 10px; }
+  .row .ts { color: #6b7280; white-space: nowrap; }
+  .row .type { font-weight: 600; min-width: 120px; }
+  .type-CYCLE_START { color: #60a5fa; }
+  .type-PART_COMPLETE { color: #4ade80; }
+  .type-ALARM { color: #f87171; }
+  .type-CYCLE_END { color: #a78bfa; }
+  .type-IDLE { color: #8a8f98; }
+  .row .payload { color: #9ca3af; }
+  .empty { color: #6b7280; padding: 8px 0; }
+</style>
+</head>
+<body>
+  <h1>AHKMES — M80 Connector Test Paneli</h1>
+  <div class="sub">Sahte M80 (port <span id="sim-port">?</span>) → M80Adapter (poll) → MachineEvent akışı — canlı</div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">Bağlantı</div>
+      <div class="value"><span id="conn-badge" class="badge conn-bad">bağlanıyor…</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Çevrim Durumu</div>
+      <div class="value"><span id="status-badge" class="badge IDLE">IDLE</span></div>
+    </div>
+    <div class="card">
+      <div class="label">Üretilen Parça</div>
+      <div class="value" id="part-count">0</div>
+    </div>
+    <div class="card">
+      <div class="label">Son Alarm</div>
+      <div class="value" id="last-alarm" style="font-size:14px; font-weight:400; color:#f87171;">—</div>
+    </div>
+  </div>
+
+  <div class="log" id="log"><div class="empty">Olay bekleniyor…</div></div>
+
+  <script>
+    const logEl = document.getElementById("log");
+    const statusBadge = document.getElementById("status-badge");
+    const partCountEl = document.getElementById("part-count");
+    const lastAlarmEl = document.getElementById("last-alarm");
+    const connBadge = document.getElementById("conn-badge");
+    const simPortEl = document.getElementById("sim-port");
+    let partCount = 0;
+    let firstEvent = true;
+
+    function setStatus(status) {
+      statusBadge.textContent = status;
+      statusBadge.className = "badge " + status;
+    }
+
+    function addRow(evt) {
+      if (firstEvent) { logEl.innerHTML = ""; firstEvent = false; }
+      const row = document.createElement("div");
+      row.className = "row";
+      const ts = new Date(evt.timestamp).toLocaleTimeString("tr-TR", { hour12: false, second: "2-digit", minute: "2-digit", hour: "2-digit" }) + "." + String(new Date(evt.timestamp).getMilliseconds()).padStart(3, "0");
+      row.innerHTML =
+        '<span class="ts">' + ts + '</span>' +
+        '<span class="type type-' + evt.type + '">' + evt.type + '</span>' +
+        '<span class="payload">' + (evt.payload ? JSON.stringify(evt.payload) : "") + '</span>';
+      logEl.prepend(row);
+      while (logEl.children.length > 300) logEl.removeChild(logEl.lastChild);
+    }
+
+    function handleEvent(evt) {
+      addRow(evt);
+      if (evt.type === "CYCLE_START") setStatus("RUNNING");
+      else if (evt.type === "ALARM") { setStatus("ALARM"); lastAlarmEl.textContent = (evt.payload && evt.payload.message) || "Alarm"; }
+      else if (evt.type === "CYCLE_END" || evt.type === "IDLE") setStatus("IDLE");
+      if (evt.type === "PART_COMPLETE") { partCount += 1; partCountEl.textContent = String(partCount); }
+    }
+
+    const source = new EventSource("/events");
+    source.addEventListener("snapshot", (e) => {
+      const data = JSON.parse(e.data);
+      simPortEl.textContent = data.simPort;
+      connBadge.textContent = "bağlı";
+      connBadge.className = "badge conn-ok";
+      partCount = data.partCount;
+      partCountEl.textContent = String(partCount);
+      setStatus(data.status);
+      if (data.lastAlarm) lastAlarmEl.textContent = data.lastAlarm;
+      for (const evt of data.history) addRow(evt);
+    });
+    source.addEventListener("machine-event", (e) => handleEvent(JSON.parse(e.data)));
+    source.onerror = () => {
+      connBadge.textContent = "koptu";
+      connBadge.className = "badge conn-bad";
+    };
+  </script>
+</body>
+</html>

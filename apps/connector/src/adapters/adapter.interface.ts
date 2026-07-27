@@ -6,8 +6,17 @@ export interface MachineEvent {
   payload?: Record<string, unknown>;
 }
 
+/** Automation Gateway: bir tag'in anlık okunmuş değeri (adı + string değer). */
+export interface TagReading {
+  name: string;
+  value: string;
+}
+
 export interface MachineAdapter {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   onEvent(cb: (event: MachineEvent) => void): void;
+  /** Opsiyonel: Automation Gateway için tag okuma/keşif yeteneği. Desteklemeyen
+   * adaptörler bu metodu implement etmeyebilir (ör. SimulatorAdapter). */
+  readTags?(): Promise<TagReading[]>;
 }

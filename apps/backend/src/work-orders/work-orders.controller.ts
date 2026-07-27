@@ -11,9 +11,11 @@ import {
 } from "@nestjs/common";
 import {
   createWorkOrderSchema,
+  scheduleWorkOrderSchema,
   updateWorkOrderSchema,
   workOrderStatusUpdateSchema,
   type CreateWorkOrderDto,
+  type ScheduleWorkOrderDto,
   type UpdateWorkOrderDto,
   type WorkOrderStatusUpdateDto,
 } from "@ahkmes/shared-types";
@@ -43,6 +45,26 @@ export class WorkOrdersController {
   @Get(":id")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);
+  }
+
+  @Get(":id/oee")
+  oee(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.oee(user.tenantId, id);
+  }
+
+  @Get(":id/genealogy")
+  genealogy(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.genealogy(user.tenantId, id);
+  }
+
+  @Patch(":id/schedule")
+  @Roles("ADMIN", "PLANNER")
+  schedule(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(scheduleWorkOrderSchema)) dto: ScheduleWorkOrderDto,
+  ) {
+    return this.service.schedule(user.tenantId, id, dto);
   }
 
   @Post()

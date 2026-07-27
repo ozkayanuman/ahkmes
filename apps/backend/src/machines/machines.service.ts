@@ -1,11 +1,14 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
-import type { Machine } from "@prisma/client";
+import type { Machine, Prisma } from "@prisma/client";
 import type {
   CreateMachineDto,
+  CreateMachineTagDto,
+  MachineTagValuesDto,
   MachineTelemetryDto,
   UpdateMachineDto,
+  UpdateMachineTagDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
@@ -29,6 +32,8 @@ export class MachinesService {
     activeWorkOrderId: true,
     lastEventAt: true,
     lastStatus: true,
+    connectorType: true,
+    connectorConfig: true,
     createdAt: true,
     updatedAt: true,
     activeWorkOrder: { select: { id: true, woNo: true, status: true } },
@@ -53,7 +58,7 @@ export class MachinesService {
 
   create(tenantId: string, dto: CreateMachineDto) {
     return this.prisma.machine.create({
-      data: { ...dto, tenantId },
+      data: { ...dto, tenantId, connectorConfig: dto.connectorConfig as Prisma.InputJsonValue },
       select: MachinesService.PUBLIC_SELECT,
     });
   }
@@ -62,7 +67,7 @@ export class MachinesService {
     await this.findOne(tenantId, id);
     return this.prisma.machine.update({
       where: { id },
-      data: dto,
+      data: { ...dto, connectorConfig: dto.connectorConfig as Prisma.InputJsonValue },
       select: MachinesService.PUBLIC_SELECT,
     });
   }
@@ -212,6 +217,68 @@ export class MachinesService {
       data: { lastEventAt: new Date(), lastStatus: dto.type },
     });
     this.realtime.emitToTenant(tenantId, "machine.updated", { id: machine.id, status: dto.type });
+    return { ok: true };
+  }
+
+  /** MachineKeyGuard ile doğrulanmış makine — connector'ın toplu tag değeri gönderdiği uç nokta. */
+  async handleTagValues(machine: Machine, dto: MachineTagValuesDto) {
+    const tenantId = machine.tenantId;
+    const applied: { tagName: string; value: string; timestamp: string }[] = [];
+
+    for (const v of dto.values) {
+      const tag = await this.prisma.machineTag.findFirst({
+        where: { tenantId, machineId: machine.id, name: v.tagName },
+      });
+      if (!tag) continue; // Tanımsız tag adı sessizce atlanır — tag'ler ayrı CRUD ile tanımlanır.
+      const timestamp = (v.timestamp ?? new Date()).toISOString();
+      await this.prisma.machineTag.update({
+        where: { id: tag.id },
+        data: { lastValue: v.value, lastValueAt: timestamp },
+      });
+      applied.push({ tagName: v.tagName, value: v.value, timestamp });
+    }
+
+    if (applied.length > 0) {
+      this.realtime.emitToTenant(tenantId, "tag.value.updated", { machineId: machine.id, values: applied });
+    }
+    return { ok: true, applied: applied.length };
+  }
+
+  // ---- Automation Gateway: Machine Tag CRUD (Faz 1) ----
+
+  async listTags(tenantId: string, machineId: string) {
+    await this.findOne(tenantId, machineId);
+    return this.prisma.machineTag.findMany({
+      where: { tenantId, machineId },
+      orderBy: { name: "asc" },
+    });
+  }
+
+  async createTag(tenantId: string, machineId: string, dto: CreateMachineTagDto) {
+    await this.findOne(tenantId, machineId);
+    const existing = await this.prisma.machineTag.findFirst({
+      where: { tenantId, machineId, name: dto.name },
+    });
+    if (existing) throw new ConflictException("Bu isimde bir tag zaten var");
+    return this.prisma.machineTag.create({ data: { ...dto, tenantId, machineId } });
+  }
+
+  private async findTag(tenantId: string, machineId: string, tagId: string) {
+    const tag = await this.prisma.machineTag.findFirst({
+      where: { id: tagId, tenantId, machineId },
+    });
+    if (!tag) throw new NotFoundException("Tag bulunamadı");
+    return tag;
+  }
+
+  async updateTag(tenantId: string, machineId: string, tagId: string, dto: UpdateMachineTagDto) {
+    await this.findTag(tenantId, machineId, tagId);
+    return this.prisma.machineTag.update({ where: { id: tagId }, data: dto });
+  }
+
+  async removeTag(tenantId: string, machineId: string, tagId: string) {
+    await this.findTag(tenantId, machineId, tagId);
+    await this.prisma.machineTag.delete({ where: { id: tagId } });
     return { ok: true };
   }
 

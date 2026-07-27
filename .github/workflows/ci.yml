@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ahkmes
+          POSTGRES_PASSWORD: ahkmes-ci
+          POSTGRES_DB: ahkmes
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ahkmes"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ahkmes:ahkmes-ci@localhost:5432/ahkmes?schema=public
+      JWT_SECRET: ci-test-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ahkmes/shared-types build
+      - run: pnpm --filter @ahkmes/backend prisma migrate deploy
+      - run: pnpm --filter @ahkmes/backend prisma db seed
+      - run: pnpm --filter @ahkmes/backend typecheck
+      - run: pnpm --filter @ahkmes/backend test:e2e
+
+  connector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ahkmes/connector typecheck
+      - run: pnpm --filter @ahkmes/connector test
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ahkmes/shared-types build
+      - run: pnpm --filter @ahkmes/web typecheck
+      - run: pnpm --filter @ahkmes/web test

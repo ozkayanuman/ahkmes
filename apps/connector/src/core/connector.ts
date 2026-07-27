@@ -7,6 +7,9 @@ export interface ConnectorConfig {
   maxQueueSize?: number;
   retryDelayMs?: number;
   maxRetryDelayMs?: number;
+  /** Automation Gateway: adapter `readTags()` destekliyorsa bu aralıkla poll edilip
+   * `/tag-values`'e gönderilir. 0/undefined ise tag polling kapalıdır. */
+  tagPollIntervalMs?: number;
 }
 
 type Fetch = typeof fetch;
@@ -18,6 +21,8 @@ export class Connector {
   private readonly maxQueueSize: number;
   private readonly retryDelayMs: number;
   private readonly maxRetryDelayMs: number;
+  private readonly tagPollIntervalMs: number;
+  private tagPollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly adapter: MachineAdapter,
@@ -27,15 +32,39 @@ export class Connector {
     this.maxQueueSize = config.maxQueueSize ?? 500;
     this.retryDelayMs = config.retryDelayMs ?? 1000;
     this.maxRetryDelayMs = config.maxRetryDelayMs ?? 30_000;
+    this.tagPollIntervalMs = config.tagPollIntervalMs ?? 0;
   }
 
   async start(): Promise<void> {
     this.adapter.onEvent((event) => this.enqueue(event));
     await this.adapter.connect();
+
+    if (this.adapter.readTags && this.tagPollIntervalMs > 0) {
+      this.tagPollTimer = setInterval(() => void this.pollTags(), this.tagPollIntervalMs);
+    }
   }
 
   async stop(): Promise<void> {
+    if (this.tagPollTimer) clearInterval(this.tagPollTimer);
+    this.tagPollTimer = null;
     await this.adapter.disconnect();
+  }
+
+  /** Automation Gateway: tag değerleri "en son değer yeter" karakterinde — kayıp
+   * toleranslı, olay kuyruğunun aksine retry/backoff uygulanmaz. */
+  private async pollTags(): Promise<void> {
+    if (!this.adapter.readTags) return;
+    try {
+      const readings = await this.adapter.readTags();
+      if (readings.length === 0) return;
+      await this.httpFetch(`${this.config.backendUrl}/machines/${this.config.machineId}/tag-values`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Machine-Key": this.config.machineKey },
+        body: JSON.stringify({ values: readings.map((r) => ({ tagName: r.name, value: r.value })) }),
+      });
+    } catch {
+      // Bir sonraki pollde tekrar denenir.
+    }
   }
 
   private enqueue(event: MachineEvent): void {

@@ -7,6 +7,10 @@ import { PartsPage } from "./pages/parts";
 import { SuppliersPage } from "./pages/suppliers";
 import { MaterialsPage } from "./pages/materials";
 import { MachinesPage } from "./pages/machines";
+import { AutomationGatewayPage } from "./pages/automation-gateway";
+import { NonConformancesPage } from "./pages/non-conformances";
+import { GenealogyPage } from "./pages/genealogy";
+import { SchedulingPage } from "./pages/scheduling";
 import { UsersPage } from "./pages/users";
 import { QuotesPage } from "./pages/quotes";
 import { QuoteDetailPage } from "./pages/quote-detail";
@@ -34,6 +38,10 @@ export function App() {
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/materials" element={<MaterialsPage />} />
         <Route path="/machines" element={<MachinesPage />} />
+        <Route path="/automation-gateway" element={<AutomationGatewayPage />} />
+        <Route path="/non-conformances" element={<NonConformancesPage />} />
+        <Route path="/genealogy" element={<GenealogyPage />} />
+        <Route path="/scheduling" element={<SchedulingPage />} />
         <Route path="/users" element={<UsersPage />} />
       </Route>
     </Routes>

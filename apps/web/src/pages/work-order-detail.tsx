@@ -88,6 +88,13 @@ export function WorkOrderDetailPage() {
     queryKey: ["/work-orders", id],
     queryFn: () => apiGet<WorkOrderRow>(`/work-orders/${id}`),
   });
+  const oee = useQuery({
+    queryKey: ["/work-orders", id, "oee"],
+    queryFn: () =>
+      apiGet<{ quality: number | null; performance: number | null; oee: number | null; note: string }>(
+        `/work-orders/${id}/oee`,
+      ),
+  });
   const machines = useQuery({
     queryKey: ["/machines"],
     queryFn: () => apiGet<MachineOption[]>("/machines"),
@@ -278,6 +285,18 @@ export function WorkOrderDetailPage() {
         <Card>
           <div className="text-xs uppercase text-slate-500">Tezgah</div>
           <div className="mt-1 font-medium">{wo.machine?.name ?? "Atanmadı"}</div>
+        </Card>
+        <Card>
+          <div className="text-xs uppercase text-slate-500" title={oee.data?.note}>
+            OEE (Kalite×Performans)
+          </div>
+          <div className="mt-1 font-medium">
+            {oee.data?.oee != null ? `${(oee.data.oee * 100).toFixed(0)}%` : "Veri yok"}
+          </div>
+          <div className="mt-1 text-xs text-slate-400">
+            Kalite: {oee.data?.quality != null ? `${(oee.data.quality * 100).toFixed(0)}%` : "—"} · Perf:{" "}
+            {oee.data?.performance != null ? `${(oee.data.performance * 100).toFixed(0)}%` : "—"}
+          </div>
         </Card>
       </div>
 

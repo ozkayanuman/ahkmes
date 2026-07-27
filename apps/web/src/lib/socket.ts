@@ -29,3 +29,41 @@ export function useInvalidateOn(events: string[], queryKeys: string[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events.join("|"), queryKeys.join("|"), qc]);
 }
+
+interface TagValueUpdatedPayload {
+  machineId: string;
+  values: { tagName: string; value: string; timestamp: string }[];
+}
+
+interface TagLike {
+  name: string;
+  lastValue?: string | null;
+  lastValueAt?: string | null;
+}
+
+/**
+ * Automation Gateway: `tag.value.updated` event'ini dinleyip, ilgili makinenin tag
+ * listesi önbelleğini refetch YAPMADAN doğrudan günceller — mevcut `useInvalidateOn`
+ * deseninden bilinçli sapma, çünkü tag akışı yüksek frekanslı olabilir.
+ */
+export function useTagValues(machineId: string | null, queryKey: string) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!machineId) return;
+    const s = getSocket();
+    const handler = (payload: TagValueUpdatedPayload) => {
+      if (payload.machineId !== machineId) return;
+      qc.setQueryData<TagLike[]>([queryKey], (old) => {
+        if (!old) return old;
+        return old.map((tag) => {
+          const match = payload.values.find((v) => v.tagName === tag.name);
+          return match ? { ...tag, lastValue: match.value, lastValueAt: match.timestamp } : tag;
+        });
+      });
+    };
+    s.on("tag.value.updated", handler);
+    return () => {
+      s.off("tag.value.updated", handler);
+    };
+  }, [machineId, queryKey, qc]);
+}

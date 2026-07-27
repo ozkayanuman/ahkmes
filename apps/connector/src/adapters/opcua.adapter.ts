@@ -5,12 +5,13 @@ import {
   ClientSubscription,
   DataValue,
   MessageSecurityMode,
+  NodeClass,
   OPCUAClient,
   SecurityPolicy,
   TimestampsToReturn,
   type OPCUAClientOptions,
 } from "node-opcua";
-import type { MachineAdapter, MachineEvent } from "./adapter.interface";
+import type { MachineAdapter, MachineEvent, TagReading } from "./adapter.interface";
 
 export interface OpcuaAdapterConfig {
   endpointUrl: string;
@@ -95,6 +96,28 @@ export class OpcuaAdapter implements MachineAdapter {
 
   onEvent(cb: (event: MachineEvent) => void): void {
     this.listeners.push(cb);
+  }
+
+  /**
+   * Automation Gateway: address space'i (ObjectsFolder = "i=85", standart OPC-UA
+   * well-known ID) iki seviye gezip bulduğu tüm Variable node'larının anlık
+   * değerini döner. Marka/cihaz bağımsız gerçek "tag keşfi" — M80Adapter'ın aksine
+   * burada elle tanımlı bir tag listesine ihtiyaç yok.
+   */
+  async readTags(): Promise<TagReading[]> {
+    if (!this.session) return [];
+    const readings: TagReading[] = [];
+    const rootBrowse = await this.session.browse("i=85");
+    for (const ref of rootBrowse.references ?? []) {
+      const childBrowse = await this.session.browse(ref.nodeId.toString());
+      for (const child of childBrowse.references ?? []) {
+        if (child.nodeClass !== NodeClass.Variable) continue;
+        const nodeIdStr = child.nodeId.toString();
+        const dv = await this.session!.read({ nodeId: nodeIdStr, attributeId: AttributeIds.Value });
+        readings.push({ name: child.browseName.name ?? nodeIdStr, value: String(dv.value?.value ?? "") });
+      }
+    }
+    return readings;
   }
 
   private monitor(nodeId: string, onChanged: (dataValue: DataValue) => void) {

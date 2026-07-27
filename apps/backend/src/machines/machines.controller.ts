@@ -2,12 +2,18 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@n
 import {
   assignActiveWorkOrderSchema,
   createMachineSchema,
+  createMachineTagSchema,
+  machineTagValuesSchema,
   machineTelemetrySchema,
   updateMachineSchema,
+  updateMachineTagSchema,
   type AssignActiveWorkOrderDto,
   type CreateMachineDto,
+  type CreateMachineTagDto,
+  type MachineTagValuesDto,
   type MachineTelemetryDto,
   type UpdateMachineDto,
+  type UpdateMachineTagDto,
 } from "@ahkmes/shared-types";
 import type { Machine } from "@prisma/client";
 import { MachinesService } from "./machines.service";
@@ -75,6 +81,40 @@ export class MachinesController {
   generateConnectorKey(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.generateConnectorKey(user.tenantId, id);
   }
+
+  // ---- Automation Gateway: Machine Tag CRUD (Faz 1) ----
+
+  @Get(":id/tags")
+  listTags(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.listTags(user.tenantId, id);
+  }
+
+  @Post(":id/tags")
+  @Roles("ADMIN")
+  createTag(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(createMachineTagSchema)) dto: CreateMachineTagDto,
+  ) {
+    return this.service.createTag(user.tenantId, id, dto);
+  }
+
+  @Patch(":id/tags/:tagId")
+  @Roles("ADMIN")
+  updateTag(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("tagId") tagId: string,
+    @Body(new ZodValidationPipe(updateMachineTagSchema)) dto: UpdateMachineTagDto,
+  ) {
+    return this.service.updateTag(user.tenantId, id, tagId, dto);
+  }
+
+  @Delete(":id/tags/:tagId")
+  @Roles("ADMIN")
+  removeTag(@CurrentUser() user: AuthUser, @Param("id") id: string, @Param("tagId") tagId: string) {
+    return this.service.removeTag(user.tenantId, id, tagId);
+  }
 }
 
 // JWT'siz, makineye özel X-Machine-Key ile korunur — connector süreçleri kullanır.
@@ -89,5 +129,19 @@ export class MachineTelemetryController {
     @Body(new ZodValidationPipe(machineTelemetrySchema)) dto: MachineTelemetryDto,
   ) {
     return this.service.handleTelemetry(machine, dto);
+  }
+
+  @Post(":id/tag-values")
+  tagValues(
+    @CurrentMachine() machine: Machine,
+    @Body(new ZodValidationPipe(machineTagValuesSchema)) dto: MachineTagValuesDto,
+  ) {
+    return this.service.handleTagValues(machine, dto);
+  }
+
+  /** Connector'ın başlangıçta kendi bağlantı ayarlarını (web'de configure edilen) çekmesi için. */
+  @Get(":id/connector-config")
+  connectorConfig(@CurrentMachine() machine: Machine) {
+    return { connectorType: machine.connectorType, connectorConfig: machine.connectorConfig };
   }
 }

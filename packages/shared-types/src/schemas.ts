@@ -3,8 +3,12 @@ import {
   ConsumptionTypeSchema,
   DocumentEntityTypeSchema,
   DocumentTypeSchema,
+  MachineConnectorTypeSchema,
   MachineEventTypeSchema,
+  MachineTagDataTypeSchema,
   MaterialTypeSchema,
+  NonConformanceActionTypeSchema,
+  NonConformanceStatusSchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
   RoleSchema,
@@ -60,6 +64,7 @@ export const createPartSchema = z.object({
   description: z.string().optional(),
   drawingFileRef: z.string().optional(),
   stepFileRef: z.string().optional(),
+  idealCycleTimeSec: decimalString.optional(),
 });
 export const updatePartSchema = createPartSchema.partial();
 export type CreatePartDto = z.infer<typeof createPartSchema>;
@@ -106,6 +111,8 @@ export const createMachineSchema = z.object({
   model: z.string().min(1),
   controller: z.string().optional(),
   isActive: z.boolean().default(true),
+  connectorType: MachineConnectorTypeSchema.default("MANUAL"),
+  connectorConfig: z.record(z.unknown()).optional(),
 });
 export const updateMachineSchema = createMachineSchema.partial();
 export type CreateMachineDto = z.infer<typeof createMachineSchema>;
@@ -229,3 +236,45 @@ export const assignActiveWorkOrderSchema = z.object({
   workOrderId: idSchema.nullable(),
 });
 export type AssignActiveWorkOrderDto = z.infer<typeof assignActiveWorkOrderSchema>;
+
+// ---- Automation Gateway (Machine Tag — Faz 1) ----
+export const createMachineTagSchema = z.object({
+  name: z.string().min(1),
+  address: z.string().min(1),
+  dataType: MachineTagDataTypeSchema.default("STRING"),
+});
+export const updateMachineTagSchema = createMachineTagSchema.partial();
+export type CreateMachineTagDto = z.infer<typeof createMachineTagSchema>;
+export type UpdateMachineTagDto = z.infer<typeof updateMachineTagSchema>;
+
+export const tagValueSchema = z.object({
+  tagName: z.string().min(1),
+  value: z.string(),
+  timestamp: isoDate.optional(),
+});
+export const machineTagValuesSchema = z.object({
+  values: z.array(tagValueSchema).min(1),
+});
+export type MachineTagValuesDto = z.infer<typeof machineTagValuesSchema>;
+
+// ---- Scheduling (basit Gantt, v1.0) ----
+export const scheduleWorkOrderSchema = z.object({
+  plannedStartDate: isoDate.nullable(),
+  plannedEndDate: isoDate.nullable(),
+});
+export type ScheduleWorkOrderDto = z.infer<typeof scheduleWorkOrderSchema>;
+
+// ---- Non-Conformance (kalite modülü, v0.9) ----
+export const createNonConformanceSchema = z.object({
+  workOrderId: idSchema,
+  productionRunId: idSchema.optional(),
+  failureType: z.string().min(1),
+  description: z.string().optional(),
+  actionType: NonConformanceActionTypeSchema.default("GENERIC"),
+});
+export type CreateNonConformanceDto = z.infer<typeof createNonConformanceSchema>;
+
+export const resolveNonConformanceSchema = z.object({
+  status: NonConformanceStatusSchema,
+});
+export type ResolveNonConformanceDto = z.infer<typeof resolveNonConformanceSchema>;

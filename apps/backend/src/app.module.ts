@@ -20,6 +20,7 @@ import { ProductionModule } from "./production/production.module";
 import { FinishedGoodsModule } from "./finished-goods/finished-goods.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { DocumentsModule } from "./documents/documents.module";
+import { NonConformanceModule } from "./non-conformance/non-conformance.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { DocumentsModule } from "./documents/documents.module";
     FinishedGoodsModule,
     DashboardModule,
     DocumentsModule,
+    NonConformanceModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

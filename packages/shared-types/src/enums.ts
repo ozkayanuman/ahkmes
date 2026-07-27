@@ -44,3 +44,17 @@ export const MachineEventTypeSchema = z.enum([
   "IDLE",
 ]);
 export type MachineEventType = z.infer<typeof MachineEventTypeSchema>;
+
+// ---- Automation Gateway (tag izleme, Faz 1+) ----
+export const MachineTagDataTypeSchema = z.enum(["NUMBER", "STRING", "BOOLEAN"]);
+export type MachineTagDataType = z.infer<typeof MachineTagDataTypeSchema>;
+
+export const MachineConnectorTypeSchema = z.enum(["MANUAL", "OPC_UA", "M80"]);
+export type MachineConnectorType = z.infer<typeof MachineConnectorTypeSchema>;
+
+// ---- Non-Conformance (kalite modülü, v0.9) ----
+export const NonConformanceStatusSchema = z.enum(["OPEN", "RESOLVED"]);
+export type NonConformanceStatus = z.infer<typeof NonConformanceStatusSchema>;
+
+export const NonConformanceActionTypeSchema = z.enum(["GENERIC", "SCRAP", "REWORK", "BLOCKING"]);
+export type NonConformanceActionType = z.infer<typeof NonConformanceActionTypeSchema>;

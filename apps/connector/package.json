@@ -7,6 +7,8 @@
     "start": "tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
     "sim-server": "tsx src/sim-server/run.ts",
+    "sim-server:m80": "tsx src/sim-server/run-m80.ts",
+    "test-ui": "tsx src/test-ui/server.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

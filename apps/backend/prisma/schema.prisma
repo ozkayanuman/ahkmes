@@ -93,6 +93,7 @@ model User {
   finishedEntries FinishedGoodsEntry[]
   auditLogs       AuditLog[]
   documents       Document[]
+  nonConformances NonConformance[]
 
   @@index([tenantId])
 }
@@ -116,16 +117,19 @@ model Customer {
 }
 
 model Part {
-  id             String   @id @default(uuid())
-  tenantId       String
-  partNo         String
-  revision       String   @default("A")
-  name           String
-  description    String?
-  drawingFileRef String?
-  stepFileRef    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                String   @id @default(uuid())
+  tenantId          String
+  partNo            String
+  revision          String   @default("A")
+  name              String
+  description       String?
+  drawingFileRef     String?
+  stepFileRef       String?
+  /// OEE Performance hesaplaması için ideal çevrim süresi (saniye) — opsiyonel,
+  /// girilmezse Performance/OEE "veri yok" olarak dönülür (sahte sayı üretilmez).
+  idealCycleTimeSec Decimal? @db.Decimal(10, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   ncPrograms      NcProgram[]
   quoteLines      QuoteLine[]
@@ -197,25 +201,63 @@ model QuoteLine {
   @@index([tenantId])
 }
 
+enum MachineConnectorType {
+  MANUAL
+  OPC_UA
+  M80
+}
+
 model Machine {
-  id                String    @id @default(uuid())
+  id                String               @id @default(uuid())
   tenantId          String
   name              String
   model             String
   controller        String?
-  isActive          Boolean   @default(true)
+  isActive          Boolean              @default(true)
   activeWorkOrderId String?
   connectorKeyHash  String?
   lastEventAt       DateTime?
   lastStatus        String?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  /// Automation Gateway — bağlantı tipi seçilince ilgili config alanları web'de dinamik gösterilir.
+  connectorType     MachineConnectorType @default(MANUAL)
+  connectorConfig   Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
   workOrders      WorkOrder[]
   productionRuns  ProductionRun[]
   activeWorkOrder WorkOrder?      @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
+  tags            MachineTag[]
 
   @@index([tenantId])
+}
+
+enum MachineTagDataType {
+  NUMBER
+  STRING
+  BOOLEAN
+}
+
+/// Automation Gateway: makineye bağlı, protokol-bağımsız tag tanımı (adres + son değer).
+/// `address` yorumu adaptöre göre değişir (OPC-UA nodeId, M80 "section:subSection" vb.) —
+/// yorumlama connector tarafında yapılır, backend adresin içeriğini bilmez.
+model MachineTag {
+  id          String             @id @default(uuid())
+  tenantId    String
+  machineId   String
+  name        String
+  address     String
+  dataType    MachineTagDataType @default(STRING)
+  lastValue   String?
+  lastValueAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  machine Machine @relation(fields: [machineId], references: [id])
+
+  @@unique([machineId, name])
+  @@index([tenantId])
+  @@index([machineId])
 }
 
 model WorkOrder {
@@ -224,12 +266,15 @@ model WorkOrder {
   woNo        String          @unique
   quoteLineId String?
   partId      String
-  quantity    Decimal         @db.Decimal(18, 3)
-  dueDate     DateTime
-  priority    Int             @default(5)
-  status      WorkOrderStatus @default(PLANNED)
-  machineId   String?
-  notes       String?
+  quantity         Decimal         @db.Decimal(18, 3)
+  dueDate          DateTime
+  priority         Int             @default(5)
+  status           WorkOrderStatus @default(PLANNED)
+  machineId        String?
+  notes            String?
+  /// Basit Scheduling/Gantt için — kapasite planlama algoritması değil, manuel çizelgeleme.
+  plannedStartDate DateTime?
+  plannedEndDate   DateTime?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
 
@@ -240,9 +285,46 @@ model WorkOrder {
   productionRuns   ProductionRun[]
   finishedEntries  FinishedGoodsEntry[]
   activeOnMachines Machine[]             @relation("ActiveWorkOrder")
+  nonConformances  NonConformance[]
 
   @@index([tenantId])
   @@index([status])
+}
+
+enum NonConformanceStatus {
+  OPEN
+  RESOLVED
+}
+
+enum NonConformanceActionType {
+  GENERIC
+  SCRAP
+  REWORK
+  BLOCKING
+}
+
+/// Kalite: iş emrine bağlı uygunsuzluk kaydı. Açık (OPEN) bir kayıt varken o iş
+/// emrinde üretim adedi (goodCount) girişi engellenir (bkz. ProductionService.update).
+model NonConformance {
+  id              String                    @id @default(uuid())
+  tenantId        String
+  workOrderId     String
+  productionRunId String?
+  reportedById    String
+  failureType     String
+  description     String?
+  actionType      NonConformanceActionType  @default(GENERIC)
+  status          NonConformanceStatus      @default(OPEN)
+  resolvedAt      DateTime?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  workOrder     WorkOrder      @relation(fields: [workOrderId], references: [id])
+  productionRun ProductionRun? @relation(fields: [productionRunId], references: [id])
+  reportedBy    User           @relation(fields: [reportedById], references: [id])
+
+  @@index([tenantId])
+  @@index([workOrderId])
 }
 
 model Supplier {
@@ -354,9 +436,10 @@ model ProductionRun {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
-  machine   Machine?  @relation(fields: [machineId], references: [id])
-  operator  User      @relation(fields: [operatorId], references: [id])
+  workOrder       WorkOrder        @relation(fields: [workOrderId], references: [id])
+  machine         Machine?         @relation(fields: [machineId], references: [id])
+  operator        User             @relation(fields: [operatorId], references: [id])
+  nonConformances NonConformance[]
 
   @@index([tenantId])
 }
