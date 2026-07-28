@@ -144,12 +144,34 @@ export class OpcuaAdapter implements MachineAdapter {
     if (status === RUNNING && prev !== RUNNING) {
       this.emit("CYCLE_START");
     } else if (status === ALARM) {
-      this.emit("ALARM", { message: this.lastAlarmMessage || "Alarm" });
+      void this.emitAlarm();
     } else if (status === IDLE && (prev === RUNNING || prev === ALARM)) {
       this.emit("CYCLE_END");
     } else if (status === IDLE && prev === null) {
       this.emit("IDLE");
     }
+  }
+
+  /**
+   * AlarmMessage ayrı bir monitored item olduğu için CycleStatus=ALARM bildirimiyle
+   * aynı publish cycle'da gelmeyebilir (node-opcua bildirim sırasını garanti etmez) —
+   * cache'lenmiş this.lastAlarmMessage'a güvenmek yerine node'u doğrudan okuyarak
+   * bu sıralama yarışını (race condition) ortadan kaldırır.
+   */
+  private async emitAlarm() {
+    let message = this.lastAlarmMessage;
+    if (this.session) {
+      try {
+        const dv = await this.session.read({
+          nodeId: this.nodeIds.alarmMessageNodeId,
+          attributeId: AttributeIds.Value,
+        });
+        if (dv.value?.value) message = String(dv.value.value);
+      } catch {
+        // okunamazsa cache'lenmiş değere düş
+      }
+    }
+    this.emit("ALARM", { message: message || "Alarm" });
   }
 
   private onPartCountChanged(count: number) {
