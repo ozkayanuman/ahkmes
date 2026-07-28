@@ -19,7 +19,10 @@ describe("OpcuaAdapter (sim sunucusuna karşı entegrasyon)", () => {
   it(
     "sim sunucudaki CycleStatus/PartCount/AlarmMessage değişimlerini MachineEvent'e çevirir",
     async () => {
-      server = await startOpcuaSimServer({ port: 4841, cycleTimeMs: 600, alarmProbability: 1 });
+      // cycleTimeMs=1600 -> alarm penceresi (cycleTimeMs/4) = 400ms: CI'da yavaş
+      // koşucularda AlarmMessage subscription bildirimi CycleStatus'tan geç
+      // gelirse bile mesajın henüz temizlenmemiş olmasını sağlamak için geniş tutuldu.
+      server = await startOpcuaSimServer({ port: 4841, cycleTimeMs: 1600, alarmProbability: 1 });
       adapter = new OpcuaAdapter({ endpointUrl: server.endpointUrl });
 
       const events: MachineEvent[] = [];

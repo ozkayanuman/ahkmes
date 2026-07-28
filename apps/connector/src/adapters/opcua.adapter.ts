@@ -162,7 +162,7 @@ export class OpcuaAdapter implements MachineAdapter {
    * (this.lastAlarmMessage) dolmasını kısa süre bekliyoruz.
    */
   private async emitAlarm() {
-    const deadline = Date.now() + 250;
+    const deadline = Date.now() + 500;
     while (!this.lastAlarmMessage && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
