@@ -174,7 +174,7 @@ describe("Temel CRUD (e2e)", () => {
     it("GET /machines — seed edilen 2 tezgah listelenir", async () => {
       const res = await auth(request(app.getHttpServer()).get("/machines")).expect(200);
       expect(res.body.length).toBeGreaterThanOrEqual(2);
-      expect(res.body[0].model).toBe("SMEC MCV-5500");
+      expect(res.body[0].model).toBe("SMEC 5500");
     });
   });
 
