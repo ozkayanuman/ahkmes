@@ -86,6 +86,27 @@ services:
     depends_on:
       - backend
 
+  # Opsiyonel: gerçek tezgah bağlantısı olmadan varsayılan olarak başlamaz.
+  # Açmak için: docker compose --profile connector up
+  connector:
+    profiles: ["connector"]
+    build:
+      context: .
+      dockerfile: apps/connector/Dockerfile
+    environment:
+      ADAPTER: ${CONNECTOR_ADAPTER:-simulator}
+      BACKEND_URL: http://backend:3000
+      MACHINE_ID: ${CONNECTOR_MACHINE_ID:-}
+      MACHINE_KEY: ${CONNECTOR_MACHINE_KEY:-}
+      OPCUA_ENDPOINT_URL: ${CONNECTOR_OPCUA_ENDPOINT_URL:-}
+      M80_HOST: ${CONNECTOR_M80_HOST:-}
+      M80_PORT: ${CONNECTOR_M80_PORT:-683}
+      FANUC_HOST: ${CONNECTOR_FANUC_HOST:-}
+      FANUC_PORT: ${CONNECTOR_FANUC_PORT:-8193}
+    depends_on:
+      backend:
+        condition: service_started
+
 volumes:
   pgdata:
   miniodata:

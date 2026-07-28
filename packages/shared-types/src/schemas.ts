@@ -229,6 +229,9 @@ export const machineTelemetrySchema = z.object({
   type: MachineEventTypeSchema,
   timestamp: isoDate.optional(),
   payload: z.record(z.unknown()).optional(),
+  /** İdempotency: connector'ın retry'de aynı olayı tekrar göndermesi durumunda
+   * ikinci işlemeyi engellemek için — verilmezse dedup uygulanmaz (geriye uyumlu). */
+  eventId: z.string().min(1).optional(),
 });
 export type MachineTelemetryDto = z.infer<typeof machineTelemetrySchema>;
 

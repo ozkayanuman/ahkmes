@@ -1,8 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import type { StartProductionRunDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NonConformanceService } from "../non-conformance/non-conformance.service";
+import { AppException } from "../common/app-exception";
 
 interface UpdateRunInput {
   goodCount?: number;
@@ -90,7 +91,9 @@ export class ProductionService {
     const run = await this.findOne(tenantId, id);
     if (run.endedAt) throw new ConflictException("Tamamlanmış koşu düzenlenemez");
     if (dto.goodCount !== undefined && (await this.nonConformance.hasOpenNonConformance(tenantId, run.workOrderId))) {
-      throw new ConflictException(
+      throw new AppException(
+        HttpStatus.CONFLICT,
+        "NON_CONFORMANCE_OPEN",
         "Bu iş emrinde açık bir uygunsuzluk kaydı var — üretim adedi girişi engellendi",
       );
     }

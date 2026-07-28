@@ -42,13 +42,21 @@ interface DashboardData {
     workOrder: { id: string; woNo: string; part: { partNo: string; name: string } };
     operator: { name: string };
   }[];
+  openNonConformanceCount: number;
 }
 
 const COUNT_ORDER = ["PLANNED", "WAITING_MATERIAL", "IN_PRODUCTION", "COMPLETED", "CANCELLED"];
 
 export function DashboardPage() {
   useInvalidateOn(
-    ["workorder.updated", "quote.updated", "stock.updated", "productionrun.updated", "purchaseorder.updated"],
+    [
+      "workorder.updated",
+      "quote.updated",
+      "stock.updated",
+      "productionrun.updated",
+      "purchaseorder.updated",
+      "nonconformance.updated",
+    ],
     ["/dashboard"],
   );
   const query = useQuery({
@@ -64,13 +72,19 @@ export function DashboardPage() {
     <div>
       <h1 className="mb-6 text-2xl font-bold">Panel</h1>
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         {COUNT_ORDER.map((s) => (
           <Card key={s}>
             <div className="text-xs uppercase text-slate-500">{WO_STATUS[s]?.label ?? s}</div>
             <div className="mt-1 text-3xl font-bold">{d.workOrderCounts[s] ?? 0}</div>
           </Card>
         ))}
+        <Link to="/non-conformances">
+          <Card>
+            <div className="text-xs uppercase text-slate-500">Açık Uygunsuzluk</div>
+            <div className="mt-1 text-3xl font-bold text-red-600">{d.openNonConformanceCount}</div>
+          </Card>
+        </Link>
       </div>
 
       <div className="mb-6 grid gap-6 xl:grid-cols-2">

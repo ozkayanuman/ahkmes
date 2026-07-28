@@ -4,6 +4,8 @@ export interface MachineEvent {
   type: MachineEventType;
   timestamp: string;
   payload?: Record<string, unknown>;
+  /** İdempotency: Connector kuyruğa alırken üretir, retry'lerde aynı kalır (bkz. core/connector.ts). */
+  eventId?: string;
 }
 
 /** Automation Gateway: bir tag'in anlık okunmuş değeri (adı + string değer). */

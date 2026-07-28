@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { MachineAdapter, MachineEvent } from "../adapters/adapter.interface";
 
 export interface ConnectorConfig {
@@ -68,6 +69,9 @@ export class Connector {
   }
 
   private enqueue(event: MachineEvent): void {
+    // eventId retry'ler boyunca aynı kuyruk öğesinde korunur — backend aynı
+    // olayın ikinci kez işlenmesini bu id ile engeller (idempotency).
+    if (!event.eventId) event.eventId = randomUUID();
     this.queue.push(event);
     if (this.queue.length > this.maxQueueSize) this.queue.shift();
     if (!this.draining) void this.drain();
@@ -100,7 +104,12 @@ export class Connector {
             "Content-Type": "application/json",
             "X-Machine-Key": this.config.machineKey,
           },
-          body: JSON.stringify({ type: event.type, timestamp: event.timestamp, payload: event.payload }),
+          body: JSON.stringify({
+            type: event.type,
+            timestamp: event.timestamp,
+            payload: event.payload,
+            eventId: event.eventId,
+          }),
         },
       );
       // 409 (atanmış iş emri yok) kalıcı bir hata — yeniden denenmeden düşürülür.

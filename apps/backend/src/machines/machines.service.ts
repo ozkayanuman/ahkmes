@@ -1,7 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
+import { Prisma as PrismaNS } from "@prisma/client";
 import type { Machine, Prisma } from "@prisma/client";
+import { AppException } from "../common/app-exception";
 import type {
   CreateMachineDto,
   CreateMachineTagDto,
@@ -114,9 +116,25 @@ export class MachinesService {
   async handleTelemetry(machine: Machine, dto: MachineTelemetryDto) {
     const tenantId = machine.tenantId;
 
+    // İdempotency: connector'ın retry kuyruğu network hatasında aynı olayı iki kez
+    // gönderirse, aynı (machineId, eventId) ikinci kez işlenmez. eventId verilmezse
+    // (eski connector sürümü) dedup uygulanmaz — geriye uyumlu.
+    if (dto.eventId) {
+      try {
+        await this.prisma.machineEventDedup.create({
+          data: { tenantId, machineId: machine.id, eventId: dto.eventId },
+        });
+      } catch (err) {
+        if (err instanceof PrismaNS.PrismaClientKnownRequestError && err.code === "P2002") {
+          return { ok: true, duplicate: true };
+        }
+        throw err;
+      }
+    }
+
     if (dto.type === "CYCLE_START") {
       if (!machine.activeWorkOrderId) {
-        throw new ConflictException("Tezgaha atanmış aktif iş emri yok");
+        throw new AppException(HttpStatus.CONFLICT, "NO_ACTIVE_WORK_ORDER", "Tezgaha atanmış aktif iş emri yok");
       }
       const activeRun = await this.prisma.productionRun.findFirst({
         where: { tenantId, workOrderId: machine.activeWorkOrderId, endedAt: null },
@@ -125,9 +143,13 @@ export class MachinesService {
         const wo = await this.prisma.workOrder.findFirst({
           where: { id: machine.activeWorkOrderId, tenantId },
         });
-        if (!wo) throw new NotFoundException("İş emri bulunamadı");
+        if (!wo) throw new AppException(HttpStatus.NOT_FOUND, "WORK_ORDER_NOT_FOUND", "İş emri bulunamadı");
         if (wo.status === "COMPLETED" || wo.status === "CANCELLED") {
-          throw new ConflictException("Tamamlanmış/iptal edilmiş iş emrinde koşu başlatılamaz");
+          throw new AppException(
+            HttpStatus.CONFLICT,
+            "WORK_ORDER_CLOSED",
+            "Tamamlanmış/iptal edilmiş iş emrinde koşu başlatılamaz",
+          );
         }
         const operator = await this.connectorUser(tenantId);
         await this.prisma.$transaction(async (tx) => {

@@ -89,9 +89,15 @@ export function ProductionPage() {
       (w.status === "PLANNED" || w.status === "WAITING_MATERIAL" || w.status === "IN_PRODUCTION"),
   );
 
+  const target = (activeRuns.data ?? []).reduce((s, r) => s + Number(r.workOrder.quantity), 0);
+  const produced = (activeRuns.data ?? []).reduce((s, r) => s + r.goodCount, 0);
+  const pending = Math.max(target - produced, 0);
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold">Operasyon Takibi</h1>
+
+      <ContextBar queuing={startable.length} target={target} produced={produced} pending={pending} />
 
       {canRun && (
         <Card className="mb-6">
@@ -141,6 +147,36 @@ export function ProductionPage() {
           <RunCard key={run.id} run={run} canRun={canRun} onChanged={invalidate} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Aktif koşuların toplamı üzerinden Target/Queuing/Pending/Produced göstergesi (Opcenter tarzı context bar). */
+function ContextBar({
+  queuing,
+  target,
+  produced,
+  pending,
+}: {
+  queuing: number;
+  target: number;
+  produced: number;
+  pending: number;
+}) {
+  const tiles = [
+    { label: "Sırada Bekleyen", value: queuing },
+    { label: "Hedef", value: target },
+    { label: "Üretilen", value: produced },
+    { label: "Kalan", value: pending },
+  ];
+  return (
+    <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {tiles.map((t) => (
+        <Card key={t.label} className="text-center">
+          <div className="text-3xl font-bold text-brand-700">{t.value}</div>
+          <div className="text-sm text-slate-500">{t.label}</div>
+        </Card>
+      ))}
     </div>
   );
 }

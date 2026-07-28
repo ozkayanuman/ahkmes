@@ -6,7 +6,7 @@ export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
   async summary(tenantId: string) {
-    const [woGroups, activeWorkOrders, pendingQuotes, minStockMaterials, recentRuns] =
+    const [woGroups, activeWorkOrders, pendingQuotes, minStockMaterials, recentRuns, openNonConformanceCount] =
       await Promise.all([
         this.prisma.workOrder.groupBy({
           by: ["status"],
@@ -43,6 +43,7 @@ export class DashboardService {
           orderBy: { startedAt: "desc" },
           take: 5,
         }),
+        this.prisma.nonConformance.count({ where: { tenantId, status: "OPEN" } }),
       ]);
 
     const workOrderCounts: Record<string, number> = {};
@@ -58,6 +59,7 @@ export class DashboardService {
       pendingQuotes,
       criticalStock,
       recentRuns,
+      openNonConformanceCount,
     };
   }
 }

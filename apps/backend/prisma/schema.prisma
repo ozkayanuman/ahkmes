@@ -232,6 +232,19 @@ model Machine {
   @@index([tenantId])
 }
 
+/// Telemetri idempotency: connector'ın retry kuyruğu aynı olayı network hatasında
+/// iki kez gönderirse, aynı (machineId, eventId) ikinci kez işlenmez (goodCount vb. çift artmaz).
+model MachineEventDedup {
+  id        String   @id @default(uuid())
+  tenantId  String
+  machineId String
+  eventId   String
+  createdAt DateTime @default(now())
+
+  @@unique([machineId, eventId])
+  @@index([tenantId])
+}
+
 enum MachineTagDataType {
   NUMBER
   STRING
