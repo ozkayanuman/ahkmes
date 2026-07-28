@@ -72,19 +72,27 @@ async function main() {
     const unit = await prisma.unit.upsert({
       where: { workplaceId_name: { workplaceId: workplace.id, name: m.name } },
       update: {},
-      create: { tenantId: DEFAULT_TENANT_ID, workplaceId: workplace.id, name: m.name, posX: 80 + i * 160, posY: 80 },
+      create: { tenantId: DEFAULT_TENANT_ID, workplaceId: workplace.id, name: m.name },
     });
     const existing = await prisma.machine.findFirst({
       where: { tenantId: DEFAULT_TENANT_ID, name: m.name },
     });
+    // Digital Twin'de varsayılan bir yerleşim görülsün diye — kullanıcı sürükleyip
+    // taşıdıktan sonra existing.posX dolu olacağından tekrar ezilmez.
+    const defaultPos = { posX: 80 + i * 160, posY: 80 };
     if (!existing) {
-      await prisma.machine.create({ data: { tenantId: DEFAULT_TENANT_ID, unitId: unit.id, ...m } });
+      await prisma.machine.create({ data: { tenantId: DEFAULT_TENANT_ID, unitId: unit.id, ...m, ...defaultPos } });
     } else {
-      // Model/controller güncel bilgiyle düzeltilir; unitId sadece boşsa doldurulur
-      // (kullanıcının hiyerarşi sayfasından yaptığı manuel yer değişikliği ezilmez).
+      // Model/controller güncel bilgiyle düzeltilir; unitId/posX-Y sadece boşsa doldurulur
+      // (kullanıcının hiyerarşi/dijital ikiz sayfasından yaptığı manuel değişiklik ezilmez).
       await prisma.machine.update({
         where: { id: existing.id },
-        data: { model: m.model, controller: m.controller, ...(existing.unitId ? {} : { unitId: unit.id }) },
+        data: {
+          model: m.model,
+          controller: m.controller,
+          ...(existing.unitId ? {} : { unitId: unit.id }),
+          ...(existing.posX === null ? defaultPos : {}),
+        },
       });
     }
   }

@@ -140,19 +140,17 @@ export const updateWorkplaceSchema = z.object({ name: z.string().min(1) });
 export type CreateWorkplaceDto = z.infer<typeof createWorkplaceSchema>;
 export type UpdateWorkplaceDto = z.infer<typeof updateWorkplaceSchema>;
 
-export const createUnitSchema = z.object({
-  workplaceId: idSchema,
-  name: z.string().min(1),
-  posX: z.number().optional(),
-  posY: z.number().optional(),
-});
-export const updateUnitSchema = z.object({
-  name: z.string().min(1).optional(),
-  posX: z.number().nullable().optional(),
-  posY: z.number().nullable().optional(),
-});
+export const createUnitSchema = z.object({ workplaceId: idSchema, name: z.string().min(1) });
+export const updateUnitSchema = z.object({ name: z.string().min(1) });
 export type CreateUnitDto = z.infer<typeof createUnitSchema>;
 export type UpdateUnitDto = z.infer<typeof updateUnitSchema>;
+
+// ---- Digital Twin (2D saha planı — hiyerarşiden bağımsız fiziksel konum) ----
+export const updateMachinePositionSchema = z.object({ posX: z.number(), posY: z.number() });
+export type UpdateMachinePositionDto = z.infer<typeof updateMachinePositionSchema>;
+
+export const createMachineConnectionSchema = z.object({ fromMachineId: idSchema, toMachineId: idSchema });
+export type CreateMachineConnectionDto = z.infer<typeof createMachineConnectionSchema>;
 
 // ---- Quote (Faz 0b'de kullanılacak) ----
 export const quoteLineInputSchema = z.object({

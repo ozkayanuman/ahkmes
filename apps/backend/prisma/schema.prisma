@@ -118,10 +118,6 @@ model Unit {
   tenantId    String
   workplaceId String
   name        String
-  /// Digital Twin kat planındaki konum (px/oransal) — hiyerarşi CRUD'unda kullanılmaz,
-  /// sadece saha planı görselleştirmesi bu alanları okur/yazar.
-  posX        Float?
-  posY        Float?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -190,7 +186,7 @@ model Part {
   revision          String   @default("A")
   name              String
   description       String?
-  drawingFileRef     String?
+  drawingFileRef    String?
   stepFileRef       String?
   /// OEE Performance hesaplaması için ideal çevrim süresi (saniye) — opsiyonel,
   /// girilmezse Performance/OEE "veri yok" olarak dönülür (sahte sayı üretilmez).
@@ -289,17 +285,40 @@ model Machine {
   connectorType     MachineConnectorType @default(MANUAL)
   connectorConfig   Json?
   /// Saha hiyerarşisindeki yeri (Plant>Area>Workplace>Unit) — opsiyonel, henüz
-  /// yerleştirilmemiş makineler null kalabilir (geriye uyumlu).
+  /// yerleştirilmemiş makineler null kalabilir (geriye uyumlu). Organizasyonel
+  /// gruplama amaçlıdır — Digital Twin'deki fiziksel konumdan (posX/posY) bağımsızdır.
   unitId            String?
+  /// Digital Twin kat planındaki fiziksel konum (px) — hiyerarşiden bağımsız,
+  /// sadece saha planı sürükle-bırak editörü bu alanları okur/yazar.
+  posX              Float?
+  posY              Float?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
   workOrders      WorkOrder[]
   productionRuns  ProductionRun[]
-  activeWorkOrder WorkOrder?      @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
+  activeWorkOrder WorkOrder?          @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
   tags            MachineTag[]
-  unit            Unit?           @relation(fields: [unitId], references: [id])
+  unit            Unit?               @relation(fields: [unitId], references: [id])
+  connectionsFrom MachineConnection[] @relation("ConnectionFrom")
+  connectionsTo   MachineConnection[] @relation("ConnectionTo")
 
+  @@index([tenantId])
+}
+
+/// Digital Twin'de iki makine arasındaki fiziksel/malzeme akışı bağlantısı
+/// (görsel çizgi) — sadece görselleştirme amaçlı, üretim mantığını etkilemez.
+model MachineConnection {
+  id            String   @id @default(uuid())
+  tenantId      String
+  fromMachineId String
+  toMachineId   String
+  createdAt     DateTime @default(now())
+
+  fromMachine Machine @relation("ConnectionFrom", fields: [fromMachineId], references: [id], onDelete: Cascade)
+  toMachine   Machine @relation("ConnectionTo", fields: [toMachineId], references: [id], onDelete: Cascade)
+
+  @@unique([fromMachineId, toMachineId])
   @@index([tenantId])
 }
 
@@ -345,11 +364,11 @@ model MachineTag {
 }
 
 model WorkOrder {
-  id          String          @id @default(uuid())
-  tenantId    String
-  woNo        String          @unique
-  quoteLineId String?
-  partId      String
+  id               String          @id @default(uuid())
+  tenantId         String
+  woNo             String          @unique
+  quoteLineId      String?
+  partId           String
   quantity         Decimal         @db.Decimal(18, 3)
   dueDate          DateTime
   priority         Int             @default(5)
@@ -359,8 +378,8 @@ model WorkOrder {
   /// Basit Scheduling/Gantt için — kapasite planlama algoritması değil, manuel çizelgeleme.
   plannedStartDate DateTime?
   plannedEndDate   DateTime?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   quoteLine        QuoteLine?            @relation(fields: [quoteLineId], references: [id])
   part             Part                  @relation(fields: [partId], references: [id])
@@ -390,18 +409,18 @@ enum NonConformanceActionType {
 /// Kalite: iş emrine bağlı uygunsuzluk kaydı. Açık (OPEN) bir kayıt varken o iş
 /// emrinde üretim adedi (goodCount) girişi engellenir (bkz. ProductionService.update).
 model NonConformance {
-  id              String                    @id @default(uuid())
+  id              String                   @id @default(uuid())
   tenantId        String
   workOrderId     String
   productionRunId String?
   reportedById    String
   failureType     String
   description     String?
-  actionType      NonConformanceActionType  @default(GENERIC)
-  status          NonConformanceStatus      @default(OPEN)
+  actionType      NonConformanceActionType @default(GENERIC)
+  status          NonConformanceStatus     @default(OPEN)
   resolvedAt      DateTime?
-  createdAt       DateTime                  @default(now())
-  updatedAt       DateTime                  @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
 
   workOrder     WorkOrder      @relation(fields: [workOrderId], references: [id])
   productionRun ProductionRun? @relation(fields: [productionRunId], references: [id])

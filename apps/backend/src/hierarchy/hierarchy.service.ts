@@ -12,16 +12,12 @@ import type {
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
+// Hiyerarşi sadece organizasyon yapısını gösterir — canlı durum/atanmış iş
+// emri Digital Twin sayfasına ait (bkz. digital-twin modülü), burada karışmaz.
 const MACHINE_SELECT = {
   id: true,
   name: true,
   model: true,
-  controller: true,
-  isActive: true,
-  lastStatus: true,
-  lastEventAt: true,
-  activeWorkOrderId: true,
-  activeWorkOrder: { select: { id: true, woNo: true, status: true } },
 } as const;
 
 @Injectable()
@@ -164,7 +160,7 @@ export class HierarchyService {
     await this.findWorkplace(tenantId, dto.workplaceId);
     try {
       return await this.prisma.unit.create({
-        data: { tenantId, workplaceId: dto.workplaceId, name: dto.name, posX: dto.posX, posY: dto.posY },
+        data: { tenantId, workplaceId: dto.workplaceId, name: dto.name },
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {

@@ -22,6 +22,7 @@ import { DashboardModule } from "./dashboard/dashboard.module";
 import { DocumentsModule } from "./documents/documents.module";
 import { NonConformanceModule } from "./non-conformance/non-conformance.module";
 import { HierarchyModule } from "./hierarchy/hierarchy.module";
+import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { HierarchyModule } from "./hierarchy/hierarchy.module";
     DocumentsModule,
     NonConformanceModule,
     HierarchyModule,
+    DigitalTwinModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

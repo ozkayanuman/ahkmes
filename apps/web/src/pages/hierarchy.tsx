@@ -9,10 +9,6 @@ interface MachineNode {
   id: string;
   name: string;
   model: string;
-  controller?: string | null;
-  isActive: boolean;
-  lastStatus?: string | null;
-  activeWorkOrder?: { id: string; woNo: string; status: string } | null;
 }
 interface UnitNode {
   id: string;
@@ -47,13 +43,6 @@ const onError = (e: unknown) => {
   const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
   alert(msg ?? "İşlem başarısız.");
 };
-
-function machineDotColor(m: MachineNode) {
-  if (!m.isActive) return "bg-slate-400";
-  if (m.lastStatus === "ALARM") return "bg-red-500";
-  if (m.activeWorkOrder) return "bg-blue-500";
-  return "bg-green-500";
-}
 
 type Level = "plant" | "area" | "workplace" | "unit";
 
@@ -467,14 +456,9 @@ function PlantRow(props: {
                           className="flex items-center justify-between rounded bg-slate-50 px-2 py-1 text-sm"
                         >
                           <div className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${machineDotColor(m)}`} />
+                            <Cpu className="h-3.5 w-3.5 text-slate-400" />
                             <span>{m.name}</span>
                             <span className="text-xs text-slate-400">{m.model}</span>
-                            {m.activeWorkOrder && (
-                              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
-                                {m.activeWorkOrder.woNo}
-                              </span>
-                            )}
                           </div>
                           {canManage && (
                             <button
