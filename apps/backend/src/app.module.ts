@@ -21,6 +21,7 @@ import { FinishedGoodsModule } from "./finished-goods/finished-goods.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
 import { DocumentsModule } from "./documents/documents.module";
 import { NonConformanceModule } from "./non-conformance/non-conformance.module";
+import { HierarchyModule } from "./hierarchy/hierarchy.module";
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { NonConformanceModule } from "./non-conformance/non-conformance.module";
     DashboardModule,
     DocumentsModule,
     NonConformanceModule,
+    HierarchyModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

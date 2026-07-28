@@ -65,6 +65,73 @@ enum DocumentType {
   OTHER
 }
 
+/// Fiziksel saha hiyerarşisi (ISA-95 tarzı): Plant > Area > Workplace > Unit.
+/// Normal süreçlerde (makine ataması, filtreleme) ve Digital Twin'de (saha planı)
+/// ortak kullanılır — Machine.unitId ile en alt seviyeye (Unit) bağlanır.
+model Plant {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  code      String?
+  location  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  areas Area[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Area {
+  id        String   @id @default(uuid())
+  tenantId  String
+  plantId   String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plant      Plant       @relation(fields: [plantId], references: [id], onDelete: Cascade)
+  workplaces Workplace[]
+
+  @@unique([plantId, name])
+  @@index([tenantId])
+}
+
+model Workplace {
+  id        String   @id @default(uuid())
+  tenantId  String
+  areaId    String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  area  Area   @relation(fields: [areaId], references: [id], onDelete: Cascade)
+  units Unit[]
+
+  @@unique([areaId, name])
+  @@index([tenantId])
+}
+
+model Unit {
+  id          String   @id @default(uuid())
+  tenantId    String
+  workplaceId String
+  name        String
+  /// Digital Twin kat planındaki konum (px/oransal) — hiyerarşi CRUD'unda kullanılmaz,
+  /// sadece saha planı görselleştirmesi bu alanları okur/yazar.
+  posX        Float?
+  posY        Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workplace Workplace @relation(fields: [workplaceId], references: [id], onDelete: Cascade)
+  machines  Machine[]
+
+  @@unique([workplaceId, name])
+  @@index([tenantId])
+}
+
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -221,6 +288,9 @@ model Machine {
   /// Automation Gateway — bağlantı tipi seçilince ilgili config alanları web'de dinamik gösterilir.
   connectorType     MachineConnectorType @default(MANUAL)
   connectorConfig   Json?
+  /// Saha hiyerarşisindeki yeri (Plant>Area>Workplace>Unit) — opsiyonel, henüz
+  /// yerleştirilmemiş makineler null kalabilir (geriye uyumlu).
+  unitId            String?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -228,6 +298,7 @@ model Machine {
   productionRuns  ProductionRun[]
   activeWorkOrder WorkOrder?      @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
   tags            MachineTag[]
+  unit            Unit?           @relation(fields: [unitId], references: [id])
 
   @@index([tenantId])
 }

@@ -46,20 +46,50 @@ async function main() {
     },
   });
 
+  // Saha hiyerarşisi (Plant > Area > Workplace > Unit) — Hiyerarşi sayfası ve
+  // Digital Twin'in üzerine kurulacağı varsayılan iskelet.
+  const plant = await prisma.plant.upsert({
+    where: { tenantId_name: { tenantId: DEFAULT_TENANT_ID, name: "AHK Fabrika" } },
+    update: {},
+    create: { tenantId: DEFAULT_TENANT_ID, name: "AHK Fabrika" },
+  });
+  const area = await prisma.area.upsert({
+    where: { plantId_name: { plantId: plant.id, name: "Talaşlı İmalat" } },
+    update: {},
+    create: { tenantId: DEFAULT_TENANT_ID, plantId: plant.id, name: "Talaşlı İmalat" },
+  });
+  const workplace = await prisma.workplace.upsert({
+    where: { areaId_name: { areaId: area.id, name: "CNC Hattı" } },
+    update: {},
+    create: { tenantId: DEFAULT_TENANT_ID, areaId: area.id, name: "CNC Hattı" },
+  });
+
   const machines = [
-    { name: "Tezgah 1", model: "SMEC MCV-5500", controller: "Fanuc (seri teyit edilecek)" },
-    { name: "Tezgah 2", model: "SMEC MCV-5500", controller: "Fanuc (seri teyit edilecek)" },
+    { name: "Tezgah 1", model: "SMEC 5500", controller: "Mitsubishi M80" },
+    { name: "Tezgah 2", model: "SMEC 5500", controller: "Mitsubishi M80" },
   ];
-  for (const m of machines) {
+  for (const [i, m] of machines.entries()) {
+    const unit = await prisma.unit.upsert({
+      where: { workplaceId_name: { workplaceId: workplace.id, name: m.name } },
+      update: {},
+      create: { tenantId: DEFAULT_TENANT_ID, workplaceId: workplace.id, name: m.name, posX: 80 + i * 160, posY: 80 },
+    });
     const existing = await prisma.machine.findFirst({
       where: { tenantId: DEFAULT_TENANT_ID, name: m.name },
     });
     if (!existing) {
-      await prisma.machine.create({ data: { tenantId: DEFAULT_TENANT_ID, ...m } });
+      await prisma.machine.create({ data: { tenantId: DEFAULT_TENANT_ID, unitId: unit.id, ...m } });
+    } else {
+      // Model/controller güncel bilgiyle düzeltilir; unitId sadece boşsa doldurulur
+      // (kullanıcının hiyerarşi sayfasından yaptığı manuel yer değişikliği ezilmez).
+      await prisma.machine.update({
+        where: { id: existing.id },
+        data: { model: m.model, controller: m.controller, ...(existing.unitId ? {} : { unitId: unit.id }) },
+      });
     }
   }
 
-  console.log("Seed tamam: tenant + admin + 2 tezgah");
+  console.log("Seed tamam: tenant + admin + hiyerarşi (AHK Fabrika > Talaşlı İmalat > CNC Hattı) + 2 tezgah");
 }
 
 main()

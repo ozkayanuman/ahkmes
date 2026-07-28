@@ -36,6 +36,7 @@ export class MachinesService {
     lastStatus: true,
     connectorType: true,
     connectorConfig: true,
+    unitId: true,
     createdAt: true,
     updatedAt: true,
     activeWorkOrder: { select: { id: true, woNo: true, status: true } },

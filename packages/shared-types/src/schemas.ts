@@ -113,10 +113,46 @@ export const createMachineSchema = z.object({
   isActive: z.boolean().default(true),
   connectorType: MachineConnectorTypeSchema.default("MANUAL"),
   connectorConfig: z.record(z.unknown()).optional(),
+  /// Saha hiyerarşisindeki yeri — null: yerleştirilmemiş/kaldırılmış.
+  unitId: idSchema.nullable().optional(),
 });
 export const updateMachineSchema = createMachineSchema.partial();
 export type CreateMachineDto = z.infer<typeof createMachineSchema>;
 export type UpdateMachineDto = z.infer<typeof updateMachineSchema>;
+
+// ---- Saha hiyerarşisi (Plant > Area > Workplace > Unit) ----
+export const createPlantSchema = z.object({
+  name: z.string().min(1),
+  code: z.string().optional(),
+  location: z.string().optional(),
+});
+export const updatePlantSchema = createPlantSchema.partial();
+export type CreatePlantDto = z.infer<typeof createPlantSchema>;
+export type UpdatePlantDto = z.infer<typeof updatePlantSchema>;
+
+export const createAreaSchema = z.object({ plantId: idSchema, name: z.string().min(1) });
+export const updateAreaSchema = z.object({ name: z.string().min(1) });
+export type CreateAreaDto = z.infer<typeof createAreaSchema>;
+export type UpdateAreaDto = z.infer<typeof updateAreaSchema>;
+
+export const createWorkplaceSchema = z.object({ areaId: idSchema, name: z.string().min(1) });
+export const updateWorkplaceSchema = z.object({ name: z.string().min(1) });
+export type CreateWorkplaceDto = z.infer<typeof createWorkplaceSchema>;
+export type UpdateWorkplaceDto = z.infer<typeof updateWorkplaceSchema>;
+
+export const createUnitSchema = z.object({
+  workplaceId: idSchema,
+  name: z.string().min(1),
+  posX: z.number().optional(),
+  posY: z.number().optional(),
+});
+export const updateUnitSchema = z.object({
+  name: z.string().min(1).optional(),
+  posX: z.number().nullable().optional(),
+  posY: z.number().nullable().optional(),
+});
+export type CreateUnitDto = z.infer<typeof createUnitSchema>;
+export type UpdateUnitDto = z.infer<typeof updateUnitSchema>;
 
 // ---- Quote (Faz 0b'de kullanılacak) ----
 export const quoteLineInputSchema = z.object({

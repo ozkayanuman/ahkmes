@@ -19,6 +19,7 @@ import { WorkOrderDetailPage } from "./pages/work-order-detail";
 import { PurchaseOrdersPage } from "./pages/purchase-orders";
 import { PurchaseOrderDetailPage } from "./pages/purchase-order-detail";
 import { ProductionPage } from "./pages/production";
+import { HierarchyPage } from "./pages/hierarchy";
 
 export function App() {
   return (
@@ -38,6 +39,7 @@ export function App() {
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/materials" element={<MaterialsPage />} />
         <Route path="/machines" element={<MachinesPage />} />
+        <Route path="/hierarchy" element={<HierarchyPage />} />
         <Route path="/automation-gateway" element={<AutomationGatewayPage />} />
         <Route path="/non-conformances" element={<NonConformancesPage />} />
         <Route path="/genealogy" element={<GenealogyPage />} />
