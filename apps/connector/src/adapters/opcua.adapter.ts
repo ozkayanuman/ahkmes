@@ -154,24 +154,19 @@ export class OpcuaAdapter implements MachineAdapter {
 
   /**
    * AlarmMessage ayrı bir monitored item olduğu için CycleStatus=ALARM bildirimiyle
-   * aynı publish cycle'da gelmeyebilir (node-opcua bildirim sırasını garanti etmez) —
-   * cache'lenmiş this.lastAlarmMessage'a güvenmek yerine node'u doğrudan okuyarak
-   * bu sıralama yarışını (race condition) ortadan kaldırır.
+   * aynı publish batch'te gelse bile callback'i birkaç milisaniye sonra işlenebilir
+   * (node-opcua bildirim sırasını garanti etmez). Aktif session.read() ile anlık
+   * değeri sorgulamak network round-trip'i alarm durumunun sunucuda geçerli kaldığı
+   * kısa pencereden (bkz. sim server) daha uzun sürebildiği için işe yaramadı —
+   * bunun yerine push tabanlı (round-trip'siz) subscription cache'inin
+   * (this.lastAlarmMessage) dolmasını kısa süre bekliyoruz.
    */
   private async emitAlarm() {
-    let message = this.lastAlarmMessage;
-    if (this.session) {
-      try {
-        const dv = await this.session.read({
-          nodeId: this.nodeIds.alarmMessageNodeId,
-          attributeId: AttributeIds.Value,
-        });
-        if (dv.value?.value) message = String(dv.value.value);
-      } catch {
-        // okunamazsa cache'lenmiş değere düş
-      }
+    const deadline = Date.now() + 250;
+    while (!this.lastAlarmMessage && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    this.emit("ALARM", { message: message || "Alarm" });
+    this.emit("ALARM", { message: this.lastAlarmMessage || "Alarm" });
   }
 
   private onPartCountChanged(count: number) {
