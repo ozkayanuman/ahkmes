@@ -56,6 +56,7 @@ jobs:
           done
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ahkmes/shared-types build
+      - run: pnpm --filter @ahkmes/backend exec prisma generate
       - run: pnpm --filter @ahkmes/backend prisma migrate deploy
       - run: pnpm --filter @ahkmes/backend prisma db seed
       - run: pnpm --filter @ahkmes/backend typecheck
