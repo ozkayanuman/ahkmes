@@ -10,6 +10,7 @@ interface UpdateRunInput {
   scrapCount?: number;
   downtimeNote?: string;
   notes?: string;
+  completeWorkOrder?: boolean;
 }
 
 const RUN_INCLUDE = {
@@ -106,16 +107,39 @@ export class ProductionService {
     return updated;
   }
 
-  /** Koşuyu bitirir; adetler son kez güncellenebilir. İş emri durumuna dokunmaz. */
+  /**
+   * Koşuyu bitirir; adetler son kez güncellenebilir.
+   * completeWorkOrder=false (varsayılan, "Parçalı Tamamla"): iş emri durumuna dokunmaz —
+   * IN_PRODUCTION'da kalır, operatör ekranında "duraklatılmış" olarak görünür, sonra
+   * yeni bir koşu ile devam edilebilir.
+   * completeWorkOrder=true ("Tamamla"): iş emri de COMPLETED'a çekilir, hedef adede
+   * ulaşılmamış olsa bile (makine kaynaklı otomatik tamamlamanın manuel karşılığı).
+   */
   async complete(tenantId: string, id: string, dto: UpdateRunInput) {
     const run = await this.findOne(tenantId, id);
     if (run.endedAt) throw new ConflictException("Koşu zaten tamamlanmış");
-    const updated = await this.prisma.productionRun.update({
-      where: { id },
-      data: { ...dto, endedAt: new Date() },
-      include: RUN_INCLUDE,
+    const { completeWorkOrder, ...runData } = dto;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.productionRun.update({
+        where: { id },
+        data: { ...runData, endedAt: new Date() },
+        include: RUN_INCLUDE,
+      });
+      if (completeWorkOrder) {
+        await tx.workOrder.update({ where: { id: run.workOrderId }, data: { status: "COMPLETED" } });
+        await tx.machine.updateMany({
+          where: { tenantId, activeWorkOrderId: run.workOrderId },
+          data: { activeWorkOrderId: null },
+        });
+      }
+      return result;
     });
+
     this.realtime.emitToTenant(tenantId, "productionrun.updated", { id });
+    if (completeWorkOrder) {
+      this.realtime.emitToTenant(tenantId, "workorder.updated", { id: run.workOrderId, status: "COMPLETED" });
+    }
     return updated;
   }
 

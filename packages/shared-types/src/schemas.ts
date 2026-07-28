@@ -205,6 +205,8 @@ export const updateProductionRunSchema = z.object({
   scrapCount: z.number().int().min(0).optional(),
   downtimeNote: z.string().optional(),
   notes: z.string().optional(),
+  /** Sadece POST /runs/:id/complete'de kullanılır — true ise iş emri de COMPLETED'a çekilir (operatör ekranı "Tamamla" sekmesi). */
+  completeWorkOrder: z.boolean().optional(),
 });
 export type StartProductionRunDto = z.infer<typeof startProductionRunSchema>;
 
