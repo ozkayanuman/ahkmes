@@ -55,8 +55,12 @@ export class DocumentsController {
   }
 
   @Get(":id/url")
-  getUrl(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.getSignedUrl(user.tenantId, id);
+  getUrl(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Query("mode") mode?: string,
+  ) {
+    return this.service.getSignedUrl(user.tenantId, id, mode === "preview" ? "preview" : undefined);
   }
 
   @Delete(":id")

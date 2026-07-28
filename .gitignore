@@ -11,3 +11,7 @@ Thumbs.db
 .turbo/
 .vite/
 scratch-backups/
+
+# occt-import-js wasm binary'si node_modules'tan `scripts/copy-occt-wasm.mjs`
+# ile kopyalanır (bkz. apps/web/package.json predev/prebuild) — commit edilmez.
+apps/web/public/

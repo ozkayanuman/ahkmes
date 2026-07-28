@@ -47,11 +47,14 @@ export class MinioService implements OnModuleInit {
 
   // Tarayıcıdan erişilebilir signed URL için ayrı bir public client kullanılır
   // (backend konteyner içi adres 'minio', dışarıdan erişim 'localhost' vb.)
-  // response-content-disposition: attachment + safe content-type zorlanır —
+  // Varsayılan: response-content-disposition: attachment + octet-stream zorlanır —
   // istemcinin yüklediği mimeType satır içi render edilirse (ör. text/html,
   // image/svg+xml) stored XSS'e yol açabileceğinden tarayıcı her zaman indirmeye
   // zorlanır, dosya içeriği asla doğrudan render edilmez.
-  presignedGetUrl(storageKey: string, fileName: string, expirySeconds = 3600) {
+  // inlineMimeType SADECE DocumentsService'in çağırdığı yerde zaten allowlist'te
+  // doğrulanmış (application/pdf, image/png, image/jpeg) bir mimeType ile
+  // geçilirse inline render'a izin verir — belge önizleyicisi (PDF/görsel) için.
+  presignedGetUrl(storageKey: string, fileName: string, expirySeconds = 3600, inlineMimeType?: string) {
     const publicClient = new Client({
       endPoint: this.publicEndpoint,
       port: this.publicPort,
@@ -61,9 +64,10 @@ export class MinioService implements OnModuleInit {
       region: "us-east-1",
     });
     const safeName = fileName.replace(/["\r\n]/g, "_");
+    const disposition = inlineMimeType ? "inline" : "attachment";
     return publicClient.presignedGetObject(this.bucket, storageKey, expirySeconds, {
-      "response-content-disposition": `attachment; filename="${safeName}"`,
-      "response-content-type": "application/octet-stream",
+      "response-content-disposition": `${disposition}; filename="${safeName}"`,
+      "response-content-type": inlineMimeType ?? "application/octet-stream",
     });
   }
 }

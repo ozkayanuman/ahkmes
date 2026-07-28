@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Trash2, Upload } from "lucide-react";
+import { Download, Eye, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import type { DocumentEntityType, DocumentType } from "@ahkmes/shared-types";
 import { ApiError, apiDelete, apiGet, apiUpload } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
-import { Button, Select, Table } from "./ui";
+import { Button, Modal, Select, Table } from "./ui";
+import { FilePreview } from "./file-preview";
 
 interface DocumentRow {
   id: string;
   docType: DocumentType;
   fileName: string;
+  mimeType: string;
   sizeBytes: number;
   createdAt: string;
   uploadedBy?: { name: string };
@@ -41,6 +43,7 @@ export function DocumentsPanel({
   const fileRef = useRef<HTMLInputElement>(null);
   const [docType, setDocType] = useState<DocumentType>("STEP");
   const [err, setErr] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<DocumentRow | null>(null);
 
   const queryKey = ["/documents", entityType, entityId];
   const list = useQuery({
@@ -76,6 +79,14 @@ export function DocumentsPanel({
     const res = await apiGet<{ url: string }>(`/documents/${doc.id}/url`);
     window.open(res.url, "_blank", "noopener,noreferrer");
   }
+
+  // Önizleme için "inline" gösterime izin veren ayrı bir signed URL istenir —
+  // indirme linki her zaman attachment zorlar (bkz. backend güvenlik notu).
+  const previewUrl = useQuery({
+    queryKey: ["/documents", previewDoc?.id, "url", "preview"],
+    queryFn: () => apiGet<{ url: string; fileName: string; mimeType: string }>(`/documents/${previewDoc!.id}/url?mode=preview`),
+    enabled: !!previewDoc,
+  });
 
   return (
     <div>
@@ -124,6 +135,14 @@ export function DocumentsPanel({
                 <Button
                   variant="ghost"
                   className="px-2 py-1"
+                  title="Görüntüle"
+                  onClick={() => setPreviewDoc(d)}
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="px-2 py-1"
                   title="İndir"
                   onClick={() => download(d)}
                 >
@@ -151,6 +170,22 @@ export function DocumentsPanel({
           <Upload className="h-3 w-3" /> Dosya seçerek yükleyin.
         </p>
       )}
+
+      <Modal
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        title={previewDoc?.fileName ?? ""}
+        className="max-w-3xl"
+      >
+        {previewDoc && (
+          <FilePreview
+            fileUrl={previewUrl.data?.url ?? null}
+            fileName={previewDoc.fileName}
+            mimeType={previewDoc.mimeType}
+            isLoading={previewUrl.isLoading}
+          />
+        )}
+      </Modal>
     </div>
   );
 }

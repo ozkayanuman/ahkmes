@@ -25,6 +25,12 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/octet-stream",
 ]);
 
+// Tarayıcının doğrudan (iframe/img ile) satır içi render edebileceği, XSS riski
+// taşımayan tipler — belge önizleyicisi bu tipler için inline signed URL ister.
+// STEP dosyaları tarayıcı tarafından native render edilmediği (occt-import-js
+// fetch() ile ham veriyi kendi işler) için bu listeye girmesine gerek yok.
+const INLINE_PREVIEWABLE_MIME_TYPES = new Set(["application/pdf", "image/png", "image/jpeg"]);
+
 @Injectable()
 export class DocumentsService {
   constructor(
@@ -66,9 +72,11 @@ export class DocumentsService {
     return doc;
   }
 
-  async getSignedUrl(tenantId: string, id: string) {
+  async getSignedUrl(tenantId: string, id: string, mode?: "preview") {
     const doc = await this.findOwned(tenantId, id);
-    const url = await this.minio.presignedGetUrl(doc.storageKey, doc.fileName);
+    const inlineMimeType =
+      mode === "preview" && INLINE_PREVIEWABLE_MIME_TYPES.has(doc.mimeType) ? doc.mimeType : undefined;
+    const url = await this.minio.presignedGetUrl(doc.storageKey, doc.fileName, 3600, inlineMimeType);
     return { url, fileName: doc.fileName, mimeType: doc.mimeType };
   }
 
