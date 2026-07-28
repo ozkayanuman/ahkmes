@@ -26,15 +26,34 @@ jobs:
     env:
       DATABASE_URL: postgresql://ahkmes:ahkmes-ci@localhost:5432/ahkmes?schema=public
       JWT_SECRET: ci-test-secret
+      MINIO_ENDPOINT: localhost
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MINIO_ROOT_USER: ahkmes
+      MINIO_ROOT_PASSWORD: ahkmes-ci
+      MINIO_BUCKET: ahkmes-documents
+      MINIO_PUBLIC_ENDPOINT: localhost
+      MINIO_PUBLIC_PORT: 9000
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
+      # GitHub Actions "services:" bloğu servis container'lar için özel komut
+      # desteklemez (minio/minio "server /data" argümanı gerektirir) — bu yüzden
+      # docker run ile ayrı bir adım olarak başlatılıyor, docker-compose.yml'deki
+      # minio servisiyle aynı imaj/komut.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=ahkmes -e MINIO_ROOT_PASSWORD=ahkmes-ci \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 1
+          done
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ahkmes/shared-types build
       - run: pnpm --filter @ahkmes/backend prisma migrate deploy
@@ -47,8 +66,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -62,8 +79,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 20
