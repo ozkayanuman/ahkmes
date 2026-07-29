@@ -1,11 +1,13 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateNonConformanceDto, ResolveNonConformanceDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { AppException } from "../common/app-exception";
 
 const INCLUDE = {
   workOrder: { select: { id: true, woNo: true, status: true } },
   reportedBy: { select: { id: true, name: true } },
+  resolvedBy: { select: { id: true, name: true } },
 } as const;
 
 @Injectable()
@@ -43,13 +45,25 @@ export class NonConformanceService {
     return created;
   }
 
-  async resolve(tenantId: string, id: string, dto: ResolveNonConformanceDto) {
+  async resolve(tenantId: string, resolvedById: string, id: string, dto: ResolveNonConformanceDto) {
     const nc = await this.prisma.nonConformance.findFirst({ where: { id, tenantId } });
     if (!nc) throw new NotFoundException("Uygunsuzluk kaydı bulunamadı");
+    if (dto.status === "RESOLVED" && !dto.resolutionNote?.trim()) {
+      throw new AppException(
+        HttpStatus.BAD_REQUEST,
+        "RESOLUTION_NOTE_REQUIRED",
+        "Kaydı kapatmak için çözüm açıklaması (ne yapıldığı) girilmeli",
+      );
+    }
 
     const updated = await this.prisma.nonConformance.update({
       where: { id },
-      data: { status: dto.status, resolvedAt: dto.status === "RESOLVED" ? new Date() : null },
+      data: {
+        status: dto.status,
+        resolvedAt: dto.status === "RESOLVED" ? new Date() : null,
+        resolutionNote: dto.status === "RESOLVED" ? dto.resolutionNote : null,
+        resolvedById: dto.status === "RESOLVED" ? resolvedById : null,
+      },
       include: INCLUDE,
     });
     this.realtime.emitToTenant(tenantId, "nonconformance.updated", { id, workOrderId: nc.workOrderId });

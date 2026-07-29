@@ -7,6 +7,8 @@ import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { Button, Modal, Select, Table } from "./ui";
 import { FilePreview } from "./file-preview";
+import { useConfirm } from "./confirm-dialog";
+import { useToast } from "./toast";
 
 interface DocumentRow {
   id: string;
@@ -40,6 +42,8 @@ export function DocumentsPanel({
   const { user } = useAuth();
   const canWrite = !!user && ["ADMIN", "PLANNER", "FOREMAN"].includes(user.role);
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const fileRef = useRef<HTMLInputElement>(null);
   const [docType, setDocType] = useState<DocumentType>("STEP");
   const [err, setErr] = useState<string | null>(null);
@@ -72,7 +76,7 @@ export function DocumentsPanel({
   const remove = useMutation({
     mutationFn: (id: string) => apiDelete(`/documents/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey }),
-    onError: () => alert("Silinemedi"),
+    onError: () => toast("Silinemedi", "error"),
   });
 
   async function download(doc: DocumentRow) {
@@ -153,8 +157,8 @@ export function DocumentsPanel({
                     variant="ghost"
                     className="px-2 py-1 text-red-600"
                     title="Sil"
-                    onClick={() => {
-                      if (confirm("Doküman silinsin mi?")) remove.mutate(d.id);
+                    onClick={async () => {
+                      if (await confirm({ message: "Doküman silinsin mi?", danger: true })) remove.mutate(d.id);
                     }}
                   >
                     <Trash2 className="h-4 w-4" />

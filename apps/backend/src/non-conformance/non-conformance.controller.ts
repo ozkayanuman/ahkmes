@@ -45,6 +45,6 @@ export class NonConformanceController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(resolveNonConformanceSchema)) dto: ResolveNonConformanceDto,
   ) {
-    return this.service.resolve(user.tenantId, id, dto);
+    return this.service.resolve(user.tenantId, user.userId, id, dto);
   }
 }

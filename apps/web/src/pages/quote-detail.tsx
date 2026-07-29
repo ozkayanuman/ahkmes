@@ -8,6 +8,8 @@ import { fmtDate, fmtMoney, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { QUOTE_STATUS, StatusBadge } from "../components/status";
 import { Button, Card, Input, Label, Modal, Select, Table } from "../components/ui";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 import { quoteTotal } from "./quotes";
 
 interface PartOption {
@@ -68,12 +70,14 @@ export function QuoteDetailPage() {
     enabled: lineModal !== null,
   });
 
+  const toast = useToast();
+  const confirm = useConfirm();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["/quotes"] });
   const onError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 409) {
       const msg = (e.body as { message?: string } | null)?.message;
-      alert(msg ?? "İşlem çakışması (409)");
-    } else alert("İşlem başarısız.");
+      toast(msg ?? "İşlem çakışması (409)", "error");
+    } else toast("İşlem başarısız.", "error");
   };
 
   const setStatus = useMutation({
@@ -122,7 +126,10 @@ export function QuoteDetailPage() {
       invalidate();
       qc.invalidateQueries({ queryKey: ["/work-orders"] });
       setConvertOpen(false);
-      alert(`${res.workOrders.length} iş emri oluşturuldu: ${res.workOrders.map((w) => w.woNo).join(", ")}`);
+      toast(
+        `${res.workOrders.length} iş emri oluşturuldu: ${res.workOrders.map((w) => w.woNo).join(", ")}`,
+        "success",
+      );
     },
     onError,
   });
@@ -171,8 +178,8 @@ export function QuoteDetailPage() {
               {user?.role === "ADMIN" && (
                 <Button
                   variant="danger"
-                  onClick={() => {
-                    if (confirm("Taslak teklifi silmek istediğinize emin misiniz?"))
+                  onClick={async () => {
+                    if (await confirm({ message: "Taslak teklifi silmek istediğinize emin misiniz?", danger: true }))
                       removeQuote.mutate();
                   }}
                 >
@@ -280,8 +287,9 @@ export function QuoteDetailPage() {
                   <Button
                     variant="ghost"
                     className="px-2 py-1 text-red-600"
-                    onClick={() => {
-                      if (confirm("Satırı silmek istediğinize emin misiniz?")) removeLine.mutate(l.id);
+                    onClick={async () => {
+                      if (await confirm({ message: "Satırı silmek istediğinize emin misiniz?", danger: true }))
+                        removeLine.mutate(l.id);
                     }}
                   >
                     <Trash2 className="h-4 w-4" />

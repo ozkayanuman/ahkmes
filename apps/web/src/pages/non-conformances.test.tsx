@@ -25,6 +25,7 @@ vi.mock("../lib/auth", () => ({
 }));
 
 import { NonConformancesPage } from "./non-conformances";
+import { ToastProvider } from "../components/toast";
 
 const NC_ROW = {
   id: "nc-1",
@@ -40,7 +41,9 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <NonConformancesPage />
+      <ToastProvider>
+        <NonConformancesPage />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }
@@ -83,14 +86,23 @@ describe("NonConformancesPage", () => {
     );
   });
 
-  it("Kapat butonu resolve isteği gönderir", async () => {
+  it("Kapat butonu detaylı çözüm notu ister, boşken kapatılamaz", async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("WO-2026-0001");
 
     await user.click(screen.getByTitle("Kapat"));
+    expect(screen.getByText("WO-2026-0001 — Kaydı Kapat")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Kaydı Kapat/ })).toBeDisabled();
+
+    await user.type(screen.getByLabelText("Çözüm Açıklaması (zorunlu)"), "8 adet hurdaya ayrıldı");
+    await user.click(screen.getByRole("button", { name: /Kaydı Kapat/ }));
+
     await waitFor(() =>
-      expect(apiPatch).toHaveBeenCalledWith("/non-conformances/nc-1/resolve", { status: "RESOLVED" }),
+      expect(apiPatch).toHaveBeenCalledWith("/non-conformances/nc-1/resolve", {
+        status: "RESOLVED",
+        resolutionNote: "8 adet hurdaya ayrıldı",
+      }),
     );
   });
 });

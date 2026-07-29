@@ -18,6 +18,8 @@ import { fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { Button, Card, Input, Label, Modal, Select } from "../components/ui";
 import { DocumentsPanel } from "../components/documents-panel";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 
 interface RunRow {
   id: string;
@@ -50,12 +52,6 @@ interface MachineOption {
   name: string;
   isActive: boolean;
 }
-
-const onError = (e: unknown) => {
-  if (e instanceof ApiError && e.status === 409) {
-    alert((e.body as { message?: string } | null)?.message ?? "İşlem çakışması (409)");
-  } else alert("İşlem başarısız.");
-};
 
 type CardStatus = "not_started" | "running" | "paused" | "completed";
 
@@ -277,6 +273,13 @@ function OperationDetail({
   onBack: () => void;
   onChanged: () => void;
 }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const onError = (e: unknown) => {
+    if (e instanceof ApiError && e.status === 409) {
+      toast((e.body as { message?: string } | null)?.message ?? "İşlem çakışması (409)", "error");
+    } else toast("İşlem başarısız.", "error");
+  };
   const [machineId, setMachineId] = useState("");
   const [showDocs, setShowDocs] = useState(false);
   const style = STATUS_STYLE[status];
@@ -365,8 +368,8 @@ function OperationDetail({
                 <Button
                   className="h-14 px-8 text-base"
                   disabled={completeWo.isPending}
-                  onClick={() => {
-                    if (confirm("İş emri tamamlansın mı?")) completeWo.mutate();
+                  onClick={async () => {
+                    if (await confirm("İş emri tamamlansın mı?")) completeWo.mutate();
                   }}
                 >
                   <CheckCircle2 className="h-5 w-5" /> Tamamla
@@ -406,6 +409,13 @@ function RunningPanel({
   canRun: boolean;
   onChanged: () => void;
 }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const onError = (e: unknown) => {
+    if (e instanceof ApiError && e.status === 409) {
+      toast((e.body as { message?: string } | null)?.message ?? "İşlem çakışması (409)", "error");
+    } else toast("İşlem başarısız.", "error");
+  };
   const [good, setGood] = useState(String(run.goodCount));
   const [scrap, setScrap] = useState(String(run.scrapCount));
   const [note, setNote] = useState(run.downtimeNote ?? "");
@@ -519,8 +529,8 @@ function RunningPanel({
               variant="outline"
               className="h-14 flex-1 text-base"
               disabled={complete.isPending}
-              onClick={() => {
-                if (confirm("Operasyon duraklatılsın mı? Girilen adetler kaydedilecek.")) complete.mutate(false);
+              onClick={async () => {
+                if (await confirm("Operasyon duraklatılsın mı? Girilen adetler kaydedilecek.")) complete.mutate(false);
               }}
             >
               <Pause className="h-5 w-5" /> Duraklat
@@ -529,8 +539,8 @@ function RunningPanel({
               variant="outline"
               className="h-14 flex-1 text-base"
               disabled={complete.isPending}
-              onClick={() => {
-                if (confirm("Bu koşu sonlandırılsın mı? İş emri devam eder (parçalı tamamlama)."))
+              onClick={async () => {
+                if (await confirm("Bu koşu sonlandırılsın mı? İş emri devam eder (parçalı tamamlama)."))
                   complete.mutate(false);
               }}
             >
@@ -540,8 +550,8 @@ function RunningPanel({
           <Button
             className="h-14 w-full text-base"
             disabled={complete.isPending}
-            onClick={() => {
-              if (confirm("İş emri tamamen tamamlansın mı?")) complete.mutate(true);
+            onClick={async () => {
+              if (await confirm("İş emri tamamen tamamlansın mı?")) complete.mutate(true);
             }}
           >
             <CheckCircle2 className="h-5 w-5" /> Tamamla

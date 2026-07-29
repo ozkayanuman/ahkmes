@@ -5,6 +5,8 @@ import type { Role } from "@ahkmes/shared-types";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Button, Input, Label, Modal, Select, Table } from "./ui";
+import { useConfirm } from "./confirm-dialog";
+import { useToast } from "./toast";
 
 export interface Column<T> {
   key: string;
@@ -68,6 +70,8 @@ export function CrudPage<T extends { id: string }>({
   const { user } = useAuth();
   const canWrite = !!user && writeRoles.includes(user.role);
   const canDelete = !!user && deleteRoles.includes(user.role);
+  const toast = useToast();
+  const confirm = useConfirm();
   const [q, setQ] = useState("");
   const [modal, setModal] = useState<{ mode: "create" } | { mode: "edit"; row: T } | null>(null);
   const [form, setForm] = useState<FormState>({});
@@ -101,8 +105,8 @@ export function CrudPage<T extends { id: string }>({
     onSuccess: () => qc.invalidateQueries({ queryKey: [endpoint] }),
     onError: (e) => {
       if (e instanceof ApiError && e.status === 409)
-        alert("Bu kayda bağlı başka kayıtlar var, silinemez.");
-      else alert("Silinemedi.");
+        toast("Bu kayda bağlı başka kayıtlar var, silinemez.", "error");
+      else toast("Silinemedi.", "error");
     },
   });
 
@@ -178,8 +182,9 @@ export function CrudPage<T extends { id: string }>({
                         variant="ghost"
                         className="px-2 py-1 text-red-600"
                         title="Sil"
-                        onClick={() => {
-                          if (confirm("Bu kaydı silmek istediğinize emin misiniz?")) remove.mutate(row.id);
+                        onClick={async () => {
+                          if (await confirm({ message: "Bu kaydı silmek istediğinize emin misiniz?", danger: true }))
+                            remove.mutate(row.id);
                         }}
                       >
                         <Trash2 className="h-4 w-4" />

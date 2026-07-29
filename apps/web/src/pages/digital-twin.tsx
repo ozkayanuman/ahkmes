@@ -5,6 +5,7 @@ import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useInvalidateOn } from "../lib/socket";
 import { Button, Card } from "../components/ui";
+import { useToast } from "../components/toast";
 
 interface TwinMachine {
   id: string;
@@ -28,11 +29,6 @@ interface Layout {
   connections: TwinConnection[];
 }
 
-const onError = (e: unknown) => {
-  const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
-  alert(msg ?? "İşlem başarısız.");
-};
-
 function statusColor(m: TwinMachine) {
   if (!m.isActive) return { bg: "bg-slate-100", border: "border-slate-400", dot: "bg-slate-400" };
   if (m.lastStatus === "ALARM") return { bg: "bg-red-50", border: "border-red-500", dot: "bg-red-500" };
@@ -52,7 +48,13 @@ export function DigitalTwinPage() {
   const { user } = useAuth();
   const canEdit = !!user && ["ADMIN", "PLANNER", "FOREMAN"].includes(user.role);
   const qc = useQueryClient();
+  const toast = useToast();
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  const onError = (e: unknown) => {
+    const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+    toast(msg ?? "İşlem başarısız.", "error");
+  };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [connectMode, setConnectMode] = useState(false);

@@ -9,6 +9,8 @@ import { useInvalidateOn } from "../lib/socket";
 import { DocumentsPanel } from "../components/documents-panel";
 import { StatusBadge, WO_STATUS } from "../components/status";
 import { Button, Card, Input, Label, Modal, Select, Table } from "../components/ui";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 import type { WorkOrderRow } from "./work-orders";
 
 interface MachineOption {
@@ -114,12 +116,14 @@ export function WorkOrderDetailPage() {
     enabled: canConsume,
   });
 
+  const toast = useToast();
+  const confirm = useConfirm();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["/work-orders"] });
   const onError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 409) {
       const msg = (e.body as { message?: string } | null)?.message;
-      alert(msg ?? "İşlem çakışması (409)");
-    } else alert("İşlem başarısız.");
+      toast(msg ?? "İşlem çakışması (409)", "error");
+    } else toast("İşlem başarısız.", "error");
   };
 
   const setStatus = useMutation({
@@ -187,14 +191,12 @@ export function WorkOrderDetailPage() {
         workOrderId: id,
         quantity: Number(fgQty),
       }),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
       invalidateOps();
       setFgQty("");
       if (
         res.completionSuggested &&
-        confirm(
-          `Toplam üretilen (${res.totalProduced}) iş emri miktarına ulaştı. İş emri tamamlansın mı?`,
-        )
+        (await confirm(`Toplam üretilen (${res.totalProduced}) iş emri miktarına ulaştı. İş emri tamamlansın mı?`))
       ) {
         setStatus.mutate("COMPLETED");
       }
@@ -237,8 +239,8 @@ export function WorkOrderDetailPage() {
                 key={t.status}
                 variant={t.danger ? "danger" : "primary"}
                 disabled={setStatus.isPending}
-                onClick={() => {
-                  if (!t.danger || confirm(`${wo.woNo} iptal edilsin mi?`))
+                onClick={async () => {
+                  if (!t.danger || (await confirm({ message: `${wo.woNo} iptal edilsin mi?`, danger: true })))
                     setStatus.mutate(t.status);
                 }}
               >
@@ -253,8 +255,9 @@ export function WorkOrderDetailPage() {
           {user?.role === "ADMIN" && (wo.status === "PLANNED" || wo.status === "CANCELLED") && (
             <Button
               variant="danger"
-              onClick={() => {
-                if (confirm("İş emrini silmek istediğinize emin misiniz?")) remove.mutate();
+              onClick={async () => {
+                if (await confirm({ message: "İş emrini silmek istediğinize emin misiniz?", danger: true }))
+                  remove.mutate();
               }}
             >
               <Trash2 className="h-4 w-4" /> Sil
@@ -414,8 +417,10 @@ export function WorkOrderDetailPage() {
                       variant="ghost"
                       className="px-2 py-1 text-red-600"
                       title="Sil (tüketim geri alınır)"
-                      onClick={() => {
-                        if (confirm("Kayıt silinsin mi? Tüketimse stok iade edilir."))
+                      onClick={async () => {
+                        if (
+                          await confirm({ message: "Kayıt silinsin mi? Tüketimse stok iade edilir.", danger: true })
+                        )
                           removeConsumption.mutate(c.id);
                       }}
                     >

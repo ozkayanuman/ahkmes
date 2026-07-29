@@ -17,6 +17,7 @@ vi.mock("../lib/api", async () => {
 vi.mock("../lib/socket", () => ({ useInvalidateOn: () => undefined }));
 
 import { SchedulingPage } from "./scheduling";
+import { ToastProvider } from "../components/toast";
 
 const WO_ROW = {
   id: "wo-1",
@@ -33,7 +34,9 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <SchedulingPage />
+      <ToastProvider>
+        <SchedulingPage />
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

@@ -315,5 +315,8 @@ export type CreateNonConformanceDto = z.infer<typeof createNonConformanceSchema>
 
 export const resolveNonConformanceSchema = z.object({
   status: NonConformanceStatusSchema,
+  /// Sadece status=RESOLVED iken zorunlu — kapatma tek tıkla değil, ne yapıldığının
+  /// (hurda/yeniden işlem/kabul vb.) yazılı gerekçesiyle olmalı.
+  resolutionNote: z.string().min(1).optional(),
 });
 export type ResolveNonConformanceDto = z.infer<typeof resolveNonConformanceSchema>;

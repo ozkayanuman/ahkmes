@@ -8,6 +8,8 @@ import { fmtDate, fmtMoney, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { PO_STATUS, StatusBadge } from "../components/status";
 import { Button, Card, Input, Table } from "../components/ui";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 import type { PoRow } from "./purchase-orders";
 
 export function PurchaseOrderDetailPage() {
@@ -28,6 +30,8 @@ export function PurchaseOrderDetailPage() {
     queryFn: () => apiGet<PoRow>(`/purchase-orders/${id}`),
   });
 
+  const toast = useToast();
+  const confirm = useConfirm();
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["/purchase-orders"] });
     qc.invalidateQueries({ queryKey: ["/materials"] });
@@ -35,8 +39,8 @@ export function PurchaseOrderDetailPage() {
   const onError = (e: unknown) => {
     if (e instanceof ApiError && e.status === 409) {
       const msg = (e.body as { message?: string } | null)?.message;
-      alert(msg ?? "İşlem çakışması (409)");
-    } else alert("İşlem başarısız.");
+      toast(msg ?? "İşlem çakışması (409)", "error");
+    } else toast("İşlem başarısız.", "error");
   };
 
   const setStatus = useMutation({
@@ -92,8 +96,8 @@ export function PurchaseOrderDetailPage() {
           {canPlan && receivable && (
             <Button
               variant="danger"
-              onClick={() => {
-                if (confirm("Siparişi iptal etmek istediğinize emin misiniz?"))
+              onClick={async () => {
+                if (await confirm({ message: "Siparişi iptal etmek istediğinize emin misiniz?", danger: true }))
                   setStatus.mutate("CANCELLED");
               }}
             >
@@ -103,8 +107,9 @@ export function PurchaseOrderDetailPage() {
           {user?.role === "ADMIN" && po.status !== "RECEIVED" && (
             <Button
               variant="danger"
-              onClick={() => {
-                if (confirm("Siparişi silmek istediğinize emin misiniz?")) remove.mutate();
+              onClick={async () => {
+                if (await confirm({ message: "Siparişi silmek istediğinize emin misiniz?", danger: true }))
+                  remove.mutate();
               }}
             >
               <Trash2 className="h-4 w-4" /> Sil

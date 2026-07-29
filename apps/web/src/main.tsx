@@ -4,6 +4,8 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
+import { ConfirmProvider } from "./components/confirm-dialog";
+import { ToastProvider } from "./components/toast";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -14,9 +16,13 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <ToastProvider>
+          <ConfirmProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ConfirmProvider>
+        </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>
   </React.StrictMode>,

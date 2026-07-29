@@ -4,6 +4,8 @@ import { useState, type ReactNode } from "react";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { Button, Card, Input, Label, Modal, Select } from "../components/ui";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 
 interface MachineNode {
   id: string;
@@ -39,11 +41,6 @@ interface MachineRow {
   unitId?: string | null;
 }
 
-const onError = (e: unknown) => {
-  const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
-  alert(msg ?? "İşlem başarısız.");
-};
-
 type Level = "plant" | "area" | "workplace" | "unit";
 
 /** Saha hiyerarşisi: Plant > Area > Workplace > Unit > Machine (ISA-95 tarzı).
@@ -53,6 +50,13 @@ export function HierarchyPage() {
   const canManage = !!user && ["ADMIN", "PLANNER"].includes(user.role);
   const canDelete = !!user && user.role === "ADMIN";
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const onError = (e: unknown) => {
+    const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+    toast(msg ?? "İşlem başarısız.", "error");
+  };
 
   const tree = useQuery({ queryKey: ["/hierarchy/tree"], queryFn: () => apiGet<PlantNode[]>("/hierarchy/tree") });
   const machines = useQuery({ queryKey: ["/machines"], queryFn: () => apiGet<MachineRow[]>("/machines") });
@@ -197,22 +201,33 @@ export function HierarchyPage() {
                 editing: { id: p.id, name: p.name, code: p.code ?? "", location: p.location ?? "" },
               })
             }
-            onDeletePlant={(id) => {
-              if (confirm("Bu tesis (ve altındaki her şey) silinsin mi?")) removePlant.mutate(id);
+            onDeletePlant={async (id) => {
+              if (await confirm({ message: "Bu tesis (ve altındaki her şey) silinsin mi?", danger: true }))
+                removePlant.mutate(id);
             }}
             onAddWorkplace={(areaId) => setFormState({ level: "workplace", parentId: areaId })}
             onEditArea={(a) => setFormState({ level: "area", editing: { id: a.id, name: a.name } })}
-            onDeleteArea={(id) => {
-              if (confirm("Bu alan (ve altındaki her şey) silinsin mi?")) removeArea.mutate(id);
+            onDeleteArea={async (id) => {
+              if (await confirm({ message: "Bu alan (ve altındaki her şey) silinsin mi?", danger: true }))
+                removeArea.mutate(id);
             }}
             onAddUnit={(workplaceId) => setFormState({ level: "unit", parentId: workplaceId })}
             onEditWorkplace={(w) => setFormState({ level: "workplace", editing: { id: w.id, name: w.name } })}
-            onDeleteWorkplace={(id) => {
-              if (confirm("Bu çalışma alanı (ve altındaki her şey) silinsin mi?")) removeWorkplace.mutate(id);
+            onDeleteWorkplace={async (id) => {
+              if (
+                await confirm({ message: "Bu çalışma alanı (ve altındaki her şey) silinsin mi?", danger: true })
+              )
+                removeWorkplace.mutate(id);
             }}
             onEditUnit={(u) => setFormState({ level: "unit", editing: { id: u.id, name: u.name } })}
-            onDeleteUnit={(id) => {
-              if (confirm("Bu birim silinsin mi? İçindeki makineler yerleşimsiz kalır.")) removeUnit.mutate(id);
+            onDeleteUnit={async (id) => {
+              if (
+                await confirm({
+                  message: "Bu birim silinsin mi? İçindeki makineler yerleşimsiz kalır.",
+                  danger: true,
+                })
+              )
+                removeUnit.mutate(id);
             }}
             onUnassignMachine={(machineId) => assignMachine.mutate({ machineId, unitId: null })}
           />

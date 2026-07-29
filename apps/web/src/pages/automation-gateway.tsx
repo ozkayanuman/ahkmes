@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button, Card, Input, Label, Modal, Select, Table } from "../components/ui";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
@@ -25,6 +27,7 @@ const CONNECTOR_LABEL: Record<ConnectorType, string> = {
 /** Bağlantı tipine göre dinamik config formu — panel seçilince ilgili alanlar gösterilir. */
 function ConnectionSettingsCard({ machine }: { machine: MachineOption }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [connectorType, setConnectorType] = useState<ConnectorType>(machine.connectorType);
   const [config, setConfig] = useState<Record<string, string>>(
     (machine.connectorConfig as Record<string, string>) ?? {},
@@ -38,7 +41,7 @@ function ConnectionSettingsCard({ machine }: { machine: MachineOption }) {
   const save = useMutation({
     mutationFn: () => apiPatch(`/machines/${machine.id}`, { connectorType, connectorConfig: config }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/machines"] }),
-    onError: () => alert("Bağlantı ayarları kaydedilemedi"),
+    onError: () => toast("Bağlantı ayarları kaydedilemedi", "error"),
   });
 
   return (
@@ -134,6 +137,7 @@ function TagFormModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const queryKey = `/machines/${machineId}/tags`;
   const [form, setForm] = useState<TagFormState>(
     tag ? { name: tag.name, address: tag.address, dataType: tag.dataType } : EMPTY_FORM,
@@ -153,7 +157,7 @@ function TagFormModal({
         err instanceof ApiError && err.body && typeof err.body === "object" && "message" in err.body
           ? String((err.body as { message: unknown }).message)
           : "Kaydedilemedi";
-      alert(message);
+      toast(message, "error");
     },
   });
 
@@ -207,6 +211,8 @@ export function AutomationGatewayPage() {
   const { user } = useAuth();
   const canManage = !!user && user.role === "ADMIN";
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [machineId, setMachineId] = useState<string>("");
   const [formTag, setFormTag] = useState<TagRow | "new" | null>(null);
 
@@ -227,7 +233,7 @@ export function AutomationGatewayPage() {
   const removeTag = useMutation({
     mutationFn: (tagId: string) => apiDelete(`/machines/${machineId}/tags/${tagId}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: [tagsQueryKey] }),
-    onError: () => alert("Silinemedi"),
+    onError: () => toast("Silinemedi", "error"),
   });
 
   return (
@@ -279,8 +285,9 @@ export function AutomationGatewayPage() {
                     <Button
                       variant="ghost"
                       className="px-2 py-1"
-                      onClick={() => {
-                        if (confirm(`"${t.name}" tag'i silinsin mi?`)) removeTag.mutate(t.id);
+                      onClick={async () => {
+                        if (await confirm({ message: `"${t.name}" tag'i silinsin mi?`, danger: true }))
+                          removeTag.mutate(t.id);
                       }}
                     >
                       <Trash2 className="h-4 w-4" />

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Plus } from "lucide-react";
 import { useState } from "react";
-import { Button, Input, Label, Modal, Select, Table } from "../components/ui";
-import { apiGet, apiPatch, apiPost } from "../lib/api";
+import { Button, Input, Label, Modal, Select, Table, Textarea } from "../components/ui";
+import { useToast } from "../components/toast";
+import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
@@ -23,6 +24,8 @@ interface NcRow {
   status: "OPEN" | "RESOLVED";
   createdAt: string;
   resolvedAt?: string | null;
+  resolvedBy?: { id: string; name: string } | null;
+  resolutionNote?: string | null;
 }
 
 interface NcFormState {
@@ -41,6 +44,7 @@ const ACTION_LABEL: Record<NcRow["actionType"], string> = {
 
 function NewNcModal({ workOrders, onClose }: { workOrders: WorkOrderOption[]; onClose: () => void }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [form, setForm] = useState<NcFormState>({
     workOrderId: "",
     failureType: "",
@@ -54,7 +58,7 @@ function NewNcModal({ workOrders, onClose }: { workOrders: WorkOrderOption[]; on
       qc.invalidateQueries({ queryKey: ["/non-conformances"] });
       onClose();
     },
-    onError: () => alert("Kaydedilemedi"),
+    onError: () => toast("Kaydedilemedi", "error"),
   });
 
   return (
@@ -122,11 +126,104 @@ function NewNcModal({ workOrders, onClose }: { workOrders: WorkOrderOption[]; on
   );
 }
 
+/** Kaydı kapatmak tek tıkla olmaz — ne yapıldığının (hurda/yeniden işlem/kabul vb.)
+ * yazılı gerekçesi zorunludur (bkz. backend RESOLUTION_NOTE_REQUIRED). */
+function ResolveNcModal({
+  nc,
+  onClose,
+  onResolved,
+}: {
+  nc: NcRow;
+  onClose: () => void;
+  onResolved: () => void;
+}) {
+  const toast = useToast();
+  const [note, setNote] = useState("");
+
+  const resolve = useMutation({
+    mutationFn: () => apiPatch(`/non-conformances/${nc.id}/resolve`, { status: "RESOLVED", resolutionNote: note }),
+    onSuccess: () => {
+      onResolved();
+      onClose();
+    },
+    onError: (e) => {
+      const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+      toast(msg ?? "Kapatılamadı", "error");
+    },
+  });
+
+  return (
+    <Modal open title={`${nc.workOrder.woNo} — Kaydı Kapat`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="rounded-md bg-slate-50 p-3 text-sm">
+          <div className="font-medium text-slate-700">{nc.failureType}</div>
+          {nc.description && <div className="mt-1 text-slate-500">{nc.description}</div>}
+          <div className="mt-1 text-xs text-slate-400">Aksiyon Tipi: {ACTION_LABEL[nc.actionType]}</div>
+        </div>
+        <div>
+          <Label htmlFor="resolutionNote">Çözüm Açıklaması (zorunlu)</Label>
+          <Textarea
+            id="resolutionNote"
+            rows={4}
+            placeholder="Ne yapıldı? Örn: 8 adet hurdaya ayrıldı, kalan 12 adet yeniden işlenip kabul edildi."
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Vazgeç
+          </Button>
+          <Button disabled={!note.trim() || resolve.isPending} onClick={() => resolve.mutate()}>
+            <CheckCircle2 className="h-4 w-4" /> Kaydı Kapat
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function NcDetailModal({ nc, onClose }: { nc: NcRow; onClose: () => void }) {
+  return (
+    <Modal open title={`${nc.workOrder.woNo} — Kayıt Detayı`} onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <div>
+          <div className="text-xs uppercase text-slate-400">Hata Tipi</div>
+          <div className="font-medium text-slate-700">{nc.failureType}</div>
+        </div>
+        {nc.description && (
+          <div>
+            <div className="text-xs uppercase text-slate-400">Açıklama</div>
+            <div className="text-slate-600">{nc.description}</div>
+          </div>
+        )}
+        <div>
+          <div className="text-xs uppercase text-slate-400">Bildiren</div>
+          <div className="text-slate-600">
+            {nc.reportedBy.name} · {fmtDate(nc.createdAt)}
+          </div>
+        </div>
+        {nc.status === "RESOLVED" && (
+          <div className="rounded-md bg-green-50 p-3">
+            <div className="text-xs uppercase text-green-700">Çözüm Açıklaması</div>
+            <div className="mt-1 text-slate-700">{nc.resolutionNote}</div>
+            <div className="mt-2 text-xs text-slate-500">
+              {nc.resolvedBy?.name ?? "—"} · {nc.resolvedAt ? fmtDate(nc.resolvedAt) : "—"}
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 export function NonConformancesPage() {
   const { user } = useAuth();
   const canManage = !!user && ["ADMIN", "PLANNER", "FOREMAN", "OPERATOR"].includes(user.role);
   const qc = useQueryClient();
   const [showNew, setShowNew] = useState(false);
+  const [resolvingNc, setResolvingNc] = useState<NcRow | null>(null);
+  const [viewingNc, setViewingNc] = useState<NcRow | null>(null);
 
   useInvalidateOn(["nonconformance.updated"], ["/non-conformances"]);
 
@@ -140,11 +237,7 @@ export function NonConformancesPage() {
     queryFn: () => apiGet<NcRow[]>("/non-conformances"),
   });
 
-  const resolve = useMutation({
-    mutationFn: (id: string) => apiPatch(`/non-conformances/${id}/resolve`, { status: "RESOLVED" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/non-conformances"] }),
-    onError: () => alert("Kapatılamadı"),
-  });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["/non-conformances"] });
 
   const openCount = (ncs.data ?? []).filter((nc) => nc.status === "OPEN").length;
 
@@ -182,16 +275,21 @@ export function NonConformancesPage() {
             <td className="px-4 py-3 text-xs text-slate-500">{nc.reportedBy.name}</td>
             <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(nc.createdAt)}</td>
             <td className="px-4 py-3">
-              {canManage && nc.status === "OPEN" && (
-                <Button
-                  variant="ghost"
-                  className="px-2 py-1"
-                  title="Kapat"
-                  onClick={() => resolve.mutate(nc.id)}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
+              <div className="flex gap-1">
+                <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setViewingNc(nc)}>
+                  Detay
                 </Button>
-              )}
+                {canManage && nc.status === "OPEN" && (
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1"
+                    title="Kapat"
+                    onClick={() => setResolvingNc(nc)}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </td>
           </tr>
         ))}
@@ -205,6 +303,10 @@ export function NonConformancesPage() {
       </Table>
 
       {showNew && <NewNcModal workOrders={workOrders.data ?? []} onClose={() => setShowNew(false)} />}
+      {resolvingNc && (
+        <ResolveNcModal nc={resolvingNc} onClose={() => setResolvingNc(null)} onResolved={invalidate} />
+      )}
+      {viewingNc && <NcDetailModal nc={viewingNc} onClose={() => setViewingNc(null)} />}
     </div>
   );
 }

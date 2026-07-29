@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { Button, Card, Input, Label, Modal } from "../components/ui";
+import { useToast } from "../components/toast";
 import { apiGet, apiPatch } from "../lib/api";
 import { useInvalidateOn } from "../lib/socket";
 
@@ -30,6 +31,7 @@ function daysBetween(a: Date, b: Date) {
 
 function ScheduleModal({ wo, onClose }: { wo: WorkOrderRow; onClose: () => void }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [start, setStart] = useState(wo.plannedStartDate?.slice(0, 10) ?? "");
   const [end, setEnd] = useState(wo.plannedEndDate?.slice(0, 10) ?? wo.dueDate.slice(0, 10));
 
@@ -43,7 +45,7 @@ function ScheduleModal({ wo, onClose }: { wo: WorkOrderRow; onClose: () => void 
       qc.invalidateQueries({ queryKey: ["/work-orders"] });
       onClose();
     },
-    onError: () => alert("Çizelge kaydedilemedi"),
+    onError: () => toast("Çizelge kaydedilemedi", "error"),
   });
 
   return (

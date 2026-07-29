@@ -148,15 +148,16 @@ model User {
 
   refreshTokenHash String?
 
-  ncPrograms      NcProgram[]
-  quotes          Quote[]
-  purchaseOrders  PurchaseOrder[]
-  consumptions    MaterialConsumption[]
-  productionRuns  ProductionRun[]
-  finishedEntries FinishedGoodsEntry[]
-  auditLogs       AuditLog[]
-  documents       Document[]
-  nonConformances NonConformance[]
+  ncPrograms              NcProgram[]
+  quotes                  Quote[]
+  purchaseOrders          PurchaseOrder[]
+  consumptions            MaterialConsumption[]
+  productionRuns          ProductionRun[]
+  finishedEntries         FinishedGoodsEntry[]
+  auditLogs               AuditLog[]
+  documents               Document[]
+  reportedNonConformances NonConformance[]      @relation("ReportedNonConformances")
+  resolvedNonConformances NonConformance[]      @relation("ResolvedNonConformances")
 
   @@index([tenantId])
 }
@@ -418,13 +419,18 @@ model NonConformance {
   description     String?
   actionType      NonConformanceActionType @default(GENERIC)
   status          NonConformanceStatus     @default(OPEN)
+  /// Kapatılırken girilen zorunlu çözüm açıklaması (ör. "12 adet hurdaya ayrıldı,
+  /// kalan parçalar yeniden işlendi") — kalite kaydının neden/nasıl kapatıldığını izler.
+  resolutionNote  String?
+  resolvedById    String?
   resolvedAt      DateTime?
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
 
   workOrder     WorkOrder      @relation(fields: [workOrderId], references: [id])
   productionRun ProductionRun? @relation(fields: [productionRunId], references: [id])
-  reportedBy    User           @relation(fields: [reportedById], references: [id])
+  reportedBy    User           @relation("ReportedNonConformances", fields: [reportedById], references: [id])
+  resolvedBy    User?          @relation("ResolvedNonConformances", fields: [resolvedById], references: [id])
 
   @@index([tenantId])
   @@index([workOrderId])

@@ -25,6 +25,8 @@ vi.mock("../lib/auth", () => ({
 }));
 
 import { AutomationGatewayPage } from "./automation-gateway";
+import { ConfirmProvider } from "../components/confirm-dialog";
+import { ToastProvider } from "../components/toast";
 
 const MACHINE = { id: "m1", name: "Tezgah 1", connectorType: "MANUAL" as const, connectorConfig: null };
 
@@ -32,7 +34,11 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <AutomationGatewayPage />
+      <ToastProvider>
+        <ConfirmProvider>
+          <AutomationGatewayPage />
+        </ConfirmProvider>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

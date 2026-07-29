@@ -33,6 +33,8 @@ vi.mock("react-router-dom", () => ({
 }));
 
 import { PurchaseOrderDetailPage } from "./purchase-order-detail";
+import { ConfirmProvider } from "../components/confirm-dialog";
+import { ToastProvider } from "../components/toast";
 
 // 40 sipariş edilmiş, 15'i teslim alınmış → kalan 25
 const PARTIALLY_RECEIVED_PO = {
@@ -58,7 +60,11 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <PurchaseOrderDetailPage />
+      <ToastProvider>
+        <ConfirmProvider>
+          <PurchaseOrderDetailPage />
+        </ConfirmProvider>
+      </ToastProvider>
     </QueryClientProvider>,
   );
 }

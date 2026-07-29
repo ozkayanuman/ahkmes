@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Link2 } from "lucide-react";
+import { Check, Copy, KeyRound, Link2 } from "lucide-react";
 import { useState } from "react";
 import { clsx } from "clsx";
 import { CrudPage } from "../components/crud-page";
 import { Button, Label, Modal, Select } from "../components/ui";
+import { useConfirm } from "../components/confirm-dialog";
+import { useToast } from "../components/toast";
 import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
@@ -41,6 +43,39 @@ function machineStatus(row: MachineRow) {
   return MACHINE_STATUS[row.lastStatus] ?? { label: row.lastStatus, cls: "bg-slate-100 text-slate-700" };
 }
 
+/** Yeni üretilen connector anahtarını gösterir (bir daha gösterilmez) — kopyala
+ * butonuyla; native prompt() yerine. */
+function ConnectorKeyModal({ machineName, apiKey, onClose }: { machineName: string; apiKey: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <Modal open title={`${machineName} — Connector Anahtarı`} onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          Bu değer bir daha gösterilmeyecek — connector <code>.env</code> dosyasına (<code>MACHINE_KEY</code>)
+          kopyalayın.
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 overflow-x-auto rounded-md bg-slate-100 px-3 py-2 text-sm">{apiKey}</code>
+          <Button
+            variant="outline"
+            onClick={() => {
+              navigator.clipboard.writeText(apiKey);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 2000);
+            }}
+          >
+            {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            {copied ? "Kopyalandı" : "Kopyala"}
+          </Button>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={onClose}>Kapat</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function AssignWorkOrderModal({
   machine,
   onClose,
@@ -49,6 +84,7 @@ function AssignWorkOrderModal({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [workOrderId, setWorkOrderId] = useState(machine.activeWorkOrderId ?? "");
   const workOrders = useQuery({
     queryKey: ["/work-orders"],
@@ -68,7 +104,7 @@ function AssignWorkOrderModal({
       qc.invalidateQueries({ queryKey: ["/machines"] });
       onClose();
     },
-    onError: () => alert("Atama başarısız"),
+    onError: () => toast("Atama başarısız", "error"),
   });
 
   return (
@@ -103,20 +139,20 @@ export function MachinesPage() {
   const canManage = !!user && ["ADMIN", "PLANNER"].includes(user.role);
   const canAssign = !!user && ["ADMIN", "PLANNER", "FOREMAN"].includes(user.role);
   const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [assignFor, setAssignFor] = useState<MachineRow | null>(null);
+  const [newKeyFor, setNewKeyFor] = useState<{ name: string; key: string } | null>(null);
 
   useInvalidateOn(["machine.updated", "machine.alarm"], ["/machines"]);
 
   const generateKey = useMutation({
-    mutationFn: (id: string) => apiPost<{ key: string }>(`/machines/${id}/connector-key`, {}),
-    onSuccess: (res) => {
+    mutationFn: ({ id }: { id: string; name: string }) => apiPost<{ key: string }>(`/machines/${id}/connector-key`, {}),
+    onSuccess: (res, { name }) => {
       qc.invalidateQueries({ queryKey: ["/machines"] });
-      prompt(
-        "Connector anahtarı üretildi. Bu değer bir daha gösterilmeyecek — connector .env dosyasına (MACHINE_KEY) kopyalayın:",
-        res.key,
-      );
+      setNewKeyFor({ name, key: res.key });
     },
-    onError: () => alert("Anahtar üretilemedi"),
+    onError: () => toast("Anahtar üretilemedi", "error"),
   });
 
   return (
@@ -179,9 +215,14 @@ export function MachinesPage() {
                 variant="ghost"
                 className="px-2 py-1"
                 title="Connector Anahtarı Oluştur"
-                onClick={() => {
-                  if (confirm(`${row.name} için yeni bir connector anahtarı üretilsin mi? Eski anahtar geçersiz olur.`))
-                    generateKey.mutate(row.id);
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      message: `${row.name} için yeni bir connector anahtarı üretilsin mi? Eski anahtar geçersiz olur.`,
+                      danger: true,
+                    })
+                  )
+                    generateKey.mutate({ id: row.id, name: row.name });
                 }}
               >
                 <KeyRound className="h-4 w-4" />
@@ -191,6 +232,9 @@ export function MachinesPage() {
         )}
       />
       {assignFor && <AssignWorkOrderModal machine={assignFor} onClose={() => setAssignFor(null)} />}
+      {newKeyFor && (
+        <ConnectorKeyModal machineName={newKeyFor.name} apiKey={newKeyFor.key} onClose={() => setNewKeyFor(null)} />
+      )}
     </>
   );
 }

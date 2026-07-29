@@ -74,8 +74,16 @@ describe("Non-Conformance (kalite) modülü (e2e)", () => {
     await auth(api().patch(`/runs/${runId}`).send({ scrapCount: 1 })).expect(200);
   });
 
+  it("NC kapatılırken resolutionNote zorunludur (400)", async () => {
+    await auth(api().patch(`/non-conformances/${ncId}/resolve`).send({ status: "RESOLVED" })).expect(400);
+  });
+
   it("NC kapatılınca (RESOLVED) üretim adedi girişi tekrar serbest kalır", async () => {
-    await auth(api().patch(`/non-conformances/${ncId}/resolve`).send({ status: "RESOLVED" })).expect(200);
+    await auth(
+      api()
+        .patch(`/non-conformances/${ncId}/resolve`)
+        .send({ status: "RESOLVED", resolutionNote: "3 adet hurdaya ayrıldı, kalan kabul edildi" }),
+    ).expect(200);
     await auth(api().patch(`/runs/${runId}`).send({ goodCount: 4 })).expect(200);
   });
 
