@@ -18,6 +18,15 @@ export type WorkOrderStatus = z.infer<typeof WorkOrderStatusSchema>;
 export const PurchaseOrderStatusSchema = z.enum(["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"]);
 export type PurchaseOrderStatus = z.infer<typeof PurchaseOrderStatusSchema>;
 
+export const ProposalStatusSchema = z.enum([
+  "DRAFT",
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "REJECTED",
+  "CONVERTED",
+]);
+export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
+
 export const MaterialTypeSchema = z.enum(["RAW", "CONSUMABLE"]);
 export type MaterialType = z.infer<typeof MaterialTypeSchema>;
 
@@ -80,6 +89,7 @@ export const PAGE_KEYS = [
   "non-conformances",
   "genealogy",
   "scheduling",
+  "mrp",
   "shift-report",
   "users",
   "audit-log",

@@ -30,6 +30,7 @@ import { PermissionGroupsModule } from "./permission-groups/permission-groups.mo
 import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { ApprovalsModule } from "./approvals/approvals.module";
+import { MrpModule } from "./mrp/mrp.module";
 
 @Module({
   imports: [
@@ -64,6 +65,7 @@ import { ApprovalsModule } from "./approvals/approvals.module";
     LdapModule,
     NotificationsModule,
     ApprovalsModule,
+    MrpModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

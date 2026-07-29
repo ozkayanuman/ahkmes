@@ -9,6 +9,7 @@ import { MaterialsPage } from "./pages/materials";
 import { MachinesPage } from "./pages/machines";
 import { AutomationGatewayPage } from "./pages/automation-gateway";
 import { NonConformancesPage } from "./pages/non-conformances";
+import { MrpPage } from "./pages/mrp";
 import { GenealogyPage } from "./pages/genealogy";
 import { SchedulingPage } from "./pages/scheduling";
 import { UsersPage } from "./pages/users";
@@ -87,6 +88,7 @@ export function App() {
             </PageGuard>
           }
         />
+        <Route path="/mrp" element={<PageGuard page="mrp"><MrpPage /></PageGuard>} />
         <Route path="/genealogy" element={<PageGuard page="genealogy"><GenealogyPage /></PageGuard>} />
         <Route path="/scheduling" element={<PageGuard page="scheduling"><SchedulingPage /></PageGuard>} />
         <Route path="/users" element={<UsersPage />} />

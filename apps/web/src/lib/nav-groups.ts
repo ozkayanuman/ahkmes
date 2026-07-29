@@ -78,6 +78,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Boxes,
     items: [
       { to: "/work-orders", label: "İş Emirleri", icon: ClipboardList, page: "work-orders" },
+      { to: "/mrp", label: "MRP Planlama", icon: Boxes, page: "mrp" },
       { to: "/parts", label: "Parçalar", icon: Cog, page: "parts" },
       { to: "/suppliers", label: "Tedarikçiler", icon: Truck, page: "suppliers" },
       { to: "/materials", label: "Malzemeler", icon: Boxes, page: "materials" },

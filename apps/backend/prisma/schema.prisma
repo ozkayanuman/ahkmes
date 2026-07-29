@@ -168,8 +168,8 @@ model User {
   auditLogs               AuditLog[]
   documents               Document[]
   notifications           Notification[]
-  requestedApprovals      ApprovalRequest[] @relation("ApprovalRequestedBy")
-  decidedApprovals        ApprovalRequest[] @relation("ApprovalDecidedBy")
+  requestedApprovals      ApprovalRequest[]     @relation("ApprovalRequestedBy")
+  decidedApprovals        ApprovalRequest[]     @relation("ApprovalDecidedBy")
   reportedNonConformances NonConformance[]      @relation("ReportedNonConformances")
   resolvedNonConformances NonConformance[]      @relation("ResolvedNonConformances")
   groups                  UserPermissionGroup[]
@@ -260,11 +260,13 @@ model Part {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  ncPrograms      NcProgram[]
-  quoteLines      QuoteLine[]
-  workOrders      WorkOrder[]
-  finishedEntries FinishedGoodsEntry[]
-  stock           PartStock?
+  ncPrograms          NcProgram[]
+  quoteLines          QuoteLine[]
+  workOrders          WorkOrder[]
+  finishedEntries     FinishedGoodsEntry[]
+  stock               PartStock?
+  bomHeaders          BomHeader[]
+  productionProposals ProductionProposal[]
 
   @@unique([tenantId, partNo, revision])
   @@index([tenantId])
@@ -363,11 +365,11 @@ model Machine {
 
   workOrders      WorkOrder[]
   productionRuns  ProductionRun[]
-  activeWorkOrder WorkOrder?          @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
+  activeWorkOrder WorkOrder?           @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
   tags            MachineTag[]
-  unit            Unit?               @relation(fields: [unitId], references: [id])
-  connectionsFrom MachineConnection[] @relation("ConnectionFrom")
-  connectionsTo   MachineConnection[] @relation("ConnectionTo")
+  unit            Unit?                @relation(fields: [unitId], references: [id])
+  connectionsFrom MachineConnection[]  @relation("ConnectionFrom")
+  connectionsTo   MachineConnection[]  @relation("ConnectionTo")
   statusEvents    MachineStatusEvent[]
 
   @@index([tenantId])
@@ -528,19 +530,22 @@ model NonConformance {
 }
 
 model Supplier {
-  id          String   @id @default(uuid())
-  tenantId    String
-  name        String
-  contactName String?
-  email       String?
-  phone       String?
-  address     String?
-  taxNo       String?
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  contactName  String?
+  email        String?
+  phone        String?
+  address      String?
+  taxNo        String?
+  notes        String?
+  /// Ortalama teslim süresi (gün) — MRP proposal gruplama/önceliklendirmede kullanılır, opsiyonel.
+  leadTimeDays Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  purchaseOrders PurchaseOrder[]
+  purchaseOrders    PurchaseOrder[]
+  purchaseProposals PurchaseProposal[]
 
   @@index([tenantId])
 }
@@ -557,8 +562,10 @@ model Material {
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  purchaseOrderLines PurchaseOrderLine[]
-  consumptions       MaterialConsumption[]
+  purchaseOrderLines    PurchaseOrderLine[]
+  consumptions          MaterialConsumption[]
+  bomLines              BomLine[]
+  purchaseProposalLines PurchaseProposalLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -758,5 +765,112 @@ model ApprovalRequest {
   decidedBy   User? @relation("ApprovalDecidedBy", fields: [decidedById], references: [id])
 
   @@index([tenantId, entity, entityId])
+  @@index([tenantId, status])
+}
+
+/// Tek seviyeli Ürün Ağacı (BOM): bir Part'ın hangi Material'lardan hangi
+/// miktarda üretildiğini tanımlar. Part→Part (alt montaj) desteklenmiyor —
+/// MRP netlemesi tek seviye patlatma yapar (Faz B MVP kapsamı).
+model BomHeader {
+  id        String   @id @default(uuid())
+  tenantId  String
+  partId    String
+  revision  String   @default("A")
+  /// Bir Part için aynı anda yalnızca bir aktif BOM olabilir — bu kısıt
+  /// servis katmanında kontrol edilir (Prisma partial unique index desteklemiyor).
+  isActive  Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  part  Part      @relation(fields: [partId], references: [id])
+  lines BomLine[]
+
+  @@unique([tenantId, partId, revision])
+  @@index([tenantId, partId, isActive])
+}
+
+model BomLine {
+  id          String   @id @default(uuid())
+  tenantId    String
+  bomHeaderId String
+  materialId  String
+  /// Bir birim Part başına gereken Material miktarı.
+  qtyPer      Decimal  @db.Decimal(18, 6)
+  /// Fire oranı (%) — opsiyonel, brüt ihtiyaç hesaplamasında qtyPer'e eklenir.
+  scrapPct    Decimal? @db.Decimal(5, 2)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bomHeader BomHeader @relation(fields: [bomHeaderId], references: [id], onDelete: Cascade)
+  material  Material  @relation(fields: [materialId], references: [id])
+
+  @@index([tenantId, bomHeaderId])
+}
+
+enum ProposalStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CONVERTED
+}
+
+/// MRP netleme çıktısı: bir Supplier için toplanmış Material shortfall
+/// önerisi. Onaylanınca gerçek PurchaseOrder'a dönüştürülür (convertedToId).
+/// supplierId null ise materyalin Supplier ataması yok — "tedarikçisiz" tek
+/// proposal altında toplanır (Faz B MVP kararı).
+model PurchaseProposal {
+  id            String         @id @default(uuid())
+  tenantId      String
+  ppNo          String         @unique
+  supplierId    String?
+  status        ProposalStatus @default(DRAFT)
+  generatedAt   DateTime       @default(now())
+  notes         String?
+  convertedToId String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  supplier Supplier?              @relation(fields: [supplierId], references: [id])
+  lines    PurchaseProposalLine[]
+
+  @@index([tenantId, status])
+}
+
+model PurchaseProposalLine {
+  id                 String    @id @default(uuid())
+  tenantId           String
+  purchaseProposalId String
+  materialId         String
+  qty                Decimal   @db.Decimal(18, 3)
+  neededByDate       DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  purchaseProposal PurchaseProposal @relation(fields: [purchaseProposalId], references: [id], onDelete: Cascade)
+  material         Material         @relation(fields: [materialId], references: [id])
+
+  @@index([tenantId, purchaseProposalId])
+}
+
+/// MRP netleme çıktısı: mevcut PartStock, WorkOrder talebini karşılamıyorsa
+/// üretilen üretim önerisi. Onaylanınca gerçek WorkOrder'a dönüştürülür.
+model ProductionProposal {
+  id            String         @id @default(uuid())
+  tenantId      String
+  prNo          String         @unique
+  partId        String
+  qty           Decimal        @db.Decimal(18, 3)
+  dueDate       DateTime
+  status        ProposalStatus @default(DRAFT)
+  generatedAt   DateTime       @default(now())
+  notes         String?
+  convertedToId String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  part Part @relation(fields: [partId], references: [id])
+
   @@index([tenantId, status])
 }

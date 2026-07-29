@@ -361,3 +361,30 @@ export const decideApprovalSchema = z.object({
   note: z.string().optional(),
 });
 export type DecideApprovalDto = z.infer<typeof decideApprovalSchema>;
+
+// ---- BOM (Faz B) ----
+export const bomLineInputSchema = z.object({
+  materialId: idSchema,
+  qtyPer: positiveQty,
+  scrapPct: decimalString.optional(),
+});
+export const createBomHeaderSchema = z.object({
+  partId: idSchema,
+  revision: z.string().min(1).default("A"),
+  notes: z.string().optional(),
+  lines: z.array(bomLineInputSchema).min(1),
+});
+export type CreateBomHeaderDto = z.infer<typeof createBomHeaderSchema>;
+export const updateBomHeaderSchema = z.object({
+  notes: z.string().optional(),
+  isActive: z.boolean().optional(),
+  lines: z.array(bomLineInputSchema).min(1).optional(),
+});
+export type UpdateBomHeaderDto = z.infer<typeof updateBomHeaderSchema>;
+
+// ---- MRP (Faz B) — proposal onay/red, gerekirse tedarikçisiz öneriye tedarikçi atanır ----
+export const mrpProposalDecisionSchema = z.object({
+  note: z.string().optional(),
+  supplierId: idSchema.optional(),
+});
+export type MrpProposalDecisionDto = z.infer<typeof mrpProposalDecisionSchema>;
