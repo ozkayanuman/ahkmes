@@ -29,6 +29,17 @@ function toneOf(m: AndonMachine): Tone {
   return "idle";
 }
 
+/** Saat ayrı bir bileşende tutulur — saniye tikinde sadece bu yeniden render olur,
+ * tüm makine kartları grid'i her saniye yeniden çizilmez. */
+function Clock() {
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return <span className="font-mono text-3xl tabular-nums text-slate-300">{now.toLocaleTimeString("tr-TR")}</span>;
+}
+
 const TONE_STYLE: Record<Tone, { border: string; bg: string; text: string; label: string; icon: typeof Gauge }> = {
   running: { border: "border-green-500", bg: "bg-green-950/40", text: "text-green-400", label: "ÇALIŞIYOR", icon: Gauge },
   idle: { border: "border-amber-500", bg: "bg-amber-950/30", text: "text-amber-400", label: "BOŞTA", icon: PauseCircle },
@@ -41,8 +52,6 @@ const TONE_STYLE: Record<Tone, { border: string; bg: string; text: string; label
  * Twin'in aynı canlı verisini (posX/posY olmadan) kartlar halinde büyük puntoyla gösterir. */
 export function AndonPage() {
   const { user, loading } = useAuth();
-  const [now, setNow] = useState(new Date());
-
   useInvalidateOn(
     ["machine.updated", "machine.alarm", "productionrun.updated", "workorder.updated"],
     ["/digital-twin/layout"],
@@ -51,12 +60,8 @@ export function AndonPage() {
     queryKey: ["/digital-twin/layout"],
     queryFn: () => apiGet<Layout>("/digital-twin/layout"),
     refetchInterval: 10_000,
+    enabled: !!user,
   });
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
@@ -74,18 +79,19 @@ export function AndonPage() {
           <h1 className="text-2xl font-bold tracking-wide">AHKMES — Canlı İzleme</h1>
         </div>
         <div className="flex items-center gap-6">
+          <span className="sr-only" role="status" aria-live="polite">
+            {alarmCount > 0 ? `${alarmCount} tezgahta alarm var` : "Alarm yok"}
+          </span>
           {alarmCount > 0 && (
-            <span className="flex items-center gap-2 rounded-full bg-red-950/60 px-4 py-1.5 text-red-400">
+            <span className="flex items-center gap-2 rounded-full bg-red-950/60 px-4 py-1.5 text-red-400 motion-reduce:animate-none">
               <span className="relative flex h-2.5 w-2.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75 motion-reduce:animate-none" />
                 <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
               </span>
               <span className="font-bold">{alarmCount} ALARM</span>
             </span>
           )}
-          <span className="font-mono text-3xl tabular-nums text-slate-300">
-            {now.toLocaleTimeString("tr-TR")}
-          </span>
+          <Clock />
         </div>
       </div>
 
@@ -101,7 +107,7 @@ export function AndonPage() {
                 "rounded-2xl border-2 p-5 shadow-lg transition-colors",
                 s.border,
                 s.bg,
-                tone === "alarm" && "animate-pulse",
+                tone === "alarm" && "animate-pulse motion-reduce:animate-none",
               )}
             >
               <div className="mb-3 flex items-center justify-between">
