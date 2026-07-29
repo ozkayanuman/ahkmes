@@ -1,3 +1,4 @@
+import { Truck } from "lucide-react";
 import { CrudPage } from "../components/crud-page";
 
 interface SupplierRow {
@@ -12,6 +13,7 @@ export function SuppliersPage() {
   return (
     <CrudPage<SupplierRow>
       title="Tedarikçiler"
+      icon={Truck}
       endpoint="/suppliers"
       writeRoles={["ADMIN", "PLANNER"]}
       columns={[

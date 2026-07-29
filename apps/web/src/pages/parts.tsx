@@ -1,4 +1,4 @@
-import { FileCode2, FileText } from "lucide-react";
+import { Cog, FileCode2, FileText } from "lucide-react";
 import { useState } from "react";
 import { CrudPage } from "../components/crud-page";
 import { DocumentsPanel } from "../components/documents-panel";
@@ -22,6 +22,7 @@ export function PartsPage() {
     <>
       <CrudPage<PartRow>
         title="Parçalar"
+        icon={Cog}
         endpoint="/parts"
         writeRoles={["ADMIN", "PLANNER"]}
         columns={[

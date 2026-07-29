@@ -1,3 +1,4 @@
+import { Wrench } from "lucide-react";
 import { CrudPage } from "../components/crud-page";
 
 interface UserRow {
@@ -20,6 +21,7 @@ export function UsersPage() {
   return (
     <CrudPage<UserRow>
       title="Kullanıcılar"
+      icon={Wrench}
       endpoint="/users"
       writeRoles={["ADMIN"]}
       searchable={false}

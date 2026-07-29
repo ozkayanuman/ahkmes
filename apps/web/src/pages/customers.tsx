@@ -1,3 +1,4 @@
+import { Users } from "lucide-react";
 import { CrudPage } from "../components/crud-page";
 
 interface CustomerRow {
@@ -13,6 +14,7 @@ export function CustomersPage() {
   return (
     <CrudPage<CustomerRow>
       title="Müşteriler"
+      icon={Users}
       endpoint="/customers"
       writeRoles={["ADMIN", "SALES"]}
       columns={[

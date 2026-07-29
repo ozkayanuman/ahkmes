@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Link2 } from "lucide-react";
+import { Check, Copy, Factory, KeyRound, Link2 } from "lucide-react";
 import { useState } from "react";
 import { clsx } from "clsx";
 import { CrudPage } from "../components/crud-page";
@@ -159,6 +159,7 @@ export function MachinesPage() {
     <>
       <CrudPage<MachineRow>
         title="Tezgahlar"
+        icon={Factory}
         endpoint="/machines"
         writeRoles={["ADMIN"]}
         searchable={false}

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Inbox, Pencil, Plus, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { Role } from "@ahkmes/shared-types";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
@@ -50,6 +50,7 @@ function toPayload(form: FormState): Record<string, unknown> {
 
 export function CrudPage<T extends { id: string }>({
   title,
+  icon: Icon,
   endpoint,
   columns,
   fields,
@@ -59,6 +60,9 @@ export function CrudPage<T extends { id: string }>({
   rowActions,
 }: {
   title: string;
+  /** Sidebar nav'daki ikonla eşleşen, sayfanın kimliğini pekiştiren ikon —
+   * uygulama genelinde tutarlı bir görsel dil için (bkz. layout.tsx NAV). */
+  icon?: LucideIcon;
   endpoint: string;
   columns: Column<T>[];
   fields: Field[];
@@ -127,7 +131,14 @@ export function CrudPage<T extends { id: string }>({
   return (
     <div>
       <div className="mb-6 flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold">{title}</h1>
+        <div className="flex items-center gap-3">
+          {Icon && (
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+              <Icon className="h-5 w-5" />
+            </span>
+          )}
+          <h1 className="text-2xl font-bold">{title}</h1>
+        </div>
         {canWrite && (
           <Button onClick={openCreate}>
             <Plus className="h-4 w-4" /> Yeni
@@ -157,9 +168,12 @@ export function CrudPage<T extends { id: string }>({
             <tr>
               <td
                 colSpan={columns.length + (rowActions ? 1 : 0) + (canWrite ? 1 : 0)}
-                className="px-4 py-8 text-center text-slate-400"
+                className="px-4 py-12 text-center text-slate-400"
               >
-                Kayıt yok
+                <div className="flex flex-col items-center gap-2">
+                  <Inbox className="h-8 w-8 text-slate-300" />
+                  <span>Kayıt yok</span>
+                </div>
               </td>
             </tr>
           )}

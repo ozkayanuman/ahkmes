@@ -1,3 +1,4 @@
+import { Boxes } from "lucide-react";
 import { CrudPage } from "../components/crud-page";
 import { useInvalidateOn } from "../lib/socket";
 
@@ -17,6 +18,7 @@ export function MaterialsPage() {
   return (
     <CrudPage<MaterialRow>
       title="Malzemeler"
+      icon={Boxes}
       endpoint="/materials"
       writeRoles={["ADMIN", "PLANNER"]}
       columns={[
