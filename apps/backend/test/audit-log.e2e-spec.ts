@@ -71,4 +71,28 @@ describe("Denetim izi (Audit Log) (e2e)", () => {
       .set("Authorization", `Bearer ${operatorToken}`)
       .expect(403);
   });
+
+  it("AuditLog kaydı doğrudan SQL ile UPDATE edilemez (DB trigger)", async () => {
+    const [row] = await prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT id FROM "AuditLog" WHERE "entityId" = $1 LIMIT 1`,
+      customerId,
+    );
+    expect(row).toBeDefined();
+
+    await expect(
+      prisma.$executeRawUnsafe(`UPDATE "AuditLog" SET action = 'UPDATE' WHERE id = $1`, row.id),
+    ).rejects.toThrow(/immutable audit trail/);
+  });
+
+  it("AuditLog kaydı doğrudan SQL ile DELETE edilemez (DB trigger)", async () => {
+    const [row] = await prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT id FROM "AuditLog" WHERE "entityId" = $1 LIMIT 1`,
+      customerId,
+    );
+    expect(row).toBeDefined();
+
+    await expect(
+      prisma.$executeRawUnsafe(`DELETE FROM "AuditLog" WHERE id = $1`, row.id),
+    ).rejects.toThrow(/immutable audit trail/);
+  });
 });
