@@ -215,9 +215,9 @@ export class MachinesService {
       }
     }
 
+    let alarmMessage: string | null = null;
     if (dto.type === "ALARM") {
-      const message =
-        typeof dto.payload?.message === "string" ? dto.payload.message : "Alarm";
+      alarmMessage = typeof dto.payload?.message === "string" ? dto.payload.message : "Alarm";
       const activeRun = await this.prisma.productionRun.findFirst({
         where: {
           tenantId,
@@ -229,11 +229,23 @@ export class MachinesService {
       if (activeRun) {
         await this.prisma.productionRun.update({
           where: { id: activeRun.id },
-          data: { downtimeNote: message },
+          data: { downtimeNote: alarmMessage },
         });
       }
-      this.realtime.emitToTenant(tenantId, "machine.alarm", { machineId: machine.id, message });
+      this.realtime.emitToTenant(tenantId, "machine.alarm", { machineId: machine.id, message: alarmMessage });
     }
+
+    // OEE trend/duruş (downtime) Pareto analizi bu geçmişten türetilir — her telemetri
+    // olayı zaman damgasıyla kalıcı olarak kaydedilir (bkz. oee/oee.service.ts).
+    await this.prisma.machineStatusEvent.create({
+      data: {
+        tenantId,
+        machineId: machine.id,
+        type: dto.type,
+        message: alarmMessage,
+        workOrderId: machine.activeWorkOrderId,
+      },
+    });
 
     await this.prisma.machine.update({
       where: { id: machine.id },

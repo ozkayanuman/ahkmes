@@ -303,6 +303,7 @@ model Machine {
   unit            Unit?               @relation(fields: [unitId], references: [id])
   connectionsFrom MachineConnection[] @relation("ConnectionFrom")
   connectionsTo   MachineConnection[] @relation("ConnectionTo")
+  statusEvents    MachineStatusEvent[]
 
   @@index([tenantId])
 }
@@ -334,6 +335,31 @@ model MachineEventDedup {
 
   @@unique([machineId, eventId])
   @@index([tenantId])
+}
+
+/// Makine durum geçmişi: her telemetri olayı (CYCLE_START/CYCLE_END/PART_COMPLETE/ALARM/IDLE)
+/// zaman damgasıyla kalıcı olarak burada tutulur. OEE trend ve duruş (downtime) Pareto
+/// analizi bu geçmişten türetilir — MachineEventDedup yalnızca idempotency içindir, geçmiş tutmaz.
+model MachineStatusEvent {
+  id          String           @id @default(uuid())
+  tenantId    String
+  machineId   String
+  type        MachineEventType
+  message     String?
+  workOrderId String?
+  occurredAt  DateTime         @default(now())
+
+  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, machineId, occurredAt])
+}
+
+enum MachineEventType {
+  CYCLE_START
+  CYCLE_END
+  PART_COMPLETE
+  ALARM
+  IDLE
 }
 
 enum MachineTagDataType {

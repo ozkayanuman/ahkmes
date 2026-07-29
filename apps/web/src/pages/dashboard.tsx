@@ -17,6 +17,24 @@ import { fmtDate, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { QUOTE_STATUS, StatusBadge, WO_STATUS } from "../components/status";
 import { Card, Table } from "../components/ui";
+import { DowntimeParetoChart, OeeTrendChart } from "../components/oee-charts";
+
+interface OeeTrendPoint {
+  date: string;
+  goodCount: number;
+  scrapCount: number;
+  quality: number | null;
+  performance: number | null;
+  availability: number | null;
+  oee: number | null;
+  downtimeSeconds: number;
+}
+
+interface DowntimeReason {
+  reason: string;
+  totalSeconds: number;
+  count: number;
+}
 
 interface DashboardData {
   workOrderCounts: Record<string, number>;
@@ -133,6 +151,14 @@ export function DashboardPage() {
     queryKey: ["/dashboard"],
     queryFn: () => apiGet<DashboardData>("/dashboard"),
   });
+  const oeeTrend = useQuery({
+    queryKey: ["/oee/trend"],
+    queryFn: () => apiGet<OeeTrendPoint[]>("/oee/trend?days=14"),
+  });
+  const downtimePareto = useQuery({
+    queryKey: ["/oee/downtime-pareto"],
+    queryFn: () => apiGet<DowntimeReason[]>("/oee/downtime-pareto?days=14"),
+  });
 
   if (query.isLoading) return <p className="text-slate-500">Yükleniyor…</p>;
   if (query.error || !query.data) return <p className="text-red-600">Panel verisi alınamadı.</p>;
@@ -178,6 +204,25 @@ export function DashboardPage() {
             </div>
           </Card>
         </Link>
+      </div>
+
+      <div className="mb-6 grid gap-6 xl:grid-cols-2">
+        <Card>
+          <PanelHeader icon={Gauge} title="OEE Trend (Son 14 Gün)" to="/work-orders" />
+          {oeeTrend.isLoading ? (
+            <p className="py-8 text-center text-sm text-slate-400">Yükleniyor…</p>
+          ) : (
+            <OeeTrendChart data={oeeTrend.data ?? []} />
+          )}
+        </Card>
+        <Card>
+          <PanelHeader icon={ShieldAlert} title="Duruş Nedenleri (Pareto)" to="/machines" />
+          {downtimePareto.isLoading ? (
+            <p className="py-8 text-center text-sm text-slate-400">Yükleniyor…</p>
+          ) : (
+            <DowntimeParetoChart data={downtimePareto.data ?? []} />
+          )}
+        </Card>
       </div>
 
       <div className="mb-6 grid gap-6 xl:grid-cols-2">

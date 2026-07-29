@@ -93,9 +93,13 @@ export function WorkOrderDetailPage() {
   const oee = useQuery({
     queryKey: ["/work-orders", id, "oee"],
     queryFn: () =>
-      apiGet<{ quality: number | null; performance: number | null; oee: number | null; note: string }>(
-        `/work-orders/${id}/oee`,
-      ),
+      apiGet<{
+        quality: number | null;
+        performance: number | null;
+        availability: number | null;
+        oee: number | null;
+        note?: string;
+      }>(`/work-orders/${id}/oee`),
   });
   const machines = useQuery({
     queryKey: ["/machines"],

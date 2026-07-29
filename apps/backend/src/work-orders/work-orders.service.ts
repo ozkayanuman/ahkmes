@@ -37,8 +37,10 @@ export class WorkOrdersService {
    * OEE (Overall Equipment Effectiveness) — yalnızca gerçek veriden hesaplanabilen
    * kısımlar döner. Quality her zaman hesaplanır. Performance yalnızca Part'ta
    * `idealCycleTimeSec` girilmişse hesaplanır (yoksa null — sahte sayı üretilmez).
-   * Availability, sistemde süre bazlı duruş takibi olmadığı için şu an hesaplanamıyor
-   * (yalnızca metin notu tutuluyor) — bilinçli olarak null döner.
+   * Availability, koşunun bağlı olduğu makinedeki ALARM olaylarının (MachineStatusEvent)
+   * koşu süresi içindeki toplam süresinden hesaplanır. Koşu bir makineye bağlı değilse
+   * (manuel giriş) availability null kalır ve OEE formülünde çarpan olarak devre dışı
+   * bırakılır (1 kabul edilir) — ölçülemeyen bir şey için ceza uygulanmaz.
    */
   async oee(tenantId: string, workOrderId: string) {
     const wo = await this.prisma.workOrder.findFirst({
@@ -64,8 +66,27 @@ export class WorkOrdersService {
         ? Math.min(1, (idealCycleTimeSec * goodCount) / runtimeSeconds)
         : null;
 
-    const availability = null; // Süre bazlı duruş takibi eklenene kadar hesaplanamaz.
-    const oeeValue = quality !== null && performance !== null ? quality * performance : null;
+    const runsWithMachine = runs.filter((r): r is typeof r & { machineId: string } => !!r.machineId);
+    let availability: number | null = null;
+    if (runsWithMachine.length > 0 && runtimeSeconds > 0) {
+      let downtimeSeconds = 0;
+      for (const run of runsWithMachine) {
+        const runEnd = run.endedAt ?? new Date();
+        const events = await this.prisma.machineStatusEvent.findMany({
+          where: { tenantId, machineId: run.machineId, occurredAt: { gte: run.startedAt, lte: runEnd } },
+          orderBy: { occurredAt: "asc" },
+        });
+        for (let i = 0; i < events.length; i++) {
+          if (events[i].type !== "ALARM") continue;
+          const end = events[i + 1]?.occurredAt ?? runEnd;
+          downtimeSeconds += Math.max(0, (end.getTime() - events[i].occurredAt.getTime()) / 1000);
+        }
+      }
+      availability = Math.max(0, Math.min(1, 1 - downtimeSeconds / runtimeSeconds));
+    }
+
+    const oeeValue =
+      quality !== null && performance !== null ? quality * performance * (availability ?? 1) : null;
 
     return {
       workOrderId,
@@ -78,7 +99,9 @@ export class WorkOrdersService {
       note:
         performance === null
           ? "Performance/OEE hesaplanamadı: parçada ideal çevrim süresi (idealCycleTimeSec) tanımlı değil."
-          : "Availability hesaplanamıyor: sistemde süre bazlı duruş (downtime) takibi yok.",
+          : availability === null
+            ? "Availability hesaplanamadı: koşu bir makineye bağlı değil (manuel giriş)."
+            : undefined,
     };
   }
 
