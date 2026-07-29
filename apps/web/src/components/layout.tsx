@@ -24,6 +24,7 @@ import { NavLink, Navigate, Outlet } from "react-router-dom";
 import { clsx } from "clsx";
 import { useState } from "react";
 import { useAuth } from "../lib/auth";
+import { GlobalStatusBar } from "./global-status-bar";
 
 const NAV = [
   { to: "/", label: "Panel", icon: LayoutDashboard, end: true },
@@ -122,7 +123,8 @@ export function AppLayout() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 p-6">
+      <main className="flex-1 overflow-x-hidden p-6">
+        <GlobalStatusBar />
         <Outlet />
       </main>
     </div>

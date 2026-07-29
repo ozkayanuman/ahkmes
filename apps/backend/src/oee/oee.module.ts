@@ -5,5 +5,6 @@ import { OeeService } from "./oee.service";
 @Module({
   controllers: [OeeController],
   providers: [OeeService],
+  exports: [OeeService],
 })
 export class OeeModule {}

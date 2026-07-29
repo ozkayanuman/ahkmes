@@ -13,4 +13,9 @@ export class DashboardController {
   summary(@CurrentUser() user: AuthUser) {
     return this.service.summary(user.tenantId);
   }
+
+  @Get("status-bar")
+  statusBar(@CurrentUser() user: AuthUser) {
+    return this.service.statusBar(user.tenantId);
+  }
 }

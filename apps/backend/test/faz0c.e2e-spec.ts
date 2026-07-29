@@ -220,5 +220,12 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
         res.body.recentRuns.some((r: { id: string }) => r.id === runId),
       ).toBe(true);
     });
+
+    it("status-bar endpoint OEE/açık NC/aktif alarm özetini döner", async () => {
+      const res = await auth(api().get("/dashboard/status-bar")).expect(200);
+      expect(typeof res.body.openNonConformanceCount).toBe("number");
+      expect(typeof res.body.activeAlarmCount).toBe("number");
+      expect(res.body).toHaveProperty("oeeToday");
+    });
   });
 });

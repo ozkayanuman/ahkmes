@@ -1,9 +1,29 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { OeeService } from "../oee/oee.service";
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly oee: OeeService,
+  ) {}
+
+  /** Tüm sayfalarda sabit üst şeritte gösterilen hafif özet — bugünkü OEE,
+   * açık uygunsuzluk sayısı ve o an ALARM durumundaki makine sayısı. */
+  async statusBar(tenantId: string) {
+    const [trend, openNonConformanceCount, activeAlarmCount] = await Promise.all([
+      this.oee.trend(tenantId, 1),
+      this.prisma.nonConformance.count({ where: { tenantId, status: "OPEN" } }),
+      this.prisma.machine.count({ where: { tenantId, lastStatus: "ALARM" } }),
+    ]);
+    const today = trend[trend.length - 1];
+    return {
+      oeeToday: today?.oee ?? null,
+      openNonConformanceCount,
+      activeAlarmCount,
+    };
+  }
 
   async summary(tenantId: string) {
     const [woGroups, activeWorkOrders, pendingQuotes, minStockMaterials, recentRuns, openNonConformanceCount] =
