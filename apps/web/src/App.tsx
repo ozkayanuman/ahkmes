@@ -26,14 +26,16 @@ import { AuditLogPage } from "./pages/audit-log";
 import { ShiftReportPage } from "./pages/shift-report";
 import { PermissionGroupsPage } from "./pages/permission-groups";
 import { PageGuard } from "./components/page-guard";
+import { LaunchpadPage } from "./pages/launchpad";
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={<LaunchpadPage />} />
       <Route path="/andon" element={<AndonPage />} />
       <Route element={<AppLayout />}>
-        <Route path="/" element={<DashboardPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
         <Route path="/quotes" element={<PageGuard page="quotes"><QuotesPage /></PageGuard>} />
         <Route path="/quotes/:id" element={<PageGuard page="quotes"><QuoteDetailPage /></PageGuard>} />
