@@ -25,6 +25,7 @@ import { HierarchyModule } from "./hierarchy/hierarchy.module";
 import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
+import { ShiftReportModule } from "./shift-report/shift-report.module";
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { AuditLogModule } from "./audit-log/audit-log.module";
     DigitalTwinModule,
     OeeModule,
     AuditLogModule,
+    ShiftReportModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

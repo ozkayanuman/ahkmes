@@ -1,5 +1,6 @@
 import {
   Boxes,
+  CalendarClock,
   ClipboardList,
   Cog,
   Factory,
@@ -44,6 +45,7 @@ const NAV = [
   { to: "/non-conformances", label: "Kalite", icon: ShieldAlert },
   { to: "/genealogy", label: "Genealogy", icon: Network },
   { to: "/scheduling", label: "Scheduling", icon: CalendarDays },
+  { to: "/shift-report", label: "Vardiya Raporu", icon: CalendarClock },
   { to: "/users", label: "Kullanıcılar", icon: Wrench, adminOnly: true },
   { to: "/audit-log", label: "Denetim İzi", icon: History, adminOnly: true },
 ];
