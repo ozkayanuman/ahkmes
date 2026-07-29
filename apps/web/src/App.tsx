@@ -22,6 +22,7 @@ import { ProductionPage } from "./pages/production";
 import { HierarchyPage } from "./pages/hierarchy";
 import { DigitalTwinPage } from "./pages/digital-twin";
 import { AndonPage } from "./pages/andon";
+import { AuditLogPage } from "./pages/audit-log";
 
 export function App() {
   return (
@@ -49,6 +50,7 @@ export function App() {
         <Route path="/genealogy" element={<GenealogyPage />} />
         <Route path="/scheduling" element={<SchedulingPage />} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/audit-log" element={<AuditLogPage />} />
       </Route>
     </Routes>
   );

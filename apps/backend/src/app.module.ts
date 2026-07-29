@@ -24,6 +24,7 @@ import { NonConformanceModule } from "./non-conformance/non-conformance.module";
 import { HierarchyModule } from "./hierarchy/hierarchy.module";
 import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
+import { AuditLogModule } from "./audit-log/audit-log.module";
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { OeeModule } from "./oee/oee.module";
     HierarchyModule,
     DigitalTwinModule,
     OeeModule,
+    AuditLogModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

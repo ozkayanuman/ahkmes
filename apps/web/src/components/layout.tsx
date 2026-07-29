@@ -5,6 +5,7 @@ import {
   Factory,
   FileText,
   Gauge,
+  History,
   LayoutDashboard,
   LogOut,
   GitBranch,
@@ -44,6 +45,7 @@ const NAV = [
   { to: "/genealogy", label: "Genealogy", icon: Network },
   { to: "/scheduling", label: "Scheduling", icon: CalendarDays },
   { to: "/users", label: "Kullanıcılar", icon: Wrench, adminOnly: true },
+  { to: "/audit-log", label: "Denetim İzi", icon: History, adminOnly: true },
 ];
 
 export function AppLayout() {
