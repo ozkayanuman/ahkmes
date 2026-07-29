@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cable, X } from "lucide-react";
+import { Cable, Maximize2, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useInvalidateOn } from "../lib/socket";
@@ -153,17 +154,24 @@ export function DigitalTwinPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Digital Twin — Saha Planı</h1>
-        {canEdit && (
-          <Button
-            variant={connectMode ? "primary" : "outline"}
-            onClick={() => {
-              setConnectMode((v) => !v);
-              setConnectFrom(null);
-            }}
-          >
-            <Cable className="h-4 w-4" /> {connectMode ? "Bağlantı Modu (Aktif)" : "Bağlantı Kur"}
-          </Button>
-        )}
+        <div className="flex gap-2">
+          <Link to="/andon" target="_blank" rel="noopener">
+            <Button variant="outline">
+              <Maximize2 className="h-4 w-4" /> Tam Ekran İzleme
+            </Button>
+          </Link>
+          {canEdit && (
+            <Button
+              variant={connectMode ? "primary" : "outline"}
+              onClick={() => {
+                setConnectMode((v) => !v);
+                setConnectFrom(null);
+              }}
+            >
+              <Cable className="h-4 w-4" /> {connectMode ? "Bağlantı Modu (Aktif)" : "Bağlantı Kur"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {connectMode && (

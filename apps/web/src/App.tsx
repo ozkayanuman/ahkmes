@@ -21,11 +21,13 @@ import { PurchaseOrderDetailPage } from "./pages/purchase-order-detail";
 import { ProductionPage } from "./pages/production";
 import { HierarchyPage } from "./pages/hierarchy";
 import { DigitalTwinPage } from "./pages/digital-twin";
+import { AndonPage } from "./pages/andon";
 
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/andon" element={<AndonPage />} />
       <Route element={<AppLayout />}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/customers" element={<CustomersPage />} />
