@@ -168,6 +168,8 @@ model User {
   auditLogs               AuditLog[]
   documents               Document[]
   notifications           Notification[]
+  requestedApprovals      ApprovalRequest[] @relation("ApprovalRequestedBy")
+  decidedApprovals        ApprovalRequest[] @relation("ApprovalDecidedBy")
   reportedNonConformances NonConformance[]      @relation("ReportedNonConformances")
   resolvedNonConformances NonConformance[]      @relation("ResolvedNonConformances")
   groups                  UserPermissionGroup[]
@@ -726,4 +728,35 @@ model Notification {
   user User @relation(fields: [userId], references: [id])
 
   @@index([tenantId, userId, isRead])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Genel amaçlı, entity-agnostik onay motoru (Faz A). Belirli bir iş akışına
+// (Quote/WO) gömülü değildir — ileriki fazlar (MRP proposal, CAPA vb.)
+// entity/entityId string çiftiyle bu tabloyu kullanabilir. requiredRoles
+// hangi rollerin karar verebileceğini belirler; ADMIN her zaman karar verebilir.
+model ApprovalRequest {
+  id            String         @id @default(uuid())
+  tenantId      String
+  entity        String
+  entityId      String
+  status        ApprovalStatus @default(PENDING)
+  requiredRoles Role[]
+  requestedById String
+  note          String?
+  decidedById   String?
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime       @default(now())
+
+  requestedBy User  @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  decidedBy   User? @relation("ApprovalDecidedBy", fields: [decidedById], references: [id])
+
+  @@index([tenantId, entity, entityId])
+  @@index([tenantId, status])
 }

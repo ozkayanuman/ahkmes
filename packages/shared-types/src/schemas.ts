@@ -348,3 +348,16 @@ export const resolveNonConformanceSchema = z.object({
   resolutionNote: z.string().min(1).optional(),
 });
 export type ResolveNonConformanceDto = z.infer<typeof resolveNonConformanceSchema>;
+
+export const createApprovalRequestSchema = z.object({
+  entity: z.string().min(1),
+  entityId: idSchema,
+  requiredRoles: z.array(RoleSchema).min(1),
+  note: z.string().optional(),
+});
+export type CreateApprovalRequestDto = z.infer<typeof createApprovalRequestSchema>;
+
+export const decideApprovalSchema = z.object({
+  note: z.string().optional(),
+});
+export type DecideApprovalDto = z.infer<typeof decideApprovalSchema>;

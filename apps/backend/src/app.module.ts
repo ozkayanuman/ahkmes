@@ -29,6 +29,7 @@ import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
 import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
+import { ApprovalsModule } from "./approvals/approvals.module";
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { NotificationsModule } from "./notifications/notifications.module";
     PermissionGroupsModule,
     LdapModule,
     NotificationsModule,
+    ApprovalsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
