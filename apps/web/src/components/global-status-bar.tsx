@@ -30,7 +30,7 @@ export function GlobalStatusBar() {
   const hasOpenNc = !!d && d.openNonConformanceCount > 0;
 
   return (
-    <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 flex items-center gap-4 border-b border-slate-200 bg-white/95 px-6 py-2 text-sm backdrop-blur">
+    <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 flex items-center gap-4 border-b border-slate-200 bg-white/95 px-6 py-2 text-sm backdrop-blur print:hidden">
       <StatBadge
         icon={Gauge}
         label="OEE (Bugün)"

@@ -63,7 +63,7 @@ export function AppLayout() {
     <div className="flex min-h-screen">
       <aside
         className={clsx(
-          "flex flex-col border-r border-slate-200 bg-white transition-[width] duration-200",
+          "flex flex-col border-r border-slate-200 bg-white transition-[width] duration-200 print:hidden",
           collapsed ? "w-16" : "w-60",
         )}
       >

@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Printer } from "lucide-react";
 import { useState } from "react";
 import { apiGet } from "../lib/api";
-import { Card, Input } from "../components/ui";
+import { Button, Card, Input } from "../components/ui";
 
 interface ShiftSummary {
   shift: number;
@@ -47,21 +47,33 @@ export function ShiftReportPage() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between gap-4">
+      <div className="mb-6 flex items-center justify-between gap-4 print:hidden">
         <div className="flex items-center gap-3">
           <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
             <CalendarClock className="h-5 w-5" />
           </span>
           <h1 className="text-2xl font-bold">Vardiya Raporu</h1>
         </div>
-        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="max-w-[180px]" />
+        <div className="flex items-center gap-2">
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="max-w-[180px]" />
+          <Button variant="outline" onClick={() => window.print()}>
+            <Printer className="h-4 w-4" /> Yazdır / PDF
+          </Button>
+        </div>
+      </div>
+
+      <div className="mb-4 hidden print:block">
+        <h1 className="text-xl font-bold">AHKMES — Vardiya Raporu</h1>
+        <p className="text-sm text-slate-500">
+          Tarih: {date} · Oluşturulma: {new Date().toLocaleString("tr-TR")}
+        </p>
       </div>
 
       {query.isLoading && <p className="text-slate-500">Yükleniyor…</p>}
       {query.error && <p className="text-red-600">Rapor alınamadı.</p>}
 
       {query.data && (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-3 print:grid-cols-3 print:gap-2">
           {query.data.map((s) => (
             <Card key={s.shift}>
               <div className="mb-3 text-sm font-semibold text-slate-700">{s.label}</div>
