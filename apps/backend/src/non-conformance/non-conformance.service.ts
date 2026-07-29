@@ -3,6 +3,7 @@ import type { CreateNonConformanceDto, ResolveNonConformanceDto } from "@ahkmes/
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { AppException } from "../common/app-exception";
+import { NotificationsService } from "../notifications/notifications.service";
 
 const INCLUDE = {
   workOrder: { select: { id: true, woNo: true, status: true } },
@@ -15,6 +16,7 @@ export class NonConformanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly notifications: NotificationsService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string, status?: string) {
@@ -42,6 +44,13 @@ export class NonConformanceService {
       include: INCLUDE,
     });
     this.realtime.emitToTenant(tenantId, "nonconformance.updated", { id: created.id, workOrderId: dto.workOrderId });
+    await this.notifications.notifyRoles(tenantId, ["ADMIN", "FOREMAN"], {
+      type: "NON_CONFORMANCE_CREATED",
+      title: "Yeni uygunsuzluk bildirimi",
+      message: `${wo.woNo}: ${dto.description ?? "Uygunsuzluk kaydı oluşturuldu"}`,
+      entity: "non-conformances",
+      entityId: created.id,
+    });
     return created;
   }
 

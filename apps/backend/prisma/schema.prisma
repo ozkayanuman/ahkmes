@@ -167,6 +167,7 @@ model User {
   finishedEntries         FinishedGoodsEntry[]
   auditLogs               AuditLog[]
   documents               Document[]
+  notifications           Notification[]
   reportedNonConformances NonConformance[]      @relation("ReportedNonConformances")
   resolvedNonConformances NonConformance[]      @relation("ResolvedNonConformances")
   groups                  UserPermissionGroup[]
@@ -705,4 +706,24 @@ model Document {
   uploadedBy User @relation(fields: [uploadedById], references: [id])
 
   @@index([tenantId, entityType, entityId])
+}
+
+// Minimal in-app bildirim motoru (Faz A). Yayın (role bazlı) kapsam dışı —
+// her satır belirli bir alıcı kullanıcıya aittir; üretici servisler role
+// eşleşen kullanıcı listesini kendisi bulup her biri için bir satır yazar.
+model Notification {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  type      String
+  title     String
+  message   String
+  entity    String?
+  entityId  String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, userId, isRead])
 }

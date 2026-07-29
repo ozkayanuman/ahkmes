@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { clsx } from "clsx";
 import { apiGet } from "../lib/api";
 import { useInvalidateOn } from "../lib/socket";
+import { NotificationBell } from "./notification-bell";
 
 interface StatusBarData {
   oeeToday: number | null;
@@ -54,6 +55,9 @@ export function GlobalStatusBar() {
           pulse={hasAlarm}
         />
       </Link>
+      <div className="ml-auto">
+        <NotificationBell />
+      </div>
     </div>
   );
 }

@@ -14,6 +14,7 @@ import type {
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { NotificationsService } from "../notifications/notifications.service";
 
 const CONNECTOR_USER_EMAIL = "machine-connector@ahkmes.local";
 
@@ -22,6 +23,7 @@ export class MachinesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly notifications: NotificationsService,
   ) {}
 
   private static readonly PUBLIC_SELECT = {
@@ -233,6 +235,13 @@ export class MachinesService {
         });
       }
       this.realtime.emitToTenant(tenantId, "machine.alarm", { machineId: machine.id, message: alarmMessage });
+      await this.notifications.notifyRoles(tenantId, ["ADMIN", "FOREMAN"], {
+        type: "MACHINE_ALARM",
+        title: "Makine alarmı",
+        message: `${machine.name}: ${alarmMessage}`,
+        entity: "machines",
+        entityId: machine.id,
+      });
     }
 
     // OEE trend/duruş (downtime) Pareto analizi bu geçmişten türetilir — her telemetri
