@@ -24,6 +24,8 @@ import { DigitalTwinPage } from "./pages/digital-twin";
 import { AndonPage } from "./pages/andon";
 import { AuditLogPage } from "./pages/audit-log";
 import { ShiftReportPage } from "./pages/shift-report";
+import { PermissionGroupsPage } from "./pages/permission-groups";
+import { PageGuard } from "./components/page-guard";
 
 export function App() {
   return (
@@ -32,27 +34,63 @@ export function App() {
       <Route path="/andon" element={<AndonPage />} />
       <Route element={<AppLayout />}>
         <Route path="/" element={<DashboardPage />} />
-        <Route path="/customers" element={<CustomersPage />} />
-        <Route path="/quotes" element={<QuotesPage />} />
-        <Route path="/quotes/:id" element={<QuoteDetailPage />} />
-        <Route path="/work-orders" element={<WorkOrdersPage />} />
-        <Route path="/work-orders/:id" element={<WorkOrderDetailPage />} />
-        <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
-        <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />
-        <Route path="/production" element={<ProductionPage />} />
-        <Route path="/parts" element={<PartsPage />} />
-        <Route path="/suppliers" element={<SuppliersPage />} />
-        <Route path="/materials" element={<MaterialsPage />} />
-        <Route path="/machines" element={<MachinesPage />} />
-        <Route path="/hierarchy" element={<HierarchyPage />} />
-        <Route path="/digital-twin" element={<DigitalTwinPage />} />
-        <Route path="/automation-gateway" element={<AutomationGatewayPage />} />
-        <Route path="/non-conformances" element={<NonConformancesPage />} />
-        <Route path="/genealogy" element={<GenealogyPage />} />
-        <Route path="/scheduling" element={<SchedulingPage />} />
+        <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
+        <Route path="/quotes" element={<PageGuard page="quotes"><QuotesPage /></PageGuard>} />
+        <Route path="/quotes/:id" element={<PageGuard page="quotes"><QuoteDetailPage /></PageGuard>} />
+        <Route path="/work-orders" element={<PageGuard page="work-orders"><WorkOrdersPage /></PageGuard>} />
+        <Route
+          path="/work-orders/:id"
+          element={
+            <PageGuard page="work-orders">
+              <WorkOrderDetailPage />
+            </PageGuard>
+          }
+        />
+        <Route
+          path="/purchase-orders"
+          element={
+            <PageGuard page="purchase-orders">
+              <PurchaseOrdersPage />
+            </PageGuard>
+          }
+        />
+        <Route
+          path="/purchase-orders/:id"
+          element={
+            <PageGuard page="purchase-orders">
+              <PurchaseOrderDetailPage />
+            </PageGuard>
+          }
+        />
+        <Route path="/production" element={<PageGuard page="production"><ProductionPage /></PageGuard>} />
+        <Route path="/parts" element={<PageGuard page="parts"><PartsPage /></PageGuard>} />
+        <Route path="/suppliers" element={<PageGuard page="suppliers"><SuppliersPage /></PageGuard>} />
+        <Route path="/materials" element={<PageGuard page="materials"><MaterialsPage /></PageGuard>} />
+        <Route path="/machines" element={<PageGuard page="machines"><MachinesPage /></PageGuard>} />
+        <Route path="/hierarchy" element={<PageGuard page="hierarchy"><HierarchyPage /></PageGuard>} />
+        <Route path="/digital-twin" element={<PageGuard page="digital-twin"><DigitalTwinPage /></PageGuard>} />
+        <Route
+          path="/automation-gateway"
+          element={
+            <PageGuard page="automation-gateway">
+              <AutomationGatewayPage />
+            </PageGuard>
+          }
+        />
+        <Route
+          path="/non-conformances"
+          element={
+            <PageGuard page="non-conformances">
+              <NonConformancesPage />
+            </PageGuard>
+          }
+        />
+        <Route path="/genealogy" element={<PageGuard page="genealogy"><GenealogyPage /></PageGuard>} />
+        <Route path="/scheduling" element={<PageGuard page="scheduling"><SchedulingPage /></PageGuard>} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/permission-groups" element={<PermissionGroupsPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
-        <Route path="/shift-report" element={<ShiftReportPage />} />
+        <Route path="/shift-report" element={<PageGuard page="shift-report"><ShiftReportPage /></PageGuard>} />
       </Route>
     </Routes>
   );

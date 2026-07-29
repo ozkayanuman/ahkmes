@@ -20,34 +20,36 @@ import {
   ShoppingCart,
   Truck,
   Users,
+  Users2,
   Wrench,
 } from "lucide-react";
 import { NavLink, Navigate, Outlet } from "react-router-dom";
 import { clsx } from "clsx";
 import { useState } from "react";
-import { useAuth } from "../lib/auth";
+import { useAuth, hasPageAccess } from "../lib/auth";
 import { GlobalStatusBar } from "./global-status-bar";
 
 const NAV = [
   { to: "/", label: "Panel", icon: LayoutDashboard, end: true },
-  { to: "/customers", label: "Müşteriler", icon: Users },
-  { to: "/quotes", label: "Teklifler", icon: FileText },
-  { to: "/work-orders", label: "İş Emirleri", icon: ClipboardList },
-  { to: "/purchase-orders", label: "Satınalma", icon: ShoppingCart },
-  { to: "/production", label: "Operasyon", icon: Gauge },
-  { to: "/parts", label: "Parçalar", icon: Cog },
-  { to: "/suppliers", label: "Tedarikçiler", icon: Truck },
-  { to: "/materials", label: "Malzemeler", icon: Boxes },
-  { to: "/machines", label: "Tezgahlar", icon: Factory },
-  { to: "/hierarchy", label: "Hiyerarşi", icon: GitBranch },
-  { to: "/digital-twin", label: "Digital Twin", icon: Map },
-  { to: "/automation-gateway", label: "Automation Gateway", icon: Radio },
-  { to: "/non-conformances", label: "Kalite", icon: ShieldAlert },
-  { to: "/genealogy", label: "Genealogy", icon: Network },
-  { to: "/scheduling", label: "Scheduling", icon: CalendarDays },
-  { to: "/shift-report", label: "Vardiya Raporu", icon: CalendarClock },
-  { to: "/users", label: "Kullanıcılar", icon: Wrench, adminOnly: true },
-  { to: "/audit-log", label: "Denetim İzi", icon: History, adminOnly: true },
+  { to: "/customers", label: "Müşteriler", icon: Users, page: "customers" },
+  { to: "/quotes", label: "Teklifler", icon: FileText, page: "quotes" },
+  { to: "/work-orders", label: "İş Emirleri", icon: ClipboardList, page: "work-orders" },
+  { to: "/purchase-orders", label: "Satınalma", icon: ShoppingCart, page: "purchase-orders" },
+  { to: "/production", label: "Operasyon", icon: Gauge, page: "production" },
+  { to: "/parts", label: "Parçalar", icon: Cog, page: "parts" },
+  { to: "/suppliers", label: "Tedarikçiler", icon: Truck, page: "suppliers" },
+  { to: "/materials", label: "Malzemeler", icon: Boxes, page: "materials" },
+  { to: "/machines", label: "Tezgahlar", icon: Factory, page: "machines" },
+  { to: "/hierarchy", label: "Hiyerarşi", icon: GitBranch, page: "hierarchy" },
+  { to: "/digital-twin", label: "Digital Twin", icon: Map, page: "digital-twin" },
+  { to: "/automation-gateway", label: "Automation Gateway", icon: Radio, page: "automation-gateway" },
+  { to: "/non-conformances", label: "Kalite", icon: ShieldAlert, page: "non-conformances" },
+  { to: "/genealogy", label: "Genealogy", icon: Network, page: "genealogy" },
+  { to: "/scheduling", label: "Scheduling", icon: CalendarDays, page: "scheduling" },
+  { to: "/shift-report", label: "Vardiya Raporu", icon: CalendarClock, page: "shift-report" },
+  { to: "/users", label: "Kullanıcılar", icon: Wrench, page: "users", adminOnly: true },
+  { to: "/permission-groups", label: "Rol Grupları", icon: Users2, adminOnly: true },
+  { to: "/audit-log", label: "Denetim İzi", icon: History, page: "audit-log", adminOnly: true },
 ];
 
 export function AppLayout() {
@@ -88,7 +90,9 @@ export function AppLayout() {
           )}
         </div>
         <nav className="flex-1 space-y-1 p-3">
-          {NAV.filter((n) => !n.adminOnly || user.role === "ADMIN").map(({ to, label, icon: Icon, end }) => (
+          {NAV.filter(
+            (n) => (!n.adminOnly || user.role === "ADMIN") && (!n.page || hasPageAccess(user, n.page)),
+          ).map(({ to, label, icon: Icon, end }) => (
             <NavLink
               key={to}
               to={to}

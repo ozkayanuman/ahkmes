@@ -19,15 +19,18 @@ import type { Machine } from "@prisma/client";
 import { MachinesService } from "./machines.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { MachineKeyGuard } from "../common/guards/machine-key.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { CurrentMachine } from "../common/decorators/current-machine.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
 
 @Controller("machines")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("machines", "automation-gateway")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class MachinesController {
   constructor(private readonly service: MachinesService) {}
 

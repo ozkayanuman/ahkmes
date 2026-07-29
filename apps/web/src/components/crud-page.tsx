@@ -58,6 +58,7 @@ export function CrudPage<T extends { id: string }>({
   deleteRoles = ["ADMIN"],
   searchable = true,
   rowActions,
+  headerActions,
 }: {
   title: string;
   /** Sidebar nav'daki ikonla eşleşen, sayfanın kimliğini pekiştiren ikon —
@@ -70,6 +71,10 @@ export function CrudPage<T extends { id: string }>({
   deleteRoles?: Role[];
   searchable?: boolean;
   rowActions?: (row: T) => ReactNode;
+  /** "Yeni" butonunun yanına eklenen ek aksiyonlar (örn. Users sayfasındaki
+   * "İçe Aktar" / "AD Ayarları" butonları) — sayfaya özgü, generic kalması gereken
+   * CrudPage'i özelleştirmeden genişletmeyi sağlar. */
+  headerActions?: ReactNode;
 }) {
   const { user } = useAuth();
   const canWrite = !!user && writeRoles.includes(user.role);
@@ -139,11 +144,14 @@ export function CrudPage<T extends { id: string }>({
           )}
           <h1 className="text-2xl font-bold">{title}</h1>
         </div>
-        {canWrite && (
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> Yeni
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {headerActions}
+          {canWrite && (
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" /> Yeni
+            </Button>
+          )}
+        </div>
       </div>
 
       {searchable && (

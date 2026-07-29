@@ -8,7 +8,9 @@ import {
 import { DigitalTwinService } from "./digital-twin.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
@@ -16,7 +18,8 @@ import type { AuthUser } from "../common/types";
 const WRITE_ROLES = ["ADMIN", "PLANNER", "FOREMAN"] as const;
 
 @Controller("digital-twin")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("digital-twin")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class DigitalTwinController {
   constructor(private readonly service: DigitalTwinService) {}
 

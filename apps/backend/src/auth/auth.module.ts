@@ -5,6 +5,8 @@ import { PassportModule } from "@nestjs/passport";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { JwtStrategy } from "./jwt.strategy";
+import { PermissionGroupsModule } from "../permission-groups/permission-groups.module";
+import { LdapModule } from "../ldap/ldap.module";
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { JwtStrategy } from "./jwt.strategy";
         secret: config.getOrThrow<string>("JWT_SECRET"),
       }),
     }),
+    PermissionGroupsModule,
+    LdapModule,
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],

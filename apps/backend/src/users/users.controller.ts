@@ -1,4 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import {
   createUserSchema,
   updateUserSchema,
@@ -49,5 +62,12 @@ export class UsersController {
   @Delete(":id")
   remove(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.remove(user.tenantId, id);
+  }
+
+  @Post("import")
+  @UseInterceptors(FileInterceptor("file"))
+  importCsv(@CurrentUser() user: AuthUser, @UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException("Dosya gerekli");
+    return this.service.importCsv(user.tenantId, file.buffer.toString("utf-8"));
   }
 }

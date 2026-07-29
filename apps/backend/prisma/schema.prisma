@@ -15,6 +15,14 @@ enum Role {
   OPERATOR
 }
 
+/// Kullanıcının kimlik doğrulamasının nereden yapıldığı: LOCAL şifresi bcrypt hash'i
+/// ile burada tutulur; LDAP kullanıcılarında şifre burada saklanmaz, giriş anında
+/// fabrikanın kendi Active Directory/LDAP sunucusuna bind edilerek doğrulanır.
+enum UserAuthSource {
+  LOCAL
+  LDAP
+}
+
 enum QuoteStatus {
   DRAFT
   SENT
@@ -136,15 +144,18 @@ model Tenant {
 }
 
 model User {
-  id           String   @id @default(uuid())
+  id           String         @id @default(uuid())
   tenantId     String
-  email        String   @unique
+  email        String         @unique
   passwordHash String
   name         String
   role         Role
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  isActive     Boolean        @default(true)
+  authSource   UserAuthSource @default(LOCAL)
+  /// LDAP kullanıcılarında distinguishedName — girişte bu DN ile bind denenir.
+  externalDn   String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   refreshTokenHash String?
 
@@ -158,8 +169,59 @@ model User {
   documents               Document[]
   reportedNonConformances NonConformance[]      @relation("ReportedNonConformances")
   resolvedNonConformances NonConformance[]      @relation("ResolvedNonConformances")
+  groups                  UserPermissionGroup[]
 
   @@index([tenantId])
+}
+
+/// Rol grubu: hangi sayfaların görünür/erişilebilir olduğunu belirler (sadece
+/// görüntüleme granülaritesinde — yazma/silme yetkisi hâlâ Role/writeRoles ile
+/// yönetilir). Kullanıcı hiçbir gruba üye değilse geriye dönük uyumluluk için
+/// kısıtlamasız (tüm sayfalar) kabul edilir — bkz. auth.service.ts computePages.
+model PermissionGroup {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  /// NAV sayfa anahtarları (packages/shared-types PAGE_KEYS ile eşleşir), örn. ["work-orders","parts"]
+  pages     String[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members UserPermissionGroup[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model UserPermissionGroup {
+  id      String @id @default(uuid())
+  userId  String
+  groupId String
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, groupId])
+}
+
+/// Tenant başına tek bir Active Directory/LDAP bağlantı yapılandırması — kullanıcı
+/// içe aktarma (sync) ve LDAP kullanıcılarının giriş doğrulaması için kullanılır.
+/// bindPasswordEnc AES-256-GCM ile şifrelenmiş saklanır, API yanıtında asla dönmez.
+model LdapConfig {
+  id              String   @id @default(uuid())
+  tenantId        String   @unique
+  host            String
+  port            Int      @default(389)
+  useTls          Boolean  @default(false)
+  bindDn          String
+  bindPasswordEnc String
+  baseDn          String
+  userFilter      String   @default("(objectClass=person)")
+  attrEmail       String   @default("mail")
+  attrName        String   @default("displayName")
+  defaultRole     Role     @default(OPERATOR)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model Customer {

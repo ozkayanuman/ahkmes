@@ -1,6 +1,8 @@
 import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { ShiftReportService } from "./shift-report.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import type { AuthUser } from "../common/types";
 
@@ -11,7 +13,8 @@ function parseDate(raw: string | undefined) {
 }
 
 @Controller("shift-report")
-@UseGuards(JwtAuthGuard)
+@RequirePage("shift-report")
+@UseGuards(JwtAuthGuard, PagesGuard)
 export class ShiftReportController {
   constructor(private readonly service: ShiftReportService) {}
 

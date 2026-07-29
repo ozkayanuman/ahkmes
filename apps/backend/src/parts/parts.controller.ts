@@ -24,13 +24,16 @@ import {
 import { PartsService } from "./parts.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
 
 @Controller("parts")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("parts")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class PartsController {
   constructor(private readonly service: PartsService) {}
 
@@ -88,7 +91,8 @@ export class PartsController {
 }
 
 @Controller("nc-programs")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("parts")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class NcProgramsController {
   constructor(private readonly service: PartsService) {}
 

@@ -25,6 +25,7 @@
     "@nestjs/websockets": "^10.4.15",
     "@prisma/client": "^5.22.0",
     "bcryptjs": "^2.4.3",
+    "ldapts": "^9.0.0",
     "minio": "^8.0.7",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

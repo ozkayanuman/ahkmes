@@ -18,13 +18,16 @@ import {
 import { CustomersService } from "./customers.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
 
 @Controller("customers")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("customers")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class CustomersController {
   constructor(private readonly service: CustomersService) {}
 

@@ -21,7 +21,9 @@ import {
 import { HierarchyService } from "./hierarchy.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
@@ -32,7 +34,8 @@ type AssignMachineDto = z.infer<typeof assignMachineSchema>;
 const WRITE_ROLES = ["ADMIN", "PLANNER"] as const;
 
 @Controller("hierarchy")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("hierarchy")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class HierarchyController {
   constructor(private readonly service: HierarchyService) {}
 

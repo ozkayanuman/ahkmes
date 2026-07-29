@@ -9,6 +9,7 @@ import {
   MaterialTypeSchema,
   NonConformanceActionTypeSchema,
   NonConformanceStatusSchema,
+  PageKeySchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
   RoleSchema,
@@ -41,6 +42,33 @@ export const updateUserSchema = createUserSchema.partial().omit({ password: true
 });
 export type CreateUserDto = z.infer<typeof createUserSchema>;
 export type UpdateUserDto = z.infer<typeof updateUserSchema>;
+
+// ---- Rol Grupları (sayfa görünürlüğü) ----
+export const createPermissionGroupSchema = z.object({
+  name: z.string().min(1),
+  pages: z.array(PageKeySchema),
+});
+export const updatePermissionGroupSchema = createPermissionGroupSchema.partial();
+export type CreatePermissionGroupDto = z.infer<typeof createPermissionGroupSchema>;
+export type UpdatePermissionGroupDto = z.infer<typeof updatePermissionGroupSchema>;
+
+export const assignGroupMemberSchema = z.object({ userId: idSchema });
+export type AssignGroupMemberDto = z.infer<typeof assignGroupMemberSchema>;
+
+// ---- Active Directory / LDAP ----
+export const ldapConfigSchema = z.object({
+  host: z.string().min(1),
+  port: z.coerce.number().int().min(1).max(65535).default(389),
+  useTls: z.boolean().default(false),
+  bindDn: z.string().min(1),
+  bindPassword: z.string().min(1),
+  baseDn: z.string().min(1),
+  userFilter: z.string().min(1).default("(objectClass=person)"),
+  attrEmail: z.string().min(1).default("mail"),
+  attrName: z.string().min(1).default("displayName"),
+  defaultRole: RoleSchema.default("OPERATOR"),
+});
+export type LdapConfigDto = z.infer<typeof ldapConfigSchema>;
 
 // ---- Customer ----
 export const createCustomerSchema = z.object({

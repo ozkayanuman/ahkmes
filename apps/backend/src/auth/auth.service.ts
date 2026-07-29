@@ -4,7 +4,9 @@ import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import type { LoginDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import type { JwtPayload } from "../common/types";
+import { PermissionGroupsService } from "../permission-groups/permission-groups.service";
+import { LdapService } from "../ldap/ldap.service";
+import type { JwtPayload, UserPages } from "../common/types";
 
 @Injectable()
 export class AuthService {
@@ -12,13 +14,26 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly permissionGroups: PermissionGroupsService,
+    private readonly ldap: LdapService,
   ) {}
 
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (!user || !user.isActive || !(await bcrypt.compare(dto.password, user.passwordHash))) {
+    if (!user || !user.isActive) {
       throw new UnauthorizedException("E-posta veya şifre hatalı");
     }
+
+    if (user.authSource === "LDAP") {
+      if (!user.externalDn) {
+        throw new UnauthorizedException("LDAP kullanıcısının dizin kaydı bulunamadı, tekrar içe aktarın");
+      }
+      const ok = await this.ldap.verifyCredentials(user.tenantId, user.externalDn, dto.password);
+      if (!ok) throw new UnauthorizedException("E-posta veya şifre hatalı");
+    } else if (!(await bcrypt.compare(dto.password, user.passwordHash))) {
+      throw new UnauthorizedException("E-posta veya şifre hatalı");
+    }
+
     return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId);
   }
 
@@ -48,7 +63,8 @@ export class AuthService {
     role: string,
     tenantId: string,
   ) {
-    const payload = { sub, email, name, role, tenantId };
+    const pages: UserPages = await this.permissionGroups.computeUserPages(sub);
+    const payload = { sub, email, name, role, tenantId, pages };
     const accessToken = await this.jwt.signAsync(payload, {
       expiresIn: this.config.get("JWT_ACCESS_TTL") ?? "15m",
     });

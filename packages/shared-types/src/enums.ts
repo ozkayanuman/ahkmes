@@ -58,3 +58,31 @@ export type NonConformanceStatus = z.infer<typeof NonConformanceStatusSchema>;
 
 export const NonConformanceActionTypeSchema = z.enum(["GENERIC", "SCRAP", "REWORK", "BLOCKING"]);
 export type NonConformanceActionType = z.infer<typeof NonConformanceActionTypeSchema>;
+
+export const UserAuthSourceSchema = z.enum(["LOCAL", "LDAP"]);
+export type UserAuthSource = z.infer<typeof UserAuthSourceSchema>;
+
+/// Rol gruplarının görünürlüğünü yönettiği NAV sayfaları — apps/web/src/components/layout.tsx
+/// NAV listesiyle birebir eşleşir ("dashboard" hariç, o her zaman herkese görünür).
+export const PAGE_KEYS = [
+  "customers",
+  "quotes",
+  "work-orders",
+  "purchase-orders",
+  "production",
+  "parts",
+  "suppliers",
+  "materials",
+  "machines",
+  "hierarchy",
+  "digital-twin",
+  "automation-gateway",
+  "non-conformances",
+  "genealogy",
+  "scheduling",
+  "shift-report",
+  "users",
+  "audit-log",
+] as const;
+export const PageKeySchema = z.enum(PAGE_KEYS);
+export type PageKey = z.infer<typeof PageKeySchema>;

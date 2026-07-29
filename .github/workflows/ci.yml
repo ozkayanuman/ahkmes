@@ -55,6 +55,19 @@ jobs:
             curl -sf http://localhost:9000/minio/health/live && break
             sleep 1
           done
+      # ldap.e2e-spec.ts gercek bir LDAP protokol sunucusuna karsi test eder (mock
+      # degil) — fabrikanin kendi Active Directory'sine baglanacak kodun gercekten
+      # calistigini kanitlamak icin. osixia/openldap dev/test amacli standart imaj.
+      - name: Start test LDAP server
+        run: |
+          docker run -d --name ahkmes-test-openldap -p 3389:389 \
+            -e LDAP_ORGANISATION="AHKMES Test" -e LDAP_DOMAIN="ahkmes.test" \
+            -e LDAP_ADMIN_PASSWORD="admin123" \
+            osixia/openldap:1.5.0
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/127.0.0.1/3389) 2>/dev/null && break
+            sleep 1
+          done
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ahkmes/shared-types build
       - run: pnpm --filter @ahkmes/backend exec prisma generate

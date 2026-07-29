@@ -8,7 +8,9 @@ import { z } from "zod";
 import { ProductionService } from "./production.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
@@ -18,7 +20,8 @@ type UpdateRunDto = z.infer<typeof updateProductionRunSchema>;
 const RUN_ROLES = ["ADMIN", "PLANNER", "FOREMAN", "OPERATOR"] as const;
 
 @Controller()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("production")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class ProductionController {
   constructor(private readonly service: ProductionService) {}
 

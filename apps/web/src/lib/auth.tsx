@@ -8,6 +8,15 @@ export interface AuthUser {
   name: string;
   role: Role;
   tenantId: string;
+  pages: "*" | string[];
+}
+
+/** Kullanıcının bir NAV sayfasına erişimi olup olmadığını kontrol eder — gruba
+ * atanmamışsa (pages === "*") her zaman true (geriye dönük uyumlu varsayılan). */
+export function hasPageAccess(user: AuthUser | null, page: string): boolean {
+  if (!user) return false;
+  if (user.pages === "*") return true;
+  return user.pages.includes(page);
 }
 
 interface AuthContextValue {

@@ -23,13 +23,16 @@ import type { WorkOrderStatus } from "@prisma/client";
 import { WorkOrdersService } from "./work-orders.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
 
 @Controller("work-orders")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePage("work-orders")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class WorkOrdersController {
   constructor(private readonly service: WorkOrdersService) {}
 
@@ -53,6 +56,7 @@ export class WorkOrdersController {
   }
 
   @Get(":id/genealogy")
+  @RequirePage("genealogy")
   genealogy(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.genealogy(user.tenantId, id);
   }

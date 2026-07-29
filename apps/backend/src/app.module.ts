@@ -26,6 +26,8 @@ import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
+import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
+import { LdapModule } from "./ldap/ldap.module";
 
 @Module({
   imports: [
@@ -56,6 +58,8 @@ import { ShiftReportModule } from "./shift-report/shift-report.module";
     OeeModule,
     AuditLogModule,
     ShiftReportModule,
+    PermissionGroupsModule,
+    LdapModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
