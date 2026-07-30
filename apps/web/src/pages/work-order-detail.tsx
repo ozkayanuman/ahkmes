@@ -107,6 +107,8 @@ export function WorkOrderDetailPage() {
       apiGet<{
         materialCost: number;
         materialCostPartial: boolean;
+        machineCost: number;
+        machineCostPartial: boolean;
         laborCost: number;
         laborCostPartial: boolean;
         totalCost: number;
@@ -323,7 +325,8 @@ export function WorkOrderDetailPage() {
           </div>
           <div className="mt-1 font-medium">{cost.data ? cost.data.totalCost.toFixed(2) : "—"}</div>
           <div className="mt-1 text-xs text-slate-400">
-            Malzeme: {cost.data ? cost.data.materialCost.toFixed(2) : "—"} · İşçilik:{" "}
+            Malzeme: {cost.data ? cost.data.materialCost.toFixed(2) : "—"} · Makine:{" "}
+            {cost.data ? cost.data.machineCost.toFixed(2) : "—"} · İşçilik:{" "}
             {cost.data ? cost.data.laborCost.toFixed(2) : "—"}
           </div>
         </Card>

@@ -42,6 +42,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   genealogy: "Genealogy",
   scheduling: "Scheduling",
   "shift-report": "Vardiya Raporu",
+  labor: "İşçilik Takibi",
   users: "Kullanıcılar",
   "audit-log": "Denetim İzi",
 };

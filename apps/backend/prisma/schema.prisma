@@ -159,6 +159,12 @@ model User {
 
   refreshTokenHash String?
 
+  /// Faz H: HR temelleri — opsiyonel, Machine.hourlyRate/Material.standardCost ile
+  /// aynı felsefe (backfill yok, eksikse ilgili maliyet hesabı partial işaretlenir).
+  department String?
+  position   String?
+  hourlyRate Decimal? @db.Decimal(18, 2)
+
   ncPrograms              NcProgram[]
   quotes                  Quote[]
   purchaseOrders          PurchaseOrder[]

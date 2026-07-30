@@ -326,6 +326,9 @@ export function UsersPage() {
           { name: "name", label: "Ad Soyad", required: true },
           { name: "role", label: "Rol", type: "select", required: true, options: ROLE_OPTIONS },
           { name: "isActive", label: "Aktif", type: "checkbox" },
+          { name: "department", label: "Departman" },
+          { name: "position", label: "Pozisyon" },
+          { name: "hourlyRate", label: "Saatlik Ücret", type: "number" },
         ]}
       />
       {showImport && <ImportCsvModal onClose={() => setShowImport(false)} />}

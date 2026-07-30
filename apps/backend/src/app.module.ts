@@ -26,6 +26,7 @@ import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
+import { LaborModule } from "./labor/labor.module";
 import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
 import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -79,6 +80,7 @@ import { ArModule } from "./ar/ar.module";
     OeeModule,
     AuditLogModule,
     ShiftReportModule,
+    LaborModule,
     PermissionGroupsModule,
     LdapModule,
     NotificationsModule,

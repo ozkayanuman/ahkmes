@@ -41,6 +41,7 @@ import { DigitalTwinPage } from "./pages/digital-twin";
 import { AndonPage } from "./pages/andon";
 import { AuditLogPage } from "./pages/audit-log";
 import { ShiftReportPage } from "./pages/shift-report";
+import { LaborPage } from "./pages/labor";
 import { PermissionGroupsPage } from "./pages/permission-groups";
 import { PageGuard } from "./components/page-guard";
 import { LaunchpadPage } from "./pages/launchpad";
@@ -134,6 +135,7 @@ export function App() {
         <Route path="/permission-groups" element={<PermissionGroupsPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
         <Route path="/shift-report" element={<PageGuard page="shift-report"><ShiftReportPage /></PageGuard>} />
+        <Route path="/labor" element={<PageGuard page="labor"><LaborPage /></PageGuard>} />
       </Route>
     </Routes>
   );

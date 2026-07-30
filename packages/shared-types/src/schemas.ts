@@ -43,6 +43,9 @@ export const createUserSchema = z.object({
   name: z.string().min(1),
   role: RoleSchema,
   isActive: z.boolean().default(true),
+  department: z.string().optional(),
+  position: z.string().optional(),
+  hourlyRate: z.coerce.number().nonnegative().optional(),
 });
 export const updateUserSchema = createUserSchema.partial().omit({ password: true }).extend({
   password: z.string().min(8).optional(),

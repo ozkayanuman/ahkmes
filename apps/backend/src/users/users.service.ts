@@ -12,6 +12,9 @@ const USER_SELECT = {
   role: true,
   isActive: true,
   authSource: true,
+  department: true,
+  position: true,
+  hourlyRate: true,
   createdAt: true,
   updatedAt: true,
 };

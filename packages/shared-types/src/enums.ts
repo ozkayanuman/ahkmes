@@ -140,6 +140,7 @@ export const PAGE_KEYS = [
   "scheduling",
   "mrp",
   "shift-report",
+  "labor",
   "users",
   "audit-log",
 ] as const;

@@ -24,6 +24,7 @@ describe("WorkOrdersService.cost", () => {
         startedAt: new Date("2026-01-01T00:00:00Z"),
         endedAt: new Date("2026-01-01T02:00:00Z"),
         machine: { hourlyRate: "100" },
+        operator: { hourlyRate: "50" },
       },
     ]);
 
@@ -31,9 +32,11 @@ describe("WorkOrdersService.cost", () => {
 
     expect(result.materialCost).toBe(25);
     expect(result.materialCostPartial).toBe(false);
-    expect(result.laborCost).toBe(200);
+    expect(result.machineCost).toBe(200);
+    expect(result.machineCostPartial).toBe(false);
+    expect(result.laborCost).toBe(100);
     expect(result.laborCostPartial).toBe(false);
-    expect(result.totalCost).toBe(225);
+    expect(result.totalCost).toBe(325);
     expect(result.note).toBeUndefined();
   });
 
@@ -41,12 +44,13 @@ describe("WorkOrdersService.cost", () => {
     const { service, prisma } = buildService();
     prisma.materialConsumption.findMany.mockResolvedValue([{ quantity: "10", material: { standardCost: null } }]);
     prisma.productionRun.findMany.mockResolvedValue([
-      { startedAt: new Date(), endedAt: new Date(), machine: null },
+      { startedAt: new Date(), endedAt: new Date(), machine: null, operator: { hourlyRate: null } },
     ]);
 
     const result = await service.cost("t1", "wo1");
 
     expect(result.materialCostPartial).toBe(true);
+    expect(result.machineCostPartial).toBe(true);
     expect(result.laborCostPartial).toBe(true);
     expect(result.note).toContain("eksik");
   });
