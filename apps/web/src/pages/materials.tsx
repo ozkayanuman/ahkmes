@@ -48,6 +48,7 @@ export function MaterialsPage() {
         },
         { name: "unit", label: "Birim (kg, adet, m…)", required: true },
         { name: "minStock", label: "Minimum Stok", type: "number" },
+        { name: "standardCost", label: "Standart Birim Maliyet", type: "number" },
       ]}
     />
   );

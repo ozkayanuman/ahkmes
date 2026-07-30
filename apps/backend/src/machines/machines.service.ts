@@ -42,6 +42,7 @@ export class MachinesService {
     runtimeHours: true,
     pmIntervalHours: true,
     lastPmRuntimeHours: true,
+    hourlyRate: true,
     createdAt: true,
     updatedAt: true,
     activeWorkOrder: { select: { id: true, woNo: true, status: true } },

@@ -138,6 +138,9 @@ export const createMaterialSchema = z.object({
   type: MaterialTypeSchema,
   unit: z.string().min(1),
   minStock: decimalString.optional(),
+  // Faz G Cost Accounting'de eklenmişti ama şemaya hiç girmemişti — WorkOrdersService.cost()
+  // bu alanı okuyordu ama UI'dan girilemiyordu (bkz. Faz H/I asimetri notu).
+  standardCost: decimalString.optional(),
 });
 export const updateMaterialSchema = createMaterialSchema.partial();
 export type CreateMaterialDto = z.infer<typeof createMaterialSchema>;
@@ -156,6 +159,9 @@ export const createMachineSchema = z.object({
   /// Faz I Predictive Maintenance: eşik girilirse (runtimeHours - lastPmRuntimeHours)
   /// aştığında öngörülü bakım tetiklenir.
   pmIntervalHours: z.coerce.number().nonnegative().optional(),
+  // Faz G Cost Accounting'de eklenmişti ama şemaya hiç girmemişti — WorkOrdersService.cost()
+  // bu alanı okuyordu ama UI'dan girilemiyordu (bkz. Faz H/I asimetri notu).
+  hourlyRate: z.coerce.number().nonnegative().optional(),
 });
 export const updateMachineSchema = createMachineSchema.partial();
 export type CreateMachineDto = z.infer<typeof createMachineSchema>;
