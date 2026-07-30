@@ -9,8 +9,15 @@ type Tx = Prisma.TransactionClient;
  */
 export async function nextDocNo(
   tx: Tx,
-  model: "quote" | "workOrder" | "purchaseOrder" | "purchaseProposal" | "productionProposal",
-  field: "quoteNo" | "woNo" | "poNo" | "ppNo" | "prNo",
+  model:
+    | "quote"
+    | "workOrder"
+    | "purchaseOrder"
+    | "purchaseProposal"
+    | "productionProposal"
+    | "rFQ"
+    | "salesOrder",
+  field: "quoteNo" | "woNo" | "poNo" | "ppNo" | "prNo" | "rfqNo" | "soNo",
   prefix: string,
 ): Promise<string> {
   const year = new Date().getFullYear();

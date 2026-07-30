@@ -149,8 +149,9 @@ export function MrpPage() {
     );
 
   const runMrp = useMutation({
-    mutationFn: () => apiPost("/mrp/run", {}),
-    onSuccess: (res: { purchaseProposal: unknown; productionProposals: unknown[] }) => {
+    mutationFn: () =>
+      apiPost<{ purchaseProposal: unknown; productionProposals: unknown[] }>("/mrp/run", {}),
+    onSuccess: (res) => {
       invalidate();
       const ppCount = res.purchaseProposal ? 1 : 0;
       toast(`MRP çalıştırıldı: ${ppCount} satınalma, ${res.productionProposals.length} üretim önerisi`, "success");

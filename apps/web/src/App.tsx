@@ -15,6 +15,8 @@ import { SchedulingPage } from "./pages/scheduling";
 import { UsersPage } from "./pages/users";
 import { QuotesPage } from "./pages/quotes";
 import { QuoteDetailPage } from "./pages/quote-detail";
+import { RfqPage } from "./pages/rfq";
+import { SalesOrdersPage } from "./pages/sales-orders";
 import { WorkOrdersPage } from "./pages/work-orders";
 import { WorkOrderDetailPage } from "./pages/work-order-detail";
 import { PurchaseOrdersPage } from "./pages/purchase-orders";
@@ -38,8 +40,10 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
+        <Route path="/rfq" element={<PageGuard page="rfq"><RfqPage /></PageGuard>} />
         <Route path="/quotes" element={<PageGuard page="quotes"><QuotesPage /></PageGuard>} />
         <Route path="/quotes/:id" element={<PageGuard page="quotes"><QuoteDetailPage /></PageGuard>} />
+        <Route path="/sales-orders" element={<PageGuard page="sales-orders"><SalesOrdersPage /></PageGuard>} />
         <Route path="/work-orders" element={<PageGuard page="work-orders"><WorkOrdersPage /></PageGuard>} />
         <Route
           path="/work-orders/:id"

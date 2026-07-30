@@ -31,6 +31,8 @@ import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { ApprovalsModule } from "./approvals/approvals.module";
 import { MrpModule } from "./mrp/mrp.module";
+import { RfqModule } from "./rfq/rfq.module";
+import { SalesOrdersModule } from "./sales-orders/sales-orders.module";
 
 @Module({
   imports: [
@@ -66,6 +68,8 @@ import { MrpModule } from "./mrp/mrp.module";
     NotificationsModule,
     ApprovalsModule,
     MrpModule,
+    RfqModule,
+    SalesOrdersModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

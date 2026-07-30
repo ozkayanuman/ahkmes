@@ -18,6 +18,12 @@ export type WorkOrderStatus = z.infer<typeof WorkOrderStatusSchema>;
 export const PurchaseOrderStatusSchema = z.enum(["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"]);
 export type PurchaseOrderStatus = z.infer<typeof PurchaseOrderStatusSchema>;
 
+export const RFQStatusSchema = z.enum(["DRAFT", "SENT", "CONVERTED", "CLOSED"]);
+export type RFQStatus = z.infer<typeof RFQStatusSchema>;
+
+export const SalesOrderStatusSchema = z.enum(["OPEN", "CLOSED", "CANCELLED"]);
+export type SalesOrderStatus = z.infer<typeof SalesOrderStatusSchema>;
+
 export const ProposalStatusSchema = z.enum([
   "DRAFT",
   "PENDING_APPROVAL",
@@ -75,7 +81,9 @@ export type UserAuthSource = z.infer<typeof UserAuthSourceSchema>;
 /// NAV listesiyle birebir eşleşir ("dashboard" hariç, o her zaman herkese görünür).
 export const PAGE_KEYS = [
   "customers",
+  "rfq",
   "quotes",
+  "sales-orders",
   "work-orders",
   "purchase-orders",
   "production",

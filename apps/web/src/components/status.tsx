@@ -24,6 +24,19 @@ export const PO_STATUS: Record<string, StatusInfo> = {
   CANCELLED: { label: "İptal", cls: "bg-red-100 text-red-700" },
 };
 
+export const RFQ_STATUS: Record<string, StatusInfo> = {
+  DRAFT: { label: "Taslak", cls: "bg-slate-100 text-slate-700" },
+  SENT: { label: "Gönderildi", cls: "bg-blue-100 text-blue-700" },
+  CONVERTED: { label: "Teklife Dönüştü", cls: "bg-green-100 text-green-700" },
+  CLOSED: { label: "Kapatıldı", cls: "bg-slate-100 text-slate-500" },
+};
+
+export const SALES_ORDER_STATUS: Record<string, StatusInfo> = {
+  OPEN: { label: "Açık", cls: "bg-blue-100 text-blue-700" },
+  CLOSED: { label: "Kapatıldı", cls: "bg-green-100 text-green-700" },
+  CANCELLED: { label: "İptal", cls: "bg-red-100 text-red-700" },
+};
+
 export function StatusBadge({
   map,
   status,

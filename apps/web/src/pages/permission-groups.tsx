@@ -11,8 +11,11 @@ import { useToast } from "../components/toast";
 
 const PAGE_LABELS: Record<PageKey, string> = {
   customers: "Müşteriler",
+  rfq: "Teklif Talepleri (RFQ)",
   quotes: "Teklifler",
+  "sales-orders": "Satış Siparişleri",
   "work-orders": "İş Emirleri",
+  mrp: "MRP Planlama",
   "purchase-orders": "Satınalma",
   production: "Operasyon",
   parts: "Parçalar",

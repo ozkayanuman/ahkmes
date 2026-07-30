@@ -25,6 +25,7 @@ interface QuoteLine {
   dueDate: string;
   part: PartOption;
   workOrders: { id: string; woNo: string }[];
+  salesOrderLines: { id: string; salesOrderId: string }[];
 }
 interface QuoteDetail {
   id: string;
@@ -58,7 +59,7 @@ export function QuoteDetailPage() {
   const [selectedLines, setSelectedLines] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
-  useInvalidateOn(["quote.updated", "workorder.updated"], ["/quotes"]);
+  useInvalidateOn(["quote.updated", "salesorder.updated"], ["/quotes"]);
 
   const query = useQuery({
     queryKey: ["/quotes", id],
@@ -119,17 +120,15 @@ export function QuoteDetailPage() {
   });
   const convert = useMutation({
     mutationFn: () =>
-      apiPost<{ workOrders: { id: string; woNo: string }[] }>(`/quotes/${id}/convert`, {
+      apiPost<{ salesOrder: { id: string; soNo: string } }>(`/quotes/${id}/convert`, {
         lineIds: selectedLines,
       }),
     onSuccess: (res) => {
       invalidate();
-      qc.invalidateQueries({ queryKey: ["/work-orders"] });
+      qc.invalidateQueries({ queryKey: ["/sales-orders"] });
       setConvertOpen(false);
-      toast(
-        `${res.workOrders.length} iş emri oluşturuldu: ${res.workOrders.map((w) => w.woNo).join(", ")}`,
-        "success",
-      );
+      toast(`Satış siparişi oluşturuldu: ${res.salesOrder.soNo}`, "success");
+      navigate("/sales-orders");
     },
     onError,
   });
@@ -155,7 +154,7 @@ export function QuoteDetailPage() {
     setLineModal({ mode: "edit", line });
   }
   function openConvert() {
-    setSelectedLines(quote.lines.filter((l) => l.workOrders.length === 0).map((l) => l.id));
+    setSelectedLines(quote.lines.filter((l) => l.salesOrderLines.length === 0).map((l) => l.id));
     setConvertOpen(true);
   }
 
@@ -204,7 +203,7 @@ export function QuoteDetailPage() {
           )}
           {canConvert && quote.status === "APPROVED" && (
             <Button onClick={openConvert}>
-              <Factory className="h-4 w-4" /> İş Emrine Dönüştür
+              <Factory className="h-4 w-4" /> Satış Siparişine Dönüştür
             </Button>
           )}
         </div>
@@ -251,7 +250,7 @@ export function QuoteDetailPage() {
           "Birim Fiyat",
           "Tutar",
           "Termin",
-          "İş Emri",
+          "Satış Siparişi",
           ...(canSales && isDraft ? ["İşlem"] : []),
         ]}
       >
@@ -267,16 +266,13 @@ export function QuoteDetailPage() {
             </td>
             <td className="px-4 py-3">{fmtDate(l.dueDate)}</td>
             <td className="px-4 py-3">
-              {l.workOrders.length === 0
-                ? "—"
-                : l.workOrders.map((w, i) => (
-                    <span key={w.id}>
-                      {i > 0 && ", "}
-                      <Link to={`/work-orders/${w.id}`} className="text-brand-700 hover:underline">
-                        {w.woNo}
-                      </Link>
-                    </span>
-                  ))}
+              {l.salesOrderLines.length === 0 ? (
+                "—"
+              ) : (
+                <Link to="/sales-orders" className="text-brand-700 hover:underline">
+                  Siparişte
+                </Link>
+              )}
             </td>
             {canSales && isDraft && (
               <td className="px-4 py-3">
@@ -377,13 +373,13 @@ export function QuoteDetailPage() {
         </form>
       </Modal>
 
-      <Modal open={convertOpen} title="İş Emrine Dönüştür" onClose={() => setConvertOpen(false)}>
+      <Modal open={convertOpen} title="Satış Siparişine Dönüştür" onClose={() => setConvertOpen(false)}>
         <p className="mb-3 text-sm text-slate-600">
-          İş emri oluşturulacak satırları seçin. Zaten dönüştürülmüş satırlar seçilemez.
+          Satış siparişine dahil edilecek satırları seçin. Zaten dönüştürülmüş satırlar seçilemez.
         </p>
         <div className="mb-4 space-y-2">
           {quote.lines.map((l) => {
-            const converted = l.workOrders.length > 0;
+            const converted = l.salesOrderLines.length > 0;
             return (
               <label
                 key={l.id}
@@ -401,7 +397,7 @@ export function QuoteDetailPage() {
                 />
                 <span className={converted ? "text-slate-400" : ""}>
                   {l.part.partNo} — {fmtQty(l.quantity)} adet, termin {fmtDate(l.dueDate)}
-                  {converted && ` (${l.workOrders.map((w) => w.woNo).join(", ")})`}
+                  {converted && " (siparişte)"}
                 </span>
               </label>
             );

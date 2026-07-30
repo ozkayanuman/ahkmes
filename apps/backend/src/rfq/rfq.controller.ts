@@ -1,30 +1,20 @@
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Query,
-  UseGuards,
-} from "@nestjs/common";
-import {
-  convertQuoteSchema,
-  createQuoteSchema,
-  quoteLineInputSchema,
-  quoteStatusUpdateSchema,
-  updateQuoteLineSchema,
-  updateQuoteSchema,
-  type ConvertQuoteDto,
-  type CreateQuoteDto,
-  type QuoteLineInputDto,
-  type QuoteStatusUpdateDto,
-  type UpdateQuoteDto,
-  type UpdateQuoteLineDto,
+  convertRfqSchema,
+  createRfqSchema,
+  rfqLineInputSchema,
+  rfqStatusUpdateSchema,
+  updateRfqLineSchema,
+  updateRfqSchema,
+  type ConvertRfqDto,
+  type CreateRfqDto,
+  type RfqLineInputDto,
+  type RfqStatusUpdateDto,
+  type UpdateRfqDto,
+  type UpdateRfqLineDto,
 } from "@ahkmes/shared-types";
-import type { QuoteStatus } from "@prisma/client";
-import { QuotesService } from "./quotes.service";
+import type { RFQStatus } from "@prisma/client";
+import { RfqService } from "./rfq.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { PagesGuard } from "../common/guards/pages.guard";
@@ -34,18 +24,14 @@ import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
 
-@Controller("quotes")
-@RequirePage("quotes")
+@Controller("rfq")
+@RequirePage("rfq")
 @UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
-export class QuotesController {
-  constructor(private readonly service: QuotesService) {}
+export class RfqController {
+  constructor(private readonly service: RfqService) {}
 
   @Get()
-  findAll(
-    @CurrentUser() user: AuthUser,
-    @Query("status") status?: QuoteStatus,
-    @Query("q") q?: string,
-  ) {
+  findAll(@CurrentUser() user: AuthUser, @Query("status") status?: RFQStatus, @Query("q") q?: string) {
     return this.service.findAll(user.tenantId, status, q);
   }
 
@@ -58,7 +44,7 @@ export class QuotesController {
   @Roles("ADMIN", "SALES")
   create(
     @CurrentUser() user: AuthUser,
-    @Body(new ZodValidationPipe(createQuoteSchema)) dto: CreateQuoteDto,
+    @Body(new ZodValidationPipe(createRfqSchema)) dto: CreateRfqDto,
   ) {
     return this.service.create(user.tenantId, user.userId, dto);
   }
@@ -68,7 +54,7 @@ export class QuotesController {
   update(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(updateQuoteSchema)) dto: UpdateQuoteDto,
+    @Body(new ZodValidationPipe(updateRfqSchema)) dto: UpdateRfqDto,
   ) {
     return this.service.update(user.tenantId, id, dto);
   }
@@ -78,7 +64,7 @@ export class QuotesController {
   setStatus(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(quoteStatusUpdateSchema)) dto: QuoteStatusUpdateDto,
+    @Body(new ZodValidationPipe(rfqStatusUpdateSchema)) dto: RfqStatusUpdateDto,
   ) {
     return this.service.setStatus(user.tenantId, id, dto.status);
   }
@@ -94,7 +80,7 @@ export class QuotesController {
   addLine(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(quoteLineInputSchema)) dto: QuoteLineInputDto,
+    @Body(new ZodValidationPipe(rfqLineInputSchema)) dto: RfqLineInputDto,
   ) {
     return this.service.addLine(user.tenantId, id, dto);
   }
@@ -105,27 +91,23 @@ export class QuotesController {
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
     @Param("lineId") lineId: string,
-    @Body(new ZodValidationPipe(updateQuoteLineSchema)) dto: UpdateQuoteLineDto,
+    @Body(new ZodValidationPipe(updateRfqLineSchema)) dto: UpdateRfqLineDto,
   ) {
     return this.service.updateLine(user.tenantId, id, lineId, dto);
   }
 
   @Delete(":id/lines/:lineId")
   @Roles("ADMIN", "SALES")
-  removeLine(
-    @CurrentUser() user: AuthUser,
-    @Param("id") id: string,
-    @Param("lineId") lineId: string,
-  ) {
+  removeLine(@CurrentUser() user: AuthUser, @Param("id") id: string, @Param("lineId") lineId: string) {
     return this.service.removeLine(user.tenantId, id, lineId);
   }
 
   @Post(":id/convert")
-  @Roles("ADMIN", "PLANNER")
+  @Roles("ADMIN", "SALES")
   convert(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(convertQuoteSchema)) dto: ConvertQuoteDto,
+    @Body(new ZodValidationPipe(convertRfqSchema)) dto: ConvertRfqDto,
   ) {
     return this.service.convert(user.tenantId, id, user.userId, dto);
   }

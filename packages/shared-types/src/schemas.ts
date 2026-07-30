@@ -12,7 +12,9 @@ import {
   PageKeySchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
+  RFQStatusSchema,
   RoleSchema,
+  SalesOrderStatusSchema,
   WorkOrderStatusSchema,
 } from "./enums";
 
@@ -204,6 +206,36 @@ export type QuoteLineInputDto = z.infer<typeof quoteLineInputSchema>;
 export type UpdateQuoteLineDto = z.infer<typeof updateQuoteLineSchema>;
 export type ConvertQuoteDto = z.infer<typeof convertQuoteSchema>;
 export type QuoteStatusUpdateDto = z.infer<typeof quoteStatusUpdateSchema>;
+
+// ---- RFQ (Faz C) — Quote'un öncesi, fiyatsız müşteri talebi ----
+export const rfqLineInputSchema = z.object({
+  partId: idSchema,
+  quantity: positiveQty,
+  dueDate: isoDate,
+});
+export const createRfqSchema = z.object({
+  customerId: idSchema,
+  validUntil: isoDate.optional(),
+  notes: z.string().optional(),
+  lines: z.array(rfqLineInputSchema).min(1),
+});
+export const rfqStatusUpdateSchema = z.object({ status: RFQStatusSchema });
+export const updateRfqSchema = createRfqSchema.omit({ lines: true }).partial();
+export const updateRfqLineSchema = rfqLineInputSchema.partial();
+export const convertRfqSchema = z.object({ lineIds: z.array(idSchema).optional() });
+export type CreateRfqDto = z.infer<typeof createRfqSchema>;
+export type UpdateRfqDto = z.infer<typeof updateRfqSchema>;
+export type RfqLineInputDto = z.infer<typeof rfqLineInputSchema>;
+export type UpdateRfqLineDto = z.infer<typeof updateRfqLineSchema>;
+export type ConvertRfqDto = z.infer<typeof convertRfqSchema>;
+export type RfqStatusUpdateDto = z.infer<typeof rfqStatusUpdateSchema>;
+
+// ---- SalesOrder (Faz C) — Quote.convert() artık bunu üretir; WorkOrder'a
+// üretime alma (release) ayrı bir adımdır ----
+export const salesOrderStatusUpdateSchema = z.object({ status: SalesOrderStatusSchema });
+export type SalesOrderStatusUpdateDto = z.infer<typeof salesOrderStatusUpdateSchema>;
+export const releaseSalesOrderSchema = z.object({ lineIds: z.array(idSchema).optional() });
+export type ReleaseSalesOrderDto = z.infer<typeof releaseSalesOrderSchema>;
 
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({

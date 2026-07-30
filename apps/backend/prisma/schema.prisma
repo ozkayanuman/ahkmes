@@ -173,6 +173,8 @@ model User {
   reportedNonConformances NonConformance[]      @relation("ReportedNonConformances")
   resolvedNonConformances NonConformance[]      @relation("ResolvedNonConformances")
   groups                  UserPermissionGroup[]
+  rfqs                    RFQ[]
+  salesOrders             SalesOrder[]
 
   @@index([tenantId])
 }
@@ -240,7 +242,9 @@ model Customer {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  quotes Quote[]
+  quotes      Quote[]
+  rfqs        RFQ[]
+  salesOrders SalesOrder[]
 
   @@index([tenantId])
 }
@@ -267,6 +271,8 @@ model Part {
   stock               PartStock?
   bomHeaders          BomHeader[]
   productionProposals ProductionProposal[]
+  rfqLines            RFQLine[]
+  salesOrderLines     SalesOrderLine[]
 
   @@unique([tenantId, partNo, revision])
   @@index([tenantId])
@@ -307,9 +313,10 @@ model Quote {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
-  customer  Customer    @relation(fields: [customerId], references: [id])
-  createdBy User        @relation(fields: [createdById], references: [id])
-  lines     QuoteLine[]
+  customer    Customer     @relation(fields: [customerId], references: [id])
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  lines       QuoteLine[]
+  salesOrders SalesOrder[]
 
   @@index([tenantId])
 }
@@ -325,9 +332,10 @@ model QuoteLine {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  quote      Quote       @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  part       Part        @relation(fields: [partId], references: [id])
-  workOrders WorkOrder[]
+  quote           Quote            @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  part            Part             @relation(fields: [partId], references: [id])
+  workOrders      WorkOrder[]
+  salesOrderLines SalesOrderLine[]
 
   @@index([tenantId])
 }
@@ -475,7 +483,11 @@ model WorkOrder {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
+  /// Faz C'den önceki (Quote'tan doğrudan) iş emirleri için korunur — yeni
+  /// akışta iş emirleri SalesOrderLine'dan release edilir (bkz. salesOrderLineId).
   quoteLine        QuoteLine?            @relation(fields: [quoteLineId], references: [id])
+  salesOrderLineId String?
+  salesOrderLine   SalesOrderLine?       @relation(fields: [salesOrderLineId], references: [id])
   part             Part                  @relation(fields: [partId], references: [id])
   machine          Machine?              @relation(fields: [machineId], references: [id])
   consumptions     MaterialConsumption[]
@@ -873,4 +885,102 @@ model ProductionProposal {
   part Part @relation(fields: [partId], references: [id])
 
   @@index([tenantId, status])
+}
+
+enum RFQStatus {
+  DRAFT
+  SENT
+  CONVERTED
+  CLOSED
+}
+
+/// Müşteri teklif talebi (RFQ) — Quote'un öncesi, fiyatsız. SENT durumundayken
+/// bir Quote'a dönüştürülür (bkz. RfqService.convert).
+model RFQ {
+  id          String    @id @default(uuid())
+  tenantId    String
+  rfqNo       String    @unique
+  customerId  String
+  status      RFQStatus @default(DRAFT)
+  validUntil  DateTime?
+  notes       String?
+  createdById String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  customer  Customer  @relation(fields: [customerId], references: [id])
+  createdBy User      @relation(fields: [createdById], references: [id])
+  lines     RFQLine[]
+
+  @@index([tenantId])
+}
+
+model RFQLine {
+  id        String   @id @default(uuid())
+  tenantId  String
+  rfqId     String
+  partId    String
+  quantity  Decimal  @db.Decimal(18, 3)
+  dueDate   DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rfq  RFQ  @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  part Part @relation(fields: [partId], references: [id])
+
+  @@index([tenantId])
+}
+
+enum SalesOrderStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+/// Onaylanmış Quote'tan üretilir (bkz. QuotesService.convert — Faz C'den
+/// itibaren Quote artık WorkOrder değil SalesOrder üretir). Üretime alma
+/// (WorkOrder oluşturma) ayrı bir adımdır — bkz. SalesOrdersService.release.
+model SalesOrder {
+  id          String           @id @default(uuid())
+  tenantId    String
+  soNo        String           @unique
+  customerId  String
+  quoteId     String?
+  status      SalesOrderStatus @default(OPEN)
+  currency    String           @default("TRY")
+  notes       String?
+  createdById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  customer  Customer         @relation(fields: [customerId], references: [id])
+  quote     Quote?           @relation(fields: [quoteId], references: [id])
+  createdBy User             @relation(fields: [createdById], references: [id])
+  lines     SalesOrderLine[]
+
+  @@index([tenantId])
+}
+
+model SalesOrderLine {
+  id           String   @id @default(uuid())
+  tenantId     String
+  salesOrderId String
+  quoteLineId  String?
+  partId       String
+  quantity     Decimal  @db.Decimal(18, 3)
+  unitPrice    Decimal  @db.Decimal(18, 2)
+  dueDate      DateTime
+  /// Delivery oluşturuldukça artar — sevk edilebilir kalan = quantity - shippedQty.
+  shippedQty   Decimal  @default(0) @db.Decimal(18, 3)
+  /// Invoice oluşturuldukça artar — faturalanabilir kalan = shippedQty - invoicedQty.
+  invoicedQty  Decimal  @default(0) @db.Decimal(18, 3)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  salesOrder SalesOrder  @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  quoteLine  QuoteLine?  @relation(fields: [quoteLineId], references: [id])
+  part       Part        @relation(fields: [partId], references: [id])
+  workOrders WorkOrder[]
+
+  @@index([tenantId])
 }

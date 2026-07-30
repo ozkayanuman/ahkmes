@@ -10,6 +10,7 @@ import type {
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { nextDocNo } from "../common/numbering";
+import { SalesOrdersService } from "../sales-orders/sales-orders.service";
 
 // DRAFT → SENT → APPROVED | REJECTED; onaylanan/reddedilen teklif değişmez
 const TRANSITIONS: Record<QuoteStatus, QuoteStatus[]> = {
@@ -22,6 +23,7 @@ const TRANSITIONS: Record<QuoteStatus, QuoteStatus[]> = {
 const LINE_INCLUDE = {
   part: { select: { id: true, partNo: true, revision: true, name: true } },
   workOrders: { select: { id: true, woNo: true } },
+  salesOrderLines: { select: { id: true, salesOrderId: true } },
 } as const;
 
 const QUOTE_INCLUDE = {
@@ -34,6 +36,7 @@ export class QuotesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly salesOrders: SalesOrdersService,
   ) {}
 
   findAll(tenantId: string, status?: QuoteStatus, q?: string) {
@@ -169,12 +172,14 @@ export class QuotesService {
     return this.findOne(tenantId, quoteId);
   }
 
-  // ---- Teklif → İş Emri dönüşümü (0b.2) ----
+  // ---- Teklif → Satış Siparişi dönüşümü (Faz C) ----
+  // Not: WorkOrder üretme mantığı artık burada değil — bkz.
+  // SalesOrdersService.release() (SalesOrderLine'dan üretime alma, ayrı adım).
 
-  async convert(tenantId: string, id: string, dto: ConvertQuoteDto) {
+  async convert(tenantId: string, id: string, userId: string, dto: ConvertQuoteDto) {
     const quote = await this.findOne(tenantId, id);
     if (quote.status !== "APPROVED") {
-      throw new ConflictException("Sadece onaylanmış (APPROVED) teklif iş emrine dönüştürülebilir");
+      throw new ConflictException("Sadece onaylanmış (APPROVED) teklif satış siparişine dönüştürülebilir");
     }
     const targetLines = dto.lineIds?.length
       ? quote.lines.filter((l) => dto.lineIds!.includes(l.id))
@@ -182,37 +187,28 @@ export class QuotesService {
     if (dto.lineIds?.length && targetLines.length !== dto.lineIds.length) {
       throw new NotFoundException("Teklif satırı bulunamadı");
     }
-    const convertible = targetLines.filter((l) => l.workOrders.length === 0);
+    const convertible = targetLines.filter((l) => l.salesOrderLines.length === 0);
     if (convertible.length === 0) {
-      throw new ConflictException("Seçilen satırlar zaten iş emrine dönüştürülmüş");
+      throw new ConflictException("Seçilen satırlar zaten satış siparişine dönüştürülmüş");
     }
 
-    const workOrders = await this.prisma.$transaction(async (tx) => {
-      const created = [];
-      for (const line of convertible) {
-        const woNo = await nextDocNo(tx, "workOrder", "woNo", "IE");
-        created.push(
-          await tx.workOrder.create({
-            data: {
-              tenantId,
-              woNo,
-              quoteLineId: line.id,
-              partId: line.part.id,
-              quantity: line.quantity,
-              dueDate: line.dueDate,
-            },
-          }),
-        );
-      }
-      return created;
-    });
+    const salesOrder = await this.salesOrders.createFromQuote(
+      tenantId,
+      userId,
+      { id: quote.id, quoteNo: quote.quoteNo, customerId: quote.customerId, currency: quote.currency },
+      convertible.map((l) => ({
+        id: l.id,
+        part: { id: l.part.id },
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        dueDate: l.dueDate,
+      })),
+    );
 
-    this.realtime.emitToTenant(tenantId, "workorder.updated", {
-      ids: workOrders.map((w) => w.id),
-    });
+    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id: salesOrder.id });
     return {
-      workOrders,
-      skippedLineIds: targetLines.filter((l) => l.workOrders.length > 0).map((l) => l.id),
+      salesOrder,
+      skippedLineIds: targetLines.filter((l) => l.salesOrderLines.length > 0).map((l) => l.id),
     };
   }
 
