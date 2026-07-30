@@ -18,6 +18,12 @@ interface TwinMachine {
   lastEventAt?: string | null;
   posX?: number | null;
   posY?: number | null;
+  runtimeHours: number;
+  oeeToday: number | null;
+  goodCountToday: number;
+  scrapCountToday: number;
+  energyTodayKwh: number;
+  openAlarmCount: number;
   activeWorkOrder?: { id: string; woNo: string; status: string } | null;
 }
 interface TwinConnection {
@@ -293,6 +299,29 @@ export function DigitalTwinPage() {
                 <dt className="text-slate-500">Atanmış İş Emri</dt>
                 <dd>{selected.activeWorkOrder?.woNo ?? "—"}</dd>
               </div>
+              <div className="border-t border-slate-100 pt-2">
+                <dt className="text-slate-500">Bugünkü OEE</dt>
+                <dd className="font-semibold">
+                  {selected.oeeToday != null ? `%${(selected.oeeToday * 100).toFixed(0)}` : "—"}
+                  <span className="ml-1 font-normal text-slate-400">
+                    ({selected.goodCountToday} sağlam / {selected.scrapCountToday} hurda)
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Kümülatif Çalışma Süresi</dt>
+                <dd>{selected.runtimeHours.toFixed(1)} saat</dd>
+              </div>
+              <div>
+                <dt className="text-slate-500">Bugünkü Enerji Tüketimi</dt>
+                <dd>{selected.energyTodayKwh.toFixed(2)} kWh</dd>
+              </div>
+              {selected.openAlarmCount > 0 && (
+                <div>
+                  <dt className="text-slate-500">Açık Alarmlar</dt>
+                  <dd className="font-semibold text-red-600">{selected.openAlarmCount}</dd>
+                </div>
+              )}
             </dl>
           </Card>
         )}
