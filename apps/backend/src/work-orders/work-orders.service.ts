@@ -156,6 +156,60 @@ export class WorkOrdersService {
     };
   }
 
+  /**
+   * Faz G Cost Accounting: bir iş emrinin gerçekleşen maliyeti — malzeme maliyeti
+   * (CONSUMED tüketimler × Material.standardCost) + işçilik/makine maliyeti
+   * (ProductionRun süresi × Machine.hourlyRate). Her iki bileşen de yalnızca
+   * maliyet verisi girilmiş kalemler üzerinden hesaplanır; eksik veri sessizce
+   * atlanmaz, `partial` bayrağıyla işaretlenir (sahte/tam sayı izlenimi verilmez).
+   */
+  async cost(tenantId: string, workOrderId: string) {
+    const wo = await this.findOne(tenantId, workOrderId);
+
+    const consumptions = await this.prisma.materialConsumption.findMany({
+      where: { tenantId, workOrderId, type: "CONSUMED" },
+      include: { material: { select: { id: true, code: true, name: true, standardCost: true } } },
+    });
+    let materialCost = 0;
+    let materialCostPartial = false;
+    for (const c of consumptions) {
+      if (c.material.standardCost === null) {
+        materialCostPartial = true;
+        continue;
+      }
+      materialCost += Number(c.quantity) * Number(c.material.standardCost);
+    }
+
+    const runs = await this.prisma.productionRun.findMany({
+      where: { tenantId, workOrderId },
+      include: { machine: { select: { id: true, name: true, hourlyRate: true } } },
+    });
+    let laborCost = 0;
+    let laborCostPartial = false;
+    for (const r of runs) {
+      if (!r.machine || r.machine.hourlyRate === null) {
+        laborCostPartial = true;
+        continue;
+      }
+      const end = r.endedAt ?? new Date();
+      const hours = Math.max(0, (end.getTime() - r.startedAt.getTime()) / 1000 / 3600);
+      laborCost += hours * Number(r.machine.hourlyRate);
+    }
+
+    return {
+      workOrderId: wo.id,
+      materialCost,
+      materialCostPartial,
+      laborCost,
+      laborCostPartial,
+      totalCost: materialCost + laborCost,
+      note:
+        materialCostPartial || laborCostPartial
+          ? "Bazı malzeme/makine kayıtlarında maliyet verisi (standardCost/hourlyRate) girilmediği için toplam maliyet eksiktir."
+          : undefined,
+    };
+  }
+
   /** Basit Scheduling/Gantt: bir iş emrinin planlanan başlangıç/bitiş tarihini ayarlar. */
   async schedule(tenantId: string, id: string, dto: ScheduleWorkOrderDto) {
     await this.findOne(tenantId, id);

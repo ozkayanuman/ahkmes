@@ -37,6 +37,8 @@ const PAGE_LABELS: Record<PageKey, string> = {
   recipes: "Reçeteler",
   spc: "SPC",
   alarms: "Alarmlar",
+  ar: "Alacaklar (AR)",
+  ap: "Borçlar (AP)",
   genealogy: "Genealogy",
   scheduling: "Scheduling",
   "shift-report": "Vardiya Raporu",

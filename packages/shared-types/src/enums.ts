@@ -124,6 +124,8 @@ export const PAGE_KEYS = [
   "recipes",
   "spc",
   "alarms",
+  "ar",
+  "ap",
   "purchase-orders",
   "production",
   "parts",

@@ -17,6 +17,7 @@ export class InvoiceController {
   constructor(private readonly service: InvoiceService) {}
 
   @Get()
+  @RequirePage("sales-orders", "ar")
   findAll(@CurrentUser() user: AuthUser, @Query("salesOrderId") salesOrderId?: string) {
     return this.service.findAll(user.tenantId, salesOrderId);
   }

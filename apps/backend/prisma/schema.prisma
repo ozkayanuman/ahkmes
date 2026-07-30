@@ -186,6 +186,9 @@ model User {
   maintenanceOrders       MaintenanceOrder[]
   spcMeasurements         SpcMeasurement[]
   acknowledgedAlarms      MachineStatusEvent[]  @relation("AcknowledgedAlarms")
+  supplierInvoicesCreated SupplierInvoice[]
+  supplierPaymentsCreated SupplierPayment[]
+  customerPaymentsCreated CustomerPayment[]
 
   @@index([tenantId])
 }
@@ -257,6 +260,7 @@ model Customer {
   rfqs          RFQ[]
   salesOrders   SalesOrder[]
   activityNotes CustomerNote[]
+  payments      CustomerPayment[]
 
   @@index([tenantId])
 }
@@ -382,6 +386,10 @@ model Machine {
   /// sadece saha planı sürükle-bırak editörü bu alanları okur/yazar.
   posX              Float?
   posY              Float?
+  /// Faz G Cost Accounting: bu makinedeki üretim süresinin saatlik maliyeti —
+  /// opsiyonel, girilmezse iş emri maliyet hesaplamasında işçilik/makine katkısı
+  /// bu makine için "veri yok" olarak işaretlenir.
+  hourlyRate        Decimal?             @db.Decimal(18, 2)
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -612,21 +620,26 @@ model Supplier {
 
   purchaseOrders    PurchaseOrder[]
   purchaseProposals PurchaseProposal[]
+  supplierInvoices  SupplierInvoice[]
+  payments          SupplierPayment[]
 
   @@index([tenantId])
 }
 
 model Material {
-  id        String       @id @default(uuid())
-  tenantId  String
-  code      String
-  name      String
-  type      MaterialType
-  unit      String
-  stockQty  Decimal      @default(0) @db.Decimal(18, 3)
-  minStock  Decimal?     @db.Decimal(18, 3)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id           String       @id @default(uuid())
+  tenantId     String
+  code         String
+  name         String
+  type         MaterialType
+  unit         String
+  stockQty     Decimal      @default(0) @db.Decimal(18, 3)
+  minStock     Decimal?     @db.Decimal(18, 3)
+  /// Faz G Cost Accounting: standart birim maliyet — opsiyonel, girilmezse iş emri
+  /// maliyet hesaplamasında bu malzemenin katkısı "veri yok" olarak işaretlenir.
+  standardCost Decimal?     @db.Decimal(18, 4)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   purchaseOrderLines    PurchaseOrderLine[]
   consumptions          MaterialConsumption[]
@@ -650,9 +663,10 @@ model PurchaseOrder {
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
-  supplier  Supplier            @relation(fields: [supplierId], references: [id])
-  createdBy User                @relation(fields: [createdById], references: [id])
-  lines     PurchaseOrderLine[]
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  createdBy        User                @relation(fields: [createdById], references: [id])
+  lines            PurchaseOrderLine[]
+  supplierInvoices SupplierInvoice[]
 
   @@index([tenantId])
 }
@@ -665,13 +679,127 @@ model PurchaseOrderLine {
   quantity        Decimal  @db.Decimal(18, 3)
   unitPrice       Decimal  @db.Decimal(18, 2)
   receivedQty     Decimal  @default(0) @db.Decimal(18, 3)
+  /// Faz G AP: SupplierInvoice oluşturuldukça artar — faturalanabilir kalan =
+  /// receivedQty - invoicedQty (Invoice/SalesOrderLine ile aynı desen).
+  invoicedQty     Decimal  @default(0) @db.Decimal(18, 3)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  material      Material      @relation(fields: [materialId], references: [id])
+  purchaseOrder        PurchaseOrder         @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  material             Material              @relation(fields: [materialId], references: [id])
+  supplierInvoiceLines SupplierInvoiceLine[]
 
   @@index([tenantId])
+}
+
+/// Faz G AP: tedarikçi faturası — Invoice/InvoiceLine ile birebir aynı desen
+/// (Delivery/SalesOrder tarafının aynısı, alım tarafında). Sadece kesildi/iptal
+/// durumu var; ödeme takibi SupplierPayment/SupplierPaymentAllocation ile ayrı.
+model SupplierInvoice {
+  id              String        @id @default(uuid())
+  tenantId        String
+  sinNo           String        @unique
+  purchaseOrderId String
+  supplierId      String
+  status          InvoiceStatus @default(ISSUED)
+  issuedDate      DateTime      @default(now())
+  notes           String?
+  createdById     String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  purchaseOrder PurchaseOrder               @relation(fields: [purchaseOrderId], references: [id])
+  supplier      Supplier                    @relation(fields: [supplierId], references: [id])
+  createdBy     User                        @relation(fields: [createdById], references: [id])
+  lines         SupplierInvoiceLine[]
+  allocations   SupplierPaymentAllocation[]
+
+  @@index([tenantId, purchaseOrderId])
+  @@index([tenantId, supplierId])
+}
+
+model SupplierInvoiceLine {
+  id                  String  @id @default(uuid())
+  tenantId            String
+  supplierInvoiceId   String
+  purchaseOrderLineId String
+  qty                 Decimal @db.Decimal(18, 3)
+  /// Fatura kesim anındaki birim fiyat — PurchaseOrderLine.unitPrice'tan kopyalanır,
+  /// PurchaseOrderLine sonradan değişse bile faturanın tutarı sabit kalır.
+  unitPrice           Decimal @db.Decimal(18, 2)
+
+  supplierInvoice   SupplierInvoice   @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  purchaseOrderLine PurchaseOrderLine @relation(fields: [purchaseOrderLineId], references: [id])
+
+  @@index([tenantId, supplierInvoiceId])
+}
+
+/// Faz G AP: tedarikçiye yapılan ödeme — bir veya birden fazla SupplierInvoice'a
+/// bölüştürülür (allocations). amount, allocation toplamından türetilir (tek
+/// doğru kaynak allocations'tır).
+model SupplierPayment {
+  id          String   @id @default(uuid())
+  tenantId    String
+  spNo        String   @unique
+  supplierId  String
+  amount      Decimal  @db.Decimal(18, 2)
+  paymentDate DateTime @default(now())
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  supplier    Supplier                    @relation(fields: [supplierId], references: [id])
+  createdBy   User                        @relation(fields: [createdById], references: [id])
+  allocations SupplierPaymentAllocation[]
+
+  @@index([tenantId, supplierId])
+}
+
+model SupplierPaymentAllocation {
+  id                String  @id @default(uuid())
+  tenantId          String
+  supplierPaymentId String
+  supplierInvoiceId String
+  amount            Decimal @db.Decimal(18, 2)
+
+  supplierPayment SupplierPayment @relation(fields: [supplierPaymentId], references: [id], onDelete: Cascade)
+  supplierInvoice SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id])
+
+  @@index([tenantId, supplierInvoiceId])
+}
+
+/// Faz G AR: müşteriden alınan ödeme — bir veya birden fazla Invoice'a
+/// bölüştürülür (allocations), SupplierPayment ile aynı desen (alım/satım
+/// simetrisi).
+model CustomerPayment {
+  id          String   @id @default(uuid())
+  tenantId    String
+  cpNo        String   @unique
+  customerId  String
+  amount      Decimal  @db.Decimal(18, 2)
+  paymentDate DateTime @default(now())
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  customer    Customer                    @relation(fields: [customerId], references: [id])
+  createdBy   User                        @relation(fields: [createdById], references: [id])
+  allocations CustomerPaymentAllocation[]
+
+  @@index([tenantId, customerId])
+}
+
+model CustomerPaymentAllocation {
+  id                String  @id @default(uuid())
+  tenantId          String
+  customerPaymentId String
+  invoiceId         String
+  amount            Decimal @db.Decimal(18, 2)
+
+  customerPayment CustomerPayment @relation(fields: [customerPaymentId], references: [id], onDelete: Cascade)
+  invoice         Invoice         @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId, invoiceId])
 }
 
 model MaterialConsumption {
@@ -1187,9 +1315,10 @@ model Invoice {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  salesOrder SalesOrder    @relation(fields: [salesOrderId], references: [id])
-  createdBy  User          @relation(fields: [createdById], references: [id])
-  lines      InvoiceLine[]
+  salesOrder  SalesOrder                  @relation(fields: [salesOrderId], references: [id])
+  createdBy   User                        @relation(fields: [createdById], references: [id])
+  lines       InvoiceLine[]
+  allocations CustomerPaymentAllocation[]
 
   @@index([tenantId, salesOrderId])
 }

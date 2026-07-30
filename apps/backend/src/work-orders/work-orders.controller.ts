@@ -55,6 +55,11 @@ export class WorkOrdersController {
     return this.service.oee(user.tenantId, id);
   }
 
+  @Get(":id/cost")
+  cost(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.cost(user.tenantId, id);
+  }
+
   @Get(":id/genealogy")
   @RequirePage("genealogy")
   genealogy(@CurrentUser() user: AuthUser, @Param("id") id: string) {

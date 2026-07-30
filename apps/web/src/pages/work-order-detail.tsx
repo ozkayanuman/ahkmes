@@ -101,6 +101,18 @@ export function WorkOrderDetailPage() {
         note?: string;
       }>(`/work-orders/${id}/oee`),
   });
+  const cost = useQuery({
+    queryKey: ["/work-orders", id, "cost"],
+    queryFn: () =>
+      apiGet<{
+        materialCost: number;
+        materialCostPartial: boolean;
+        laborCost: number;
+        laborCostPartial: boolean;
+        totalCost: number;
+        note?: string;
+      }>(`/work-orders/${id}/cost`),
+  });
   const machines = useQuery({
     queryKey: ["/machines"],
     queryFn: () => apiGet<MachineOption[]>("/machines"),
@@ -303,6 +315,16 @@ export function WorkOrderDetailPage() {
           <div className="mt-1 text-xs text-slate-400">
             Kalite: {oee.data?.quality != null ? `${(oee.data.quality * 100).toFixed(0)}%` : "—"} · Perf:{" "}
             {oee.data?.performance != null ? `${(oee.data.performance * 100).toFixed(0)}%` : "—"}
+          </div>
+        </Card>
+        <Card>
+          <div className="text-xs uppercase text-slate-500" title={cost.data?.note}>
+            Maliyet {cost.data?.note ? "(eksik veri)" : ""}
+          </div>
+          <div className="mt-1 font-medium">{cost.data ? cost.data.totalCost.toFixed(2) : "—"}</div>
+          <div className="mt-1 text-xs text-slate-400">
+            Malzeme: {cost.data ? cost.data.materialCost.toFixed(2) : "—"} · İşçilik:{" "}
+            {cost.data ? cost.data.laborCost.toFixed(2) : "—"}
           </div>
         </Card>
       </div>

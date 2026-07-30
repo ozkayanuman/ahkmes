@@ -607,6 +607,40 @@ export type UpdateAlarmDefinitionDto = z.infer<typeof updateAlarmDefinitionSchem
 export const acknowledgeAlarmSchema = z.object({ note: z.string().optional() });
 export type AcknowledgeAlarmDto = z.infer<typeof acknowledgeAlarmSchema>;
 
+// ---- Faz G AP (Accounts Payable) — SupplierInvoice, Invoice ile aynı desen ----
+export const supplierInvoiceLineInputSchema = z.object({
+  purchaseOrderLineId: idSchema,
+  qty: positiveQty,
+});
+export const createSupplierInvoiceSchema = z.object({
+  purchaseOrderId: idSchema,
+  notes: z.string().optional(),
+  lines: z.array(supplierInvoiceLineInputSchema).min(1),
+});
+export type CreateSupplierInvoiceDto = z.infer<typeof createSupplierInvoiceSchema>;
+
+export const paymentAllocationInputSchema = z.object({
+  amount: positiveQty,
+});
+export const createSupplierPaymentSchema = z.object({
+  supplierId: idSchema,
+  paymentDate: isoDate.optional(),
+  notes: z.string().optional(),
+  allocations: z
+    .array(paymentAllocationInputSchema.extend({ supplierInvoiceId: idSchema }))
+    .min(1),
+});
+export type CreateSupplierPaymentDto = z.infer<typeof createSupplierPaymentSchema>;
+
+// ---- Faz G AR (Accounts Receivable) — CustomerPayment, SupplierPayment ile aynı desen ----
+export const createCustomerPaymentSchema = z.object({
+  customerId: idSchema,
+  paymentDate: isoDate.optional(),
+  notes: z.string().optional(),
+  allocations: z.array(paymentAllocationInputSchema.extend({ invoiceId: idSchema })).min(1),
+});
+export type CreateCustomerPaymentDto = z.infer<typeof createCustomerPaymentSchema>;
+
 // ---- MRP (Faz B) — proposal onay/red, gerekirse tedarikçisiz öneriye tedarikçi atanır ----
 export const mrpProposalDecisionSchema = z.object({
   note: z.string().optional(),

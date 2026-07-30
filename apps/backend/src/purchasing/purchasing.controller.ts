@@ -37,6 +37,7 @@ export class PurchasingController {
   constructor(private readonly service: PurchasingService) {}
 
   @Get()
+  @RequirePage("purchase-orders", "ap")
   findAll(
     @CurrentUser() user: AuthUser,
     @Query("status") status?: PurchaseOrderStatus,
@@ -46,6 +47,7 @@ export class PurchasingController {
   }
 
   @Get(":id")
+  @RequirePage("purchase-orders", "ap")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);
   }

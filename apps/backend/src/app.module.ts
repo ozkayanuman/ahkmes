@@ -47,6 +47,8 @@ import { MaintenanceOrdersModule } from "./maintenance-orders/maintenance-orders
 import { RecipesModule } from "./recipes/recipes.module";
 import { SpcModule } from "./spc/spc.module";
 import { AlarmsModule } from "./alarms/alarms.module";
+import { ApModule } from "./ap/ap.module";
+import { ArModule } from "./ar/ar.module";
 
 @Module({
   imports: [
@@ -98,6 +100,8 @@ import { AlarmsModule } from "./alarms/alarms.module";
     RecipesModule,
     SpcModule,
     AlarmsModule,
+    ApModule,
+    ArModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

@@ -32,6 +32,7 @@ export class CustomersController {
   constructor(private readonly service: CustomersService) {}
 
   @Get()
+  @RequirePage("customers", "ar")
   findAll(@CurrentUser() user: AuthUser, @Query("q") q?: string) {
     return this.service.findAll(user.tenantId, q);
   }

@@ -5,7 +5,7 @@ import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { nextDocNo } from "../common/numbering";
 
 const INVOICE_INCLUDE = {
-  salesOrder: { select: { id: true, soNo: true } },
+  salesOrder: { select: { id: true, soNo: true, customerId: true, customer: { select: { id: true, name: true } } } },
   createdBy: { select: { id: true, name: true } },
   lines: {
     include: {
@@ -14,6 +14,9 @@ const INVOICE_INCLUDE = {
       },
     },
   },
+  // Faz G AR: ödeme tahsislerinin toplamı — kalan bakiye (total - allocated) web
+  // tarafında hesaplanır, ayrı bir "balance" alanı persist edilmez.
+  allocations: { select: { amount: true } },
 } as const;
 
 /** Fatura — sadece kesildi/iptal durumu var, ödeme/AR takibi yok (Faz G

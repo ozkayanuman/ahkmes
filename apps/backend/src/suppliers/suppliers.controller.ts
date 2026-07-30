@@ -32,6 +32,7 @@ export class SuppliersController {
   constructor(private readonly service: SuppliersService) {}
 
   @Get()
+  @RequirePage("suppliers", "ap")
   findAll(@CurrentUser() user: AuthUser, @Query("q") q?: string) {
     return this.service.findAll(user.tenantId, q);
   }
