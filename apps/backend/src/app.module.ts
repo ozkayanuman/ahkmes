@@ -40,6 +40,10 @@ import { WarehousesModule } from "./warehouses/warehouses.module";
 import { LotsModule } from "./lots/lots.module";
 import { TransferOrdersModule } from "./transfer-orders/transfer-orders.module";
 import { CycleCountsModule } from "./cycle-counts/cycle-counts.module";
+import { InspectionsModule } from "./inspections/inspections.module";
+import { CapaModule } from "./capa/capa.module";
+import { CalibrationsModule } from "./calibrations/calibrations.module";
+import { MaintenanceOrdersModule } from "./maintenance-orders/maintenance-orders.module";
 
 @Module({
   imports: [
@@ -84,6 +88,10 @@ import { CycleCountsModule } from "./cycle-counts/cycle-counts.module";
     LotsModule,
     TransferOrdersModule,
     CycleCountsModule,
+    InspectionsModule,
+    CapaModule,
+    CalibrationsModule,
+    MaintenanceOrdersModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

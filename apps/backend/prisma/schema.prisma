@@ -180,6 +180,10 @@ model User {
   customerNotes           CustomerNote[]
   transferOrders          TransferOrder[]
   cycleCounts             CycleCount[]
+  inspections             Inspection[]
+  capasCreated            Capa[]
+  calibrationsPerformed   Calibration[]
+  maintenanceOrders       MaintenanceOrder[]
 
   @@index([tenantId])
 }
@@ -377,14 +381,16 @@ model Machine {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  workOrders      WorkOrder[]
-  productionRuns  ProductionRun[]
-  activeWorkOrder WorkOrder?           @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
-  tags            MachineTag[]
-  unit            Unit?                @relation(fields: [unitId], references: [id])
-  connectionsFrom MachineConnection[]  @relation("ConnectionFrom")
-  connectionsTo   MachineConnection[]  @relation("ConnectionTo")
-  statusEvents    MachineStatusEvent[]
+  workOrders        WorkOrder[]
+  productionRuns    ProductionRun[]
+  activeWorkOrder   WorkOrder?           @relation("ActiveWorkOrder", fields: [activeWorkOrderId], references: [id])
+  tags              MachineTag[]
+  unit              Unit?                @relation(fields: [unitId], references: [id])
+  connectionsFrom   MachineConnection[]  @relation("ConnectionFrom")
+  connectionsTo     MachineConnection[]  @relation("ConnectionTo")
+  statusEvents      MachineStatusEvent[]
+  calibrations      Calibration[]
+  maintenanceOrders MaintenanceOrder[]
 
   @@index([tenantId])
 }
@@ -501,6 +507,7 @@ model WorkOrder {
   finishedEntries  FinishedGoodsEntry[]
   activeOnMachines Machine[]             @relation("ActiveWorkOrder")
   nonConformances  NonConformance[]
+  inspections      Inspection[]
 
   @@index([tenantId])
   @@index([status])
@@ -542,6 +549,8 @@ model NonConformance {
   productionRun ProductionRun? @relation(fields: [productionRunId], references: [id])
   reportedBy    User           @relation("ReportedNonConformances", fields: [reportedById], references: [id])
   resolvedBy    User?          @relation("ResolvedNonConformances", fields: [resolvedById], references: [id])
+  inspections   Inspection[]
+  capas         Capa[]
 
   @@index([tenantId])
   @@index([workOrderId])
@@ -665,6 +674,7 @@ model ProductionRun {
   machine         Machine?         @relation(fields: [machineId], references: [id])
   operator        User             @relation(fields: [operatorId], references: [id])
   nonConformances NonConformance[]
+  inspections     Inspection[]
 
   @@index([tenantId])
 }
@@ -1257,4 +1267,129 @@ model CycleCountLine {
   cycleCount CycleCount @relation(fields: [cycleCountId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, cycleCountId])
+}
+
+enum InspectionResult {
+  PASS
+  FAIL
+}
+
+/// Kalite kontrol noktası kaydı — NonConformance'ın (bir bulgu kaydı) aksine
+/// Inspection bir muayene/kontrol olayıdır. FAIL sonucunda servis katmanında
+/// otomatik NonConformance üretilir (nonConformanceId ile geriye bağlanır) —
+/// tıpkı ProductionService'in NonConformanceService'i çapraz-modül çağırdığı
+/// mevcut desen gibi.
+model Inspection {
+  id               String           @id @default(uuid())
+  tenantId         String
+  insNo            String           @unique
+  workOrderId      String
+  productionRunId  String?
+  checkpointName   String
+  result           InspectionResult
+  notes            String?
+  nonConformanceId String?          @unique
+  inspectedById    String
+  inspectedAt      DateTime         @default(now())
+  createdAt        DateTime         @default(now())
+
+  workOrder      WorkOrder       @relation(fields: [workOrderId], references: [id])
+  productionRun  ProductionRun?  @relation(fields: [productionRunId], references: [id])
+  nonConformance NonConformance? @relation(fields: [nonConformanceId], references: [id])
+  inspectedBy    User            @relation(fields: [inspectedById], references: [id])
+
+  @@index([tenantId, workOrderId])
+}
+
+enum CapaStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  CLOSED
+}
+
+/// Düzeltici/Önleyici Faaliyet (CAPA) — kök neden analizi + aksiyon planı +
+/// onay akışı. Onay Faz A'nın genel ApprovalRequest motoru üzerinden yürür
+/// (entity="capa"); bu tablo onay motorunu değiştirmez, sadece kendi
+/// status'unu CapaService içinde senkronize eder (approvals.service.ts'nin
+/// felsefesiyle tutarlı — motor hiçbir entity'yi otomatik dönüştürmez).
+model Capa {
+  id                     String     @id @default(uuid())
+  tenantId               String
+  dofNo                  String     @unique
+  sourceNonConformanceId String?
+  title                  String
+  rootCause              String?
+  actionPlan             String?
+  status                 CapaStatus @default(DRAFT)
+  createdById            String
+  closedAt               DateTime?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  sourceNonConformance NonConformance? @relation(fields: [sourceNonConformanceId], references: [id])
+  createdBy            User            @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId, status])
+}
+
+/// Makine kalibrasyon kaydı — takvim bazlı (nextDueDate). Sertifika/rapor
+/// dosyası istenirse Document'in polimorfik entityType="calibration" deseni
+/// kullanılır (bkz. packages/shared-types DocumentEntityTypeSchema), ayrı bir
+/// FK gerekmez.
+model Calibration {
+  id            String   @id @default(uuid())
+  tenantId      String
+  kalNo         String   @unique
+  machineId     String
+  calibratedAt  DateTime
+  nextDueDate   DateTime
+  notes         String?
+  performedById String
+  createdAt     DateTime @default(now())
+
+  machine     Machine @relation(fields: [machineId], references: [id])
+  performedBy User    @relation(fields: [performedById], references: [id])
+
+  @@index([tenantId, machineId])
+  @@index([tenantId, nextDueDate])
+}
+
+enum MaintenanceOrderType {
+  PREVENTIVE
+  CORRECTIVE
+}
+
+enum MaintenanceOrderStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+/// Bakım emri — Faz E MVP'de TAKVİM BAZLI (scheduledDate). Machine'de
+/// kümülatif çalışma saati sayacı yok (OEE hesaplaması MachineStatusEvent'ten
+/// anlık türetiyor, kalıcı sayaç tutmuyor) — runtime-hour bazlı tetikleme
+/// bilinçli olarak kapsam dışı bırakıldı, ileride Machine'e bir sayaç alanı
+/// eklenip bu modelin genişletilmesi gerekir.
+model MaintenanceOrder {
+  id            String                 @id @default(uuid())
+  tenantId      String
+  bakNo         String                 @unique
+  machineId     String
+  type          MaintenanceOrderType
+  scheduledDate DateTime
+  status        MaintenanceOrderStatus @default(PLANNED)
+  completedAt   DateTime?
+  notes         String?
+  createdById   String
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  machine   Machine @relation(fields: [machineId], references: [id])
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId, machineId])
+  @@index([tenantId, status])
 }

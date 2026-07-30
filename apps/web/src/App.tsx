@@ -22,6 +22,10 @@ import { WarehousesPage } from "./pages/warehouses";
 import { LotsPage } from "./pages/lots";
 import { TransferOrdersPage } from "./pages/transfer-orders";
 import { CycleCountsPage } from "./pages/cycle-counts";
+import { InspectionsPage } from "./pages/inspections";
+import { CapaPage } from "./pages/capa";
+import { CalibrationsPage } from "./pages/calibrations";
+import { MaintenanceOrdersPage } from "./pages/maintenance-orders";
 import { WorkOrdersPage } from "./pages/work-orders";
 import { WorkOrderDetailPage } from "./pages/work-order-detail";
 import { PurchaseOrdersPage } from "./pages/purchase-orders";
@@ -90,6 +94,10 @@ export function App() {
         <Route path="/lots" element={<PageGuard page="lots"><LotsPage /></PageGuard>} />
         <Route path="/transfer-orders" element={<PageGuard page="transfer-orders"><TransferOrdersPage /></PageGuard>} />
         <Route path="/cycle-counts" element={<PageGuard page="cycle-counts"><CycleCountsPage /></PageGuard>} />
+        <Route path="/inspections" element={<PageGuard page="inspections"><InspectionsPage /></PageGuard>} />
+        <Route path="/capa" element={<PageGuard page="capa"><CapaPage /></PageGuard>} />
+        <Route path="/calibrations" element={<PageGuard page="calibrations"><CalibrationsPage /></PageGuard>} />
+        <Route path="/maintenance-orders" element={<PageGuard page="maintenance-orders"><MaintenanceOrdersPage /></PageGuard>} />
         <Route path="/machines" element={<PageGuard page="machines"><MachinesPage /></PageGuard>} />
         <Route path="/hierarchy" element={<PageGuard page="hierarchy"><HierarchyPage /></PageGuard>} />
         <Route path="/digital-twin" element={<PageGuard page="digital-twin"><DigitalTwinPage /></PageGuard>} />

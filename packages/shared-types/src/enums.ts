@@ -36,6 +36,18 @@ export type TransferOrderStatus = z.infer<typeof TransferOrderStatusSchema>;
 export const CycleCountStatusSchema = z.enum(["OPEN", "POSTED"]);
 export type CycleCountStatus = z.infer<typeof CycleCountStatusSchema>;
 
+export const InspectionResultSchema = z.enum(["PASS", "FAIL"]);
+export type InspectionResult = z.infer<typeof InspectionResultSchema>;
+
+export const CapaStatusSchema = z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "CLOSED"]);
+export type CapaStatus = z.infer<typeof CapaStatusSchema>;
+
+export const MaintenanceOrderTypeSchema = z.enum(["PREVENTIVE", "CORRECTIVE"]);
+export type MaintenanceOrderType = z.infer<typeof MaintenanceOrderTypeSchema>;
+
+export const MaintenanceOrderStatusSchema = z.enum(["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]);
+export type MaintenanceOrderStatus = z.infer<typeof MaintenanceOrderStatusSchema>;
+
 export const ProposalStatusSchema = z.enum([
   "DRAFT",
   "PENDING_APPROVAL",
@@ -60,7 +72,7 @@ export type AuditAction = z.infer<typeof AuditActionSchema>;
 export const DocumentTypeSchema = z.enum(["STEP", "WORK_INSTRUCTION", "OTHER"]);
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
 
-export const DocumentEntityTypeSchema = z.enum(["part", "work-order"]);
+export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration"]);
 export type DocumentEntityType = z.infer<typeof DocumentEntityTypeSchema>;
 
 export const MachineEventTypeSchema = z.enum([
@@ -101,6 +113,10 @@ export const PAGE_KEYS = [
   "lots",
   "transfer-orders",
   "cycle-counts",
+  "inspections",
+  "capa",
+  "calibrations",
+  "maintenance-orders",
   "purchase-orders",
   "production",
   "parts",

@@ -10,7 +10,9 @@ import {
   NonConformanceActionTypeSchema,
   NonConformanceStatusSchema,
   PageKeySchema,
+  InspectionResultSchema,
   InvoiceStatusSchema,
+  MaintenanceOrderTypeSchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
   RFQStatusSchema,
@@ -323,6 +325,52 @@ export const createCycleCountSchema = z.object({
   lines: z.array(cycleCountLineInputSchema).min(1),
 });
 export type CreateCycleCountDto = z.infer<typeof createCycleCountSchema>;
+
+// ---- Inspection (Faz E) — FAIL sonucunda servis katmanında otomatik NonConformance üretir ----
+export const createInspectionSchema = z.object({
+  workOrderId: idSchema,
+  productionRunId: idSchema.optional(),
+  checkpointName: z.string().min(1),
+  result: InspectionResultSchema,
+  notes: z.string().optional(),
+});
+export type CreateInspectionDto = z.infer<typeof createInspectionSchema>;
+
+// ---- Capa (Faz E) — onay akışı ApprovalsService üzerinden yürür ----
+export const createCapaSchema = z.object({
+  sourceNonConformanceId: idSchema.optional(),
+  title: z.string().min(1),
+  rootCause: z.string().optional(),
+  actionPlan: z.string().optional(),
+});
+export type CreateCapaDto = z.infer<typeof createCapaSchema>;
+export const updateCapaSchema = z.object({
+  rootCause: z.string().optional(),
+  actionPlan: z.string().optional(),
+});
+export type UpdateCapaDto = z.infer<typeof updateCapaSchema>;
+export const decideCapaSchema = z.object({ note: z.string().optional() });
+export type DecideCapaDto = z.infer<typeof decideCapaSchema>;
+
+// ---- Calibration (Faz E) — takvim bazlı, Machine'e bağlı ----
+export const createCalibrationSchema = z.object({
+  machineId: idSchema,
+  calibratedAt: isoDate,
+  nextDueDate: isoDate,
+  notes: z.string().optional(),
+});
+export type CreateCalibrationDto = z.infer<typeof createCalibrationSchema>;
+
+// ---- MaintenanceOrder (Faz E) — takvim bazlı PM/CM, runtime-hour tetikleme kapsam dışı ----
+export const createMaintenanceOrderSchema = z.object({
+  machineId: idSchema,
+  type: MaintenanceOrderTypeSchema,
+  scheduledDate: isoDate,
+  notes: z.string().optional(),
+});
+export type CreateMaintenanceOrderDto = z.infer<typeof createMaintenanceOrderSchema>;
+export const completeMaintenanceOrderSchema = z.object({ notes: z.string().optional() });
+export type CompleteMaintenanceOrderDto = z.infer<typeof completeMaintenanceOrderSchema>;
 
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({

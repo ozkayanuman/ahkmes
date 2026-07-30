@@ -20,7 +20,11 @@ export async function nextDocNo(
     | "delivery"
     | "invoice"
     | "transferOrder"
-    | "cycleCount",
+    | "cycleCount"
+    | "inspection"
+    | "capa"
+    | "calibration"
+    | "maintenanceOrder",
   field:
     | "quoteNo"
     | "woNo"
@@ -32,7 +36,11 @@ export async function nextDocNo(
     | "dlvNo"
     | "invNo"
     | "toNo"
-    | "ccNo",
+    | "ccNo"
+    | "insNo"
+    | "dofNo"
+    | "kalNo"
+    | "bakNo",
   prefix: string,
 ): Promise<string> {
   const year = new Date().getFullYear();
