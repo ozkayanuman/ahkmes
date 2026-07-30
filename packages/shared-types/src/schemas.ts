@@ -388,6 +388,17 @@ export const createEnergyReadingSchema = z.object({
 });
 export type CreateEnergyReadingDto = z.infer<typeof createEnergyReadingSchema>;
 
+// ---- WebhookSubscription (Faz J Developer Platform) ----
+export const createWebhookSubscriptionSchema = z.object({
+  url: z.string().url(),
+  event: z.string().min(1),
+  secret: z.string().optional(),
+  isActive: z.boolean().default(true),
+});
+export const updateWebhookSubscriptionSchema = createWebhookSubscriptionSchema.partial();
+export type CreateWebhookSubscriptionDto = z.infer<typeof createWebhookSubscriptionSchema>;
+export type UpdateWebhookSubscriptionDto = z.infer<typeof updateWebhookSubscriptionSchema>;
+
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({
   quoteLineId: idSchema.optional(),

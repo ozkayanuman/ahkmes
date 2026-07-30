@@ -77,6 +77,23 @@ export const apiPatch = <T,>(path: string, body: unknown) =>
   api<T>(path, { method: "PATCH", body: JSON.stringify(body) });
 export const apiDelete = <T,>(path: string) => api<T>(path, { method: "DELETE" });
 
+// api()'nin aksine res.json() varsaymaz — CSV gibi ham dosya indirmelerinde
+// kullanılır, blob'u tarayıcıda anchor tıklamasıyla indirmeye zorlar.
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const { access } = getTokens();
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: access ? { Authorization: `Bearer ${access}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, await res.text().catch(() => null));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // multipart/form-data — Content-Type header'ı tarayıcı boundary ile kendisi ekler
 export async function apiUpload<T = unknown>(path: string, file: File): Promise<T> {
   const { access } = getTokens();

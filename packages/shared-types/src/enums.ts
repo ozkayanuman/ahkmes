@@ -144,6 +144,8 @@ export const PAGE_KEYS = [
   "labor",
   "users",
   "audit-log",
+  "webhooks",
+  "reports",
 ] as const;
 export const PageKeySchema = z.enum(PAGE_KEYS);
 export type PageKey = z.infer<typeof PageKeySchema>;

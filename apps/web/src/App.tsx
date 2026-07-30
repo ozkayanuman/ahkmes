@@ -43,6 +43,8 @@ import { AuditLogPage } from "./pages/audit-log";
 import { ShiftReportPage } from "./pages/shift-report";
 import { LaborPage } from "./pages/labor";
 import { EnergyPage } from "./pages/energy";
+import { WebhooksPage } from "./pages/webhooks";
+import { ReportsPage } from "./pages/reports";
 import { PermissionGroupsPage } from "./pages/permission-groups";
 import { PageGuard } from "./components/page-guard";
 import { LaunchpadPage } from "./pages/launchpad";
@@ -136,6 +138,8 @@ export function App() {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/permission-groups" element={<PermissionGroupsPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
+        <Route path="/reports" element={<PageGuard page="reports"><ReportsPage /></PageGuard>} />
+        <Route path="/webhooks" element={<PageGuard page="webhooks"><WebhooksPage /></PageGuard>} />
         <Route path="/shift-report" element={<PageGuard page="shift-report"><ShiftReportPage /></PageGuard>} />
         <Route path="/labor" element={<PageGuard page="labor"><LaborPage /></PageGuard>} />
       </Route>

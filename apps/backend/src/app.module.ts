@@ -28,6 +28,8 @@ import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { LaborModule } from "./labor/labor.module";
 import { EnergyModule } from "./energy/energy.module";
+import { WebhooksModule } from "./webhooks/webhooks.module";
+import { ReportsModule } from "./reports/reports.module";
 import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
 import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -83,6 +85,8 @@ import { ArModule } from "./ar/ar.module";
     ShiftReportModule,
     LaborModule,
     EnergyModule,
+    WebhooksModule,
+    ReportsModule,
     PermissionGroupsModule,
     LdapModule,
     NotificationsModule,

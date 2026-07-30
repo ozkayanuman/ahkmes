@@ -4,13 +4,16 @@ import { RealtimeGateway } from "./realtime.gateway";
 describe("RealtimeGateway", () => {
   let gateway: RealtimeGateway;
   let jwt: JwtService;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let webhooks: any;
 
   beforeEach(() => {
     jwt = new JwtService({ secret: "test-secret-test-secret-test-secret" });
-    gateway = new RealtimeGateway(jwt);
+    webhooks = { dispatch: jest.fn() };
+    gateway = new RealtimeGateway(jwt, webhooks);
   });
 
-  it("emitToTenant — tenant odasına olay yayınlar", () => {
+  it("emitToTenant — tenant odasına olay yayınlar ve webhook dispatch tetikler", () => {
     const emit = jest.fn();
     const to = jest.fn().mockReturnValue({ emit });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +23,7 @@ describe("RealtimeGateway", () => {
 
     expect(to).toHaveBeenCalledWith("tenant:t1");
     expect(emit).toHaveBeenCalledWith("stock.updated", { materialId: "m1" });
+    expect(webhooks.dispatch).toHaveBeenCalledWith("t1", "stock.updated", { materialId: "m1" });
   });
 
   it("handleConnection — geçerli JWT ile tenant odasına katılır", async () => {

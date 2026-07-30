@@ -196,6 +196,7 @@ model User {
   supplierPaymentsCreated SupplierPayment[]
   customerPaymentsCreated CustomerPayment[]
   energyReadingsCreated   EnergyReading[]
+  webhooksCreated         WebhookSubscription[]
 
   @@index([tenantId])
 }
@@ -1690,4 +1691,30 @@ model EnergyReading {
 
   @@index([tenantId, machineId])
   @@index([tenantId, recordedAt])
+}
+
+/// Faz J Developer Platform: dış sistemlere olay bildirimi — mevcut
+/// RealtimeGateway.emitToTenant() çağrı noktalarının tamamı otomatik olarak
+/// webhook kaynağı olur (bkz. RealtimeGateway). Cron/kuyruk yok, teslim
+/// fire-and-forget; lastStatus sadece görünürlük içindir, tam teslim geçmişi
+/// tutulmaz (MVP kapsamı — retry/backoff yok).
+model WebhookSubscription {
+  id              String    @id @default(uuid())
+  tenantId        String
+  url             String
+  /// Tam olay adı (örn. "workorder.updated") veya tüm olaylar için "*".
+  event           String
+  /// Ayarlanmışsa X-Webhook-Signature header'ında HMAC-SHA256 imzası gönderilir.
+  secret          String?
+  isActive        Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  lastStatus      String?
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, event])
 }

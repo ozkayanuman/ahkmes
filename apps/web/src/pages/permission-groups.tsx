@@ -35,6 +35,8 @@ const PAGE_LABELS: Record<PageKey, string> = {
   calibrations: "Kalibrasyon",
   "maintenance-orders": "Bakım Emirleri",
   energy: "Enerji İzleme",
+  webhooks: "Webhook'lar",
+  reports: "Raporlar",
   recipes: "Reçeteler",
   spc: "SPC",
   alarms: "Alarmlar",
