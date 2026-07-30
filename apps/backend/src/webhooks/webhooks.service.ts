@@ -1,18 +1,60 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { createHmac } from "node:crypto";
+import { isIPv4, isIPv6 } from "node:net";
+import { lookup } from "node:dns/promises";
 import type { CreateWebhookSubscriptionDto, UpdateWebhookSubscriptionDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
-const PRIVATE_HOST_PATTERNS = [
-  /^localhost$/i,
-  /^127\./,
-  /^0\.0\.0\.0$/,
-  /^::1$/,
-  /^10\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^169\.254\./,
-];
+/** Regex yerine gerçek sayısal IPv4 ayrıştırma — "0x7f000001" gibi alternatif
+ * yazımların yanlışlıkla geçmesini önler (regex sadece nokta-ayraçlı ondalık
+ * biçimi tanır, biçim dışı her şey aşağıda "özel" kabul edilir). */
+function ipv4ToInt(ip: string): number | null {
+  const octets = ip.split(".");
+  if (octets.length !== 4) return null;
+  let result = 0;
+  for (const o of octets) {
+    if (!/^\d{1,3}$/.test(o)) return null;
+    const n = Number(o);
+    if (n > 255) return null;
+    result = (result << 8) + n;
+  }
+  return result >>> 0;
+}
+
+function inCidr(ipInt: number, base: string, bits: number): boolean {
+  const baseInt = ipv4ToInt(base)!;
+  const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+  return (ipInt & mask) === (baseInt & mask);
+}
+
+function isPrivateIpv4(ip: string): boolean {
+  const n = ipv4ToInt(ip);
+  if (n === null) return true; // ayrıştırılamayan biçim — güvenli tarafta kal
+  return (
+    inCidr(n, "10.0.0.0", 8) ||
+    inCidr(n, "172.16.0.0", 12) ||
+    inCidr(n, "192.168.0.0", 16) ||
+    inCidr(n, "127.0.0.0", 8) ||
+    inCidr(n, "169.254.0.0", 16) ||
+    n === 0
+  );
+}
+
+/** Bir IP'nin (v4 veya v6) yerel/özel/link-local/ULA aralığında olup
+ * olmadığını — hostname string'i üzerinde değil, gerçek çözülmüş adres
+ * üzerinde kontrol eder (bkz. resolvesToPrivateIp — DNS rebinding koruması). */
+function isPrivateIp(ip: string): boolean {
+  if (isIPv4(ip)) return isPrivateIpv4(ip);
+  if (isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    if (lower === "::1" || lower === "::") return true;
+    if (lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isPrivateIpv4(mapped[1]);
+    return false;
+  }
+  return true; // tanınmayan biçim — güvenli tarafta kal
+}
 
 function assertPublicUrl(url: string) {
   let parsed: URL;
@@ -24,8 +66,25 @@ function assertPublicUrl(url: string) {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new BadRequestException("Webhook URL'i http(s) olmalı");
   }
-  if (PRIVATE_HOST_PATTERNS.some((p) => p.test(parsed.hostname))) {
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+  const isLiteralIp = isIPv4(hostname) || isIPv6(hostname);
+  if (hostname.toLowerCase() === "localhost" || (isLiteralIp && isPrivateIp(hostname))) {
     throw new BadRequestException("Webhook URL'i yerel/özel ağ adresine işaret edemez");
+  }
+  // Hostname bir domain adıysa burada DNS çözülmez — asıl güvenlik sınırı her
+  // teslimde deliverOne()'daki resolvesToPrivateIp() kontrolüdür (bkz. orada:
+  // onay anında public olan bir domain sonradan private bir IP'ye
+  // yönlendirilebilir — "DNS rebinding").
+}
+
+async function resolvesToPrivateIp(hostname: string): Promise<boolean> {
+  const clean = hostname.replace(/^\[|\]$/g, "");
+  if (isIPv4(clean) || isIPv6(clean)) return isPrivateIp(clean);
+  try {
+    const results = await lookup(clean, { all: true });
+    return results.length === 0 || results.some((r) => isPrivateIp(r.address));
+  } catch {
+    return true; // çözülemiyorsa güvenli tarafta kal
   }
 }
 
@@ -105,8 +164,25 @@ export class WebhooksService {
 
     let status: "success" | "failed";
     try {
-      const res = await fetch(url, { method: "POST", headers, body, signal: AbortSignal.timeout(5000) });
-      status = res.ok ? "success" : "failed";
+      const hostname = new URL(url).hostname;
+      if (await resolvesToPrivateIp(hostname)) {
+        // Kayıt anında public olan bir domain sonradan private bir IP'ye
+        // yönlendirilmiş (DNS rebinding) veya create()'ten sonra manipüle
+        // edilmiş olabilir — her teslimde yeniden doğrulanır.
+        this.logger.warn(`Webhook ${id}: hedef artık özel/yerel bir IP'ye çözülüyor, teslim engellendi`);
+        status = "failed";
+      } else {
+        // redirect: "manual" — bir yönlendirmeyi izlemek, hedefin private bir
+        // adrese SSRF yapmasının en yaygın yoludur; 3xx burada başarısız sayılır.
+        const res = await fetch(url, {
+          method: "POST",
+          headers,
+          body,
+          redirect: "manual",
+          signal: AbortSignal.timeout(5000),
+        });
+        status = res.ok ? "success" : "failed";
+      }
     } catch {
       status = "failed";
     }

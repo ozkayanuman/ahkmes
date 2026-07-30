@@ -1,8 +1,13 @@
 /** Faz J basit Custom Report: generic satır dizisini CSV metnine çevirir.
- * Değerler virgül/tırnak/yeni satır içeriyorsa RFC 4180'e göre tırnaklanır. */
+ * Değerler virgül/tırnak/yeni satır içeriyorsa RFC 4180'e göre tırnaklanır.
+ * `=`/`+`/`-`/`@`/tab/CR ile başlayan hücreler CSV Formula Injection'a karşı
+ * tek tırnak öneki ile "metinleştirilir" (Excel/Sheets bunları formül olarak
+ * yorumlayabilir — kullanıcı girişi içeren failureType/description/notes gibi
+ * alanlar bu riski taşır). */
 function escapeCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const s = value instanceof Date ? value.toISOString() : String(value);
+  let s = value instanceof Date ? value.toISOString() : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }

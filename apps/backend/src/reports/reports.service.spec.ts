@@ -53,6 +53,26 @@ describe("ReportsService.workOrdersCsv", () => {
     expect(csv).toContain("IE-2026-0002");
   });
 
+  it("=/+/-/@ ile başlayan değer CSV formula injection'a karşı tek tırnakla metinleştirilir", async () => {
+    const { service, prisma } = buildService();
+    prisma.workOrder.findMany.mockResolvedValue([
+      {
+        woNo: "=cmd|'/c calc'!A1",
+        part: { partNo: "P4", name: "Test" },
+        quantity: "1",
+        status: "PLANNED",
+        machine: null,
+        dueDate: new Date(),
+        createdAt: new Date(),
+      },
+    ]);
+
+    const csv = await service.workOrdersCsv("t1");
+
+    expect(csv).toContain("'=cmd|'/c calc'!A1");
+    expect(csv.split("\r\n")[1].startsWith("=")).toBe(false);
+  });
+
   it("virgül/tırnak içeren değer RFC 4180'e göre tırnaklanır", async () => {
     const { service, prisma } = buildService();
     prisma.workOrder.findMany.mockResolvedValue([

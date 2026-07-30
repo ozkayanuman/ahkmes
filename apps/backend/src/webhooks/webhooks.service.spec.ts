@@ -1,5 +1,12 @@
 import { WebhooksService } from "./webhooks.service";
 
+// dispatch() her teslimde gerçek DNS çözümlemesi yapıyor (SSRF/rebinding
+// koruması) — testlerin gerçek ağa çıkmaması için mock'lanır, varsayılan
+// olarak public bir IP döner.
+jest.mock("node:dns/promises", () => ({
+  lookup: jest.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma: any = {
