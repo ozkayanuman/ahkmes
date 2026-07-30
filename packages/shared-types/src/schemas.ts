@@ -16,6 +16,7 @@ import {
   RFQStatusSchema,
   RoleSchema,
   SalesOrderStatusSchema,
+  StockItemTypeSchema,
   WorkOrderStatusSchema,
 } from "./enums";
 
@@ -267,6 +268,61 @@ export type InvoiceStatusUpdateDto = z.infer<typeof invoiceStatusUpdateSchema>;
 // ---- CustomerNote (Faz C Pass 2) — basit CRM, append-only aktivite notu ----
 export const createCustomerNoteSchema = z.object({ note: z.string().min(1) });
 export type CreateCustomerNoteDto = z.infer<typeof createCustomerNoteSchema>;
+
+// ---- Warehouse / Bin (Faz D) ----
+export const createWarehouseSchema = z.object({
+  name: z.string().min(1),
+  code: z.string().optional(),
+});
+export const updateWarehouseSchema = createWarehouseSchema.partial();
+export type CreateWarehouseDto = z.infer<typeof createWarehouseSchema>;
+export type UpdateWarehouseDto = z.infer<typeof updateWarehouseSchema>;
+
+export const createBinSchema = z.object({
+  warehouseId: idSchema,
+  code: z.string().min(1),
+  name: z.string().optional(),
+});
+export const updateBinSchema = z.object({ name: z.string().optional() });
+export type CreateBinDto = z.infer<typeof createBinSchema>;
+export type UpdateBinDto = z.infer<typeof updateBinSchema>;
+
+// ---- Lot (Faz D) ----
+export const createLotSchema = z.object({
+  lotNo: z.string().min(1),
+  itemType: StockItemTypeSchema,
+  itemId: idSchema,
+  expiryDate: isoDate.optional(),
+});
+export type CreateLotDto = z.infer<typeof createLotSchema>;
+
+// ---- TransferOrder (Faz D) — Bin→Bin, Delivery gibi tek seferlik olay ----
+export const transferOrderLineInputSchema = z.object({
+  itemType: StockItemTypeSchema,
+  itemId: idSchema,
+  lotId: idSchema.optional(),
+  qty: positiveQty,
+});
+export const createTransferOrderSchema = z.object({
+  fromBinId: idSchema,
+  toBinId: idSchema,
+  notes: z.string().optional(),
+  lines: z.array(transferOrderLineInputSchema).min(1),
+});
+export type CreateTransferOrderDto = z.infer<typeof createTransferOrderSchema>;
+
+// ---- CycleCount (Faz D) — OPEN'da sayım girilir, POSTED'da StockBalance düzeltilir ----
+export const cycleCountLineInputSchema = z.object({
+  itemType: StockItemTypeSchema,
+  itemId: idSchema,
+  lotId: idSchema.optional(),
+  countedQty: decimalString.refine((n) => n >= 0, "Sayılan miktar negatif olamaz"),
+});
+export const createCycleCountSchema = z.object({
+  binId: idSchema,
+  lines: z.array(cycleCountLineInputSchema).min(1),
+});
+export type CreateCycleCountDto = z.infer<typeof createCycleCountSchema>;
 
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({

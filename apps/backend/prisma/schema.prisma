@@ -178,6 +178,8 @@ model User {
   deliveries              Delivery[]
   invoices                Invoice[]
   customerNotes           CustomerNote[]
+  transferOrders          TransferOrder[]
+  cycleCounts             CycleCount[]
 
   @@index([tenantId])
 }
@@ -1083,4 +1085,176 @@ model CustomerNote {
   author   User     @relation(fields: [authorId], references: [id])
 
   @@index([tenantId, customerId])
+}
+
+/// Faz D: lokasyon bazlı stok katmanı — Material.stockQty ve PartStock.qty
+/// (Faz 0-C'den beri var olan düz toplam alanlar) BİLİNÇLİ OLARAK KORUNUR,
+/// mevcut purchasing/finished-goods/delivery/mrp akışları bunlara dokunmaya
+/// devam eder. StockBalance bunların YANINDA, opsiyonel bir lokasyon detay
+/// katmanıdır — Bin-farkında hale getirilmemiş akışlar için henüz senkron
+/// değildir (ayrı bir sonraki faz/pass'in kapsamı, bilinçli bir sınır).
+model Warehouse {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  code      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bins Bin[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Bin {
+  id          String   @id @default(uuid())
+  tenantId    String
+  warehouseId String
+  code        String
+  name        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  warehouse     Warehouse       @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  stockBalances StockBalance[]
+  transfersFrom TransferOrder[] @relation("TransferFromBin")
+  transfersTo   TransferOrder[] @relation("TransferToBin")
+  cycleCounts   CycleCount[]
+
+  @@unique([warehouseId, code])
+  @@index([tenantId])
+}
+
+enum StockItemType {
+  MATERIAL
+  PART
+}
+
+/// Malzeme/mamul parti (lot) kaydı — genealogy'nin gelecekte WorkOrder
+/// granülaritesinden gerçek lot granülaritesine taşınabilmesi için temel
+/// (bkz. work-orders.service.ts genealogy() — şu an lot kavramı yok, bu
+/// fazda sadece Lot entity'si eklenir, mevcut genealogy sorgusuna bağlanması
+/// ayrı bir işin kapsamıdır).
+model Lot {
+  id           String        @id @default(uuid())
+  tenantId     String
+  lotNo        String
+  itemType     StockItemType
+  itemId       String
+  expiryDate   DateTime?
+  receivedDate DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+
+  stockBalances StockBalance[]
+
+  @@unique([tenantId, lotNo])
+  @@index([tenantId, itemType, itemId])
+}
+
+/// Bin başına malzeme/mamul bakiyesi — polimorfik itemType/itemId deseni
+/// (Document.entityType/entityId ile aynı felsefe) Material/Part'a ayrı FK
+/// çifti açmak yerine tek tabloda tutulmasını sağlar. lotId opsiyonel —
+/// lot takibi yapılmayan kalemler için null kalır. Prisma/Postgres'te NULL
+/// kolonlu unique constraint güvenilir çalışmadığından tekillik DB seviyesinde
+/// değil servis katmanında (find-or-create) sağlanır — bu depoda diğer
+/// modüllerin (delivery/mrp) zaten kullandığı deseni izler.
+model StockBalance {
+  id        String        @id @default(uuid())
+  tenantId  String
+  binId     String
+  itemType  StockItemType
+  itemId    String
+  lotId     String?
+  qty       Decimal       @default(0) @db.Decimal(18, 3)
+  updatedAt DateTime      @updatedAt
+
+  bin Bin  @relation(fields: [binId], references: [id])
+  lot Lot? @relation(fields: [lotId], references: [id])
+
+  @@index([tenantId, binId, itemType, itemId])
+}
+
+enum TransferOrderStatus {
+  COMPLETED
+  CANCELLED
+}
+
+/// Bin→Bin transfer — Delivery gibi tek seferlik olay (oluşturulunca anında
+/// gerçekleşir, taslak durumu yok); yetersiz bakiyede transaction geri alınır.
+model TransferOrder {
+  id          String              @id @default(uuid())
+  tenantId    String
+  toNo        String              @unique
+  fromBinId   String
+  toBinId     String
+  status      TransferOrderStatus @default(COMPLETED)
+  notes       String?
+  createdById String
+  createdAt   DateTime            @default(now())
+
+  fromBin   Bin                 @relation("TransferFromBin", fields: [fromBinId], references: [id])
+  toBin     Bin                 @relation("TransferToBin", fields: [toBinId], references: [id])
+  createdBy User                @relation(fields: [createdById], references: [id])
+  lines     TransferOrderLine[]
+
+  @@index([tenantId])
+}
+
+model TransferOrderLine {
+  id              String        @id @default(uuid())
+  tenantId        String
+  transferOrderId String
+  itemType        StockItemType
+  itemId          String
+  lotId           String?
+  qty             Decimal       @db.Decimal(18, 3)
+
+  transferOrder TransferOrder @relation(fields: [transferOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, transferOrderId])
+}
+
+enum CycleCountStatus {
+  OPEN
+  POSTED
+}
+
+/// Bin bazlı stok sayımı — OPEN'da sayılan miktarlar kaydedilir, POSTED'da
+/// StockBalance sayılan miktara göre düzeltilir (fark AuditLog'a değil bu
+/// tablonun kendi varianceQty alanına yazılır) ve geri alınamaz.
+model CycleCount {
+  id          String           @id @default(uuid())
+  tenantId    String
+  ccNo        String           @unique
+  binId       String
+  status      CycleCountStatus @default(OPEN)
+  countedById String
+  countedAt   DateTime         @default(now())
+  postedAt    DateTime?
+  createdAt   DateTime         @default(now())
+
+  bin       Bin              @relation(fields: [binId], references: [id])
+  countedBy User             @relation(fields: [countedById], references: [id])
+  lines     CycleCountLine[]
+
+  @@index([tenantId, binId])
+}
+
+model CycleCountLine {
+  id           String        @id @default(uuid())
+  tenantId     String
+  cycleCountId String
+  itemType     StockItemType
+  itemId       String
+  lotId        String?
+  /// Sayım anında StockBalance'ta bulunan miktar (snapshot).
+  systemQty    Decimal       @db.Decimal(18, 3)
+  countedQty   Decimal       @db.Decimal(18, 3)
+  /// countedQty - systemQty — POSTED sonrası değişmez denetim kaydı.
+  varianceQty  Decimal       @db.Decimal(18, 3)
+
+  cycleCount CycleCount @relation(fields: [cycleCountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, cycleCountId])
 }

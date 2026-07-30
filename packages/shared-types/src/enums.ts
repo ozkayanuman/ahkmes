@@ -27,6 +27,15 @@ export type SalesOrderStatus = z.infer<typeof SalesOrderStatusSchema>;
 export const InvoiceStatusSchema = z.enum(["ISSUED", "CANCELLED"]);
 export type InvoiceStatus = z.infer<typeof InvoiceStatusSchema>;
 
+export const StockItemTypeSchema = z.enum(["MATERIAL", "PART"]);
+export type StockItemType = z.infer<typeof StockItemTypeSchema>;
+
+export const TransferOrderStatusSchema = z.enum(["COMPLETED", "CANCELLED"]);
+export type TransferOrderStatus = z.infer<typeof TransferOrderStatusSchema>;
+
+export const CycleCountStatusSchema = z.enum(["OPEN", "POSTED"]);
+export type CycleCountStatus = z.infer<typeof CycleCountStatusSchema>;
+
 export const ProposalStatusSchema = z.enum([
   "DRAFT",
   "PENDING_APPROVAL",
@@ -88,6 +97,10 @@ export const PAGE_KEYS = [
   "quotes",
   "sales-orders",
   "work-orders",
+  "warehouses",
+  "lots",
+  "transfer-orders",
+  "cycle-counts",
   "purchase-orders",
   "production",
   "parts",

@@ -36,6 +36,10 @@ import { SalesOrdersModule } from "./sales-orders/sales-orders.module";
 import { DeliveryModule } from "./delivery/delivery.module";
 import { InvoiceModule } from "./invoice/invoice.module";
 import { CustomerNotesModule } from "./customer-notes/customer-notes.module";
+import { WarehousesModule } from "./warehouses/warehouses.module";
+import { LotsModule } from "./lots/lots.module";
+import { TransferOrdersModule } from "./transfer-orders/transfer-orders.module";
+import { CycleCountsModule } from "./cycle-counts/cycle-counts.module";
 
 @Module({
   imports: [
@@ -76,6 +80,10 @@ import { CustomerNotesModule } from "./customer-notes/customer-notes.module";
     DeliveryModule,
     InvoiceModule,
     CustomerNotesModule,
+    WarehousesModule,
+    LotsModule,
+    TransferOrdersModule,
+    CycleCountsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
