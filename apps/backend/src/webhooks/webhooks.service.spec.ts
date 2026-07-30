@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { WebhooksService } from "./webhooks.service";
 
 // dispatch() her teslimde gerçek DNS çözümlemesi yapıyor (SSRF/rebinding
@@ -6,6 +7,28 @@ import { WebhooksService } from "./webhooks.service";
 jest.mock("node:dns/promises", () => ({
   lookup: jest.fn().mockResolvedValue([{ address: "93.184.216.34", family: 4 }]),
 }));
+
+// deliverOne artık global fetch değil, pinlenmiş IP'ye node:https request
+// kullanıyor (TOCTOU düzeltmesi) — bu modülü mock'luyoruz.
+let mockStatusCode = 200;
+let mockRequestError: Error | null = null;
+const httpsRequestMock = jest.fn((_opts: unknown, callback: (res: unknown) => void) => {
+  const req = new EventEmitter() as EventEmitter & { write: jest.Mock; end: jest.Mock; destroy: jest.Mock };
+  req.write = jest.fn();
+  req.end = jest.fn(() => {
+    if (mockRequestError) {
+      queueMicrotask(() => req.emit("error", mockRequestError));
+      return;
+    }
+    const res = new EventEmitter() as EventEmitter & { statusCode: number; resume: jest.Mock };
+    res.statusCode = mockStatusCode;
+    res.resume = jest.fn();
+    queueMicrotask(() => callback(res));
+  });
+  req.destroy = jest.fn();
+  return req;
+});
+jest.mock("node:https", () => ({ request: (...args: unknown[]) => httpsRequestMock(...(args as [unknown, () => void])) }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
@@ -44,31 +67,33 @@ describe("WebhooksService.create", () => {
 });
 
 describe("WebhooksService.dispatch", () => {
-  const originalFetch = global.fetch;
-  afterEach(() => {
-    global.fetch = originalFetch;
+  beforeEach(() => {
+    mockStatusCode = 200;
+    mockRequestError = null;
+    httpsRequestMock.mockClear();
   });
 
-  it("sadece eşleşen aktif abonelikleri çağırır ve lastStatus'u günceller", async () => {
+  it("sadece eşleşen aktif abonelikleri çağırır, pinlenmiş IP'ye bağlanır ve lastStatus'u günceller", async () => {
     const { service, prisma } = buildService();
     prisma.webhookSubscription.findMany.mockResolvedValue([
       { id: "w1", url: "https://example.com/hook", secret: null },
     ]);
     prisma.webhookSubscription.update.mockResolvedValue({});
-    const fetchMock = jest.fn().mockResolvedValue({ ok: true });
-    global.fetch = fetchMock as unknown as typeof fetch;
 
     service.dispatch("t1", "workorder.updated", { id: "wo1" });
     // dispatch fire-and-forget — bir sonraki microtask'a kadar bekle
+    await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
 
     expect(prisma.webhookSubscription.findMany).toHaveBeenCalledWith({
       where: { tenantId: "t1", isActive: true, OR: [{ event: "workorder.updated" }, { event: "*" }] },
     });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://example.com/hook",
-      expect.objectContaining({ method: "POST" }),
+    // DNS'in ikinci kez çözülmemesi için bağlantı doğrulanmış IP'ye pinlenir,
+    // Host header orijinal hostname'i taşır (TLS SNI + sertifika için).
+    expect(httpsRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({ hostname: "93.184.216.34", headers: expect.objectContaining({ Host: "example.com" }) }),
+      expect.any(Function),
     );
     expect(prisma.webhookSubscription.update).toHaveBeenCalledWith({
       where: { id: "w1" },
@@ -76,15 +101,35 @@ describe("WebhooksService.dispatch", () => {
     });
   });
 
-  it("fetch hata fırlatırsa lastStatus 'failed' olur, dispatch kendisi throw etmez", async () => {
+  it("istek hata fırlatırsa lastStatus 'failed' olur, dispatch kendisi throw etmez", async () => {
     const { service, prisma } = buildService();
     prisma.webhookSubscription.findMany.mockResolvedValue([
       { id: "w1", url: "https://example.com/hook", secret: null },
     ]);
     prisma.webhookSubscription.update.mockResolvedValue({});
-    global.fetch = jest.fn().mockRejectedValue(new Error("network down")) as unknown as typeof fetch;
+    mockRequestError = new Error("network down");
 
     expect(() => service.dispatch("t1", "workorder.updated", {})).not.toThrow();
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(prisma.webhookSubscription.update).toHaveBeenCalledWith({
+      where: { id: "w1" },
+      data: { lastTriggeredAt: expect.any(Date), lastStatus: "failed" },
+    });
+  });
+
+  it("3xx yönlendirme yanıtı 'failed' sayılır (yönlendirme hiç izlenmez)", async () => {
+    const { service, prisma } = buildService();
+    prisma.webhookSubscription.findMany.mockResolvedValue([
+      { id: "w1", url: "https://example.com/hook", secret: null },
+    ]);
+    prisma.webhookSubscription.update.mockResolvedValue({});
+    mockStatusCode = 302;
+
+    service.dispatch("t1", "workorder.updated", {});
+    await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
 

@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from "@nes
 import { createHmac } from "node:crypto";
 import { isIPv4, isIPv6 } from "node:net";
 import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import type { CreateWebhookSubscriptionDto, UpdateWebhookSubscriptionDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -77,15 +79,62 @@ function assertPublicUrl(url: string) {
   // yönlendirilebilir — "DNS rebinding").
 }
 
-async function resolvesToPrivateIp(hostname: string): Promise<boolean> {
+/** Hostname'i TEK SEFER çözüp doğrulanmış bir IP döndürür (veya güvensizse
+ * null). Önceki sürüm burada true/false dönüp fetch'in DNS'i KENDİ İÇİNDE
+ * ikinci kez çözmesine izin veriyordu — kontrol ile gerçek istek arasında
+ * DNS rebinding için bir TOCTOU penceresi açıyordu. Artık bu fonksiyonun
+ * döndürdüğü IP'ye doğrudan bağlanılıyor (bkz. deliverOne/pinnedRequest),
+ * ikinci bir çözümleme hiç yapılmıyor. */
+async function resolveSafeIp(hostname: string): Promise<string | null> {
   const clean = hostname.replace(/^\[|\]$/g, "");
-  if (isIPv4(clean) || isIPv6(clean)) return isPrivateIp(clean);
+  if (isIPv4(clean) || isIPv6(clean)) return isPrivateIp(clean) ? null : clean;
   try {
     const results = await lookup(clean, { all: true });
-    return results.length === 0 || results.some((r) => isPrivateIp(r.address));
+    if (results.length === 0 || results.some((r) => isPrivateIp(r.address))) return null;
+    return results[0].address;
   } catch {
-    return true; // çözülemiyorsa güvenli tarafta kal
+    return null; // çözülemiyorsa güvenli tarafta kal
   }
+}
+
+/** Bağlantıyı doğrudan (önceden doğrulanmış) `ip`'ye kurar — hostname sadece
+ * TLS SNI/sertifika doğrulaması ve Host header'ı için kullanılır, ikinci bir
+ * DNS çözümlemesi TETİKLENMEZ. Yönlendirmeler asla izlenmez (3xx = failed). */
+function pinnedRequest(
+  targetUrl: string,
+  ip: string,
+  headers: Record<string, string>,
+  body: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean }> {
+  const parsed = new URL(targetUrl);
+  const isHttps = parsed.protocol === "https:";
+  const requester = isHttps ? httpsRequest : httpRequest;
+
+  return new Promise((resolve, reject) => {
+    const req = requester(
+      {
+        hostname: ip,
+        port: parsed.port || (isHttps ? 443 : 80),
+        path: `${parsed.pathname}${parsed.search}`,
+        method: "POST",
+        headers: { ...headers, Host: parsed.host },
+        // TLS sertifika doğrulaması + SNI orijinal hostname'e karşı yapılır —
+        // sadece bağlantının fiziksel adresi pinlenir, kimlik doğrulaması gevşemez.
+        ...(isHttps ? { servername: parsed.hostname } : {}),
+        timeout: timeoutMs,
+      },
+      (res) => {
+        res.resume();
+        const code = res.statusCode ?? 0;
+        resolve({ ok: code >= 200 && code < 300 });
+      },
+    );
+    req.on("timeout", () => req.destroy(new Error("webhook isteği zaman aşımına uğradı")));
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
 }
 
 /** Faz J Developer Platform: dış sistemlere olay bildirimi. RealtimeGateway'in
@@ -165,22 +214,20 @@ export class WebhooksService {
     let status: "success" | "failed";
     try {
       const hostname = new URL(url).hostname;
-      if (await resolvesToPrivateIp(hostname)) {
+      const safeIp = await resolveSafeIp(hostname);
+      if (!safeIp) {
         // Kayıt anında public olan bir domain sonradan private bir IP'ye
         // yönlendirilmiş (DNS rebinding) veya create()'ten sonra manipüle
         // edilmiş olabilir — her teslimde yeniden doğrulanır.
         this.logger.warn(`Webhook ${id}: hedef artık özel/yerel bir IP'ye çözülüyor, teslim engellendi`);
         status = "failed";
       } else {
-        // redirect: "manual" — bir yönlendirmeyi izlemek, hedefin private bir
-        // adrese SSRF yapmasının en yaygın yoludur; 3xx burada başarısız sayılır.
-        const res = await fetch(url, {
-          method: "POST",
-          headers,
-          body,
-          redirect: "manual",
-          signal: AbortSignal.timeout(5000),
-        });
+        // Bağlantı yukarıda doğrulanan IP'ye PINLENIR — global fetch/undici'nin
+        // isteği gönderirken hostname'i KENDİSİ yeniden çözmesine izin
+        // verilmez, aksi halde kontrol ile istek arasında ikinci bir DNS
+        // çözümlemesi (TOCTOU) SSRF'e yeniden açık kapı bırakırdı. Yönlendirme
+        // hiç izlenmez (3xx = failed) — pinnedRequest yönlendirme takip etmez.
+        const res = await pinnedRequest(url, safeIp, headers, body, 5000);
         status = res.ok ? "success" : "failed";
       }
     } catch {
