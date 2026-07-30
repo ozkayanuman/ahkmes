@@ -26,6 +26,9 @@ import { InspectionsPage } from "./pages/inspections";
 import { CapaPage } from "./pages/capa";
 import { CalibrationsPage } from "./pages/calibrations";
 import { MaintenanceOrdersPage } from "./pages/maintenance-orders";
+import { RecipesPage } from "./pages/recipes";
+import { SpcPage } from "./pages/spc";
+import { AlarmsPage } from "./pages/alarms";
 import { WorkOrdersPage } from "./pages/work-orders";
 import { WorkOrderDetailPage } from "./pages/work-order-detail";
 import { PurchaseOrdersPage } from "./pages/purchase-orders";
@@ -98,6 +101,9 @@ export function App() {
         <Route path="/capa" element={<PageGuard page="capa"><CapaPage /></PageGuard>} />
         <Route path="/calibrations" element={<PageGuard page="calibrations"><CalibrationsPage /></PageGuard>} />
         <Route path="/maintenance-orders" element={<PageGuard page="maintenance-orders"><MaintenanceOrdersPage /></PageGuard>} />
+        <Route path="/recipes" element={<PageGuard page="recipes"><RecipesPage /></PageGuard>} />
+        <Route path="/spc" element={<PageGuard page="spc"><SpcPage /></PageGuard>} />
+        <Route path="/alarms" element={<PageGuard page="alarms"><AlarmsPage /></PageGuard>} />
         <Route path="/machines" element={<PageGuard page="machines"><MachinesPage /></PageGuard>} />
         <Route path="/hierarchy" element={<PageGuard page="hierarchy"><HierarchyPage /></PageGuard>} />
         <Route path="/digital-twin" element={<PageGuard page="digital-twin"><DigitalTwinPage /></PageGuard>} />

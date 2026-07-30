@@ -44,6 +44,12 @@ export class FinishedGoodsService {
       if (wo.status === "COMPLETED" || wo.status === "CANCELLED") {
         throw new ConflictException("Tamamlanmış/iptal edilmiş iş emrine mamul girişi yapılamaz");
       }
+      if (dto.lotId) {
+        const lot = await tx.lot.findFirst({
+          where: { id: dto.lotId, tenantId, itemType: "PART", itemId: wo.partId },
+        });
+        if (!lot) throw new NotFoundException("Lot bulunamadı veya bu parçaya ait değil");
+      }
 
       const entry = await tx.finishedGoodsEntry.create({
         data: {
@@ -53,6 +59,7 @@ export class FinishedGoodsService {
           quantity: dto.quantity,
           date: dto.date ?? new Date(),
           createdById: userId,
+          lotId: dto.lotId,
         },
         include: INCLUDE,
       });

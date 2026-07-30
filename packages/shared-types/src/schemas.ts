@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  AlarmSeveritySchema,
   ConsumptionTypeSchema,
   DocumentEntityTypeSchema,
   DocumentTypeSchema,
@@ -421,6 +422,8 @@ export const createConsumptionSchema = z.object({
   type: ConsumptionTypeSchema,
   quantity: positiveQty,
   date: isoDate.optional(),
+  /// Faz F: tüketilen malzemenin geldiği lot — backward traceability için opsiyonel.
+  lotId: idSchema.optional(),
 });
 export type CreateConsumptionDto = z.infer<typeof createConsumptionSchema>;
 
@@ -444,6 +447,8 @@ export const createFinishedGoodsSchema = z.object({
   workOrderId: idSchema,
   quantity: positiveQty,
   date: isoDate.optional(),
+  /// Faz F: üretilen mamulün atandığı lot — forward traceability için opsiyonel.
+  lotId: idSchema.optional(),
 });
 export type CreateFinishedGoodsDto = z.infer<typeof createFinishedGoodsSchema>;
 
@@ -548,6 +553,59 @@ export const updateBomHeaderSchema = z.object({
   lines: z.array(bomLineInputSchema).min(1).optional(),
 });
 export type UpdateBomHeaderDto = z.infer<typeof updateBomHeaderSchema>;
+
+// ---- Recipe (Faz F) — süreç reçetesi versiyonlama, BomHeader ile aynı desen ----
+export const recipeStepInputSchema = z.object({
+  seq: z.number().int().min(1),
+  name: z.string().min(1),
+  parameterName: z.string().optional(),
+  parameterValue: z.string().optional(),
+  unit: z.string().optional(),
+});
+export const createRecipeHeaderSchema = z.object({
+  partId: idSchema,
+  revision: z.string().min(1).default("A"),
+  notes: z.string().optional(),
+  steps: z.array(recipeStepInputSchema).min(1),
+});
+export type CreateRecipeHeaderDto = z.infer<typeof createRecipeHeaderSchema>;
+export const updateRecipeHeaderSchema = z.object({
+  notes: z.string().optional(),
+  isActive: z.boolean().optional(),
+  steps: z.array(recipeStepInputSchema).min(1).optional(),
+});
+export type UpdateRecipeHeaderDto = z.infer<typeof updateRecipeHeaderSchema>;
+
+// ---- SPC (Faz F) — karakteristik tanımı + ölçüm kaydı ----
+export const createSpcCharacteristicSchema = z.object({
+  partId: idSchema,
+  name: z.string().min(1),
+  unit: z.string().optional(),
+  target: decimalString.optional(),
+  uslUpper: decimalString.optional(),
+  lslLower: decimalString.optional(),
+});
+export type CreateSpcCharacteristicDto = z.infer<typeof createSpcCharacteristicSchema>;
+export const createSpcMeasurementSchema = z.object({
+  characteristicId: idSchema,
+  workOrderId: idSchema.optional(),
+  value: decimalString,
+  measuredAt: isoDate.optional(),
+});
+export type CreateSpcMeasurementDto = z.infer<typeof createSpcMeasurementSchema>;
+
+// ---- Alarm Management (Faz F) ----
+export const createAlarmDefinitionSchema = z.object({
+  code: z.string().min(1),
+  description: z.string().min(1),
+  severity: AlarmSeveritySchema.default("MEDIUM"),
+  machineId: idSchema.optional(),
+});
+export type CreateAlarmDefinitionDto = z.infer<typeof createAlarmDefinitionSchema>;
+export const updateAlarmDefinitionSchema = createAlarmDefinitionSchema.partial();
+export type UpdateAlarmDefinitionDto = z.infer<typeof updateAlarmDefinitionSchema>;
+export const acknowledgeAlarmSchema = z.object({ note: z.string().optional() });
+export type AcknowledgeAlarmDto = z.infer<typeof acknowledgeAlarmSchema>;
 
 // ---- MRP (Faz B) — proposal onay/red, gerekirse tedarikçisiz öneriye tedarikçi atanır ----
 export const mrpProposalDecisionSchema = z.object({

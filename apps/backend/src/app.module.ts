@@ -44,6 +44,9 @@ import { InspectionsModule } from "./inspections/inspections.module";
 import { CapaModule } from "./capa/capa.module";
 import { CalibrationsModule } from "./calibrations/calibrations.module";
 import { MaintenanceOrdersModule } from "./maintenance-orders/maintenance-orders.module";
+import { RecipesModule } from "./recipes/recipes.module";
+import { SpcModule } from "./spc/spc.module";
+import { AlarmsModule } from "./alarms/alarms.module";
 
 @Module({
   imports: [
@@ -92,6 +95,9 @@ import { MaintenanceOrdersModule } from "./maintenance-orders/maintenance-orders
     CapaModule,
     CalibrationsModule,
     MaintenanceOrdersModule,
+    RecipesModule,
+    SpcModule,
+    AlarmsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

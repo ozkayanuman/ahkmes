@@ -101,6 +101,10 @@ export type NonConformanceActionType = z.infer<typeof NonConformanceActionTypeSc
 export const UserAuthSourceSchema = z.enum(["LOCAL", "LDAP"]);
 export type UserAuthSource = z.infer<typeof UserAuthSourceSchema>;
 
+// ---- Alarm Management (Faz F) ----
+export const AlarmSeveritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+export type AlarmSeverity = z.infer<typeof AlarmSeveritySchema>;
+
 /// Rol gruplarının görünürlüğünü yönettiği NAV sayfaları — apps/web/src/components/layout.tsx
 /// NAV listesiyle birebir eşleşir ("dashboard" hariç, o her zaman herkese görünür).
 export const PAGE_KEYS = [
@@ -117,6 +121,9 @@ export const PAGE_KEYS = [
   "capa",
   "calibrations",
   "maintenance-orders",
+  "recipes",
+  "spc",
+  "alarms",
   "purchase-orders",
   "production",
   "parts",

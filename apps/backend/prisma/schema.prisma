@@ -184,6 +184,8 @@ model User {
   capasCreated            Capa[]
   calibrationsPerformed   Calibration[]
   maintenanceOrders       MaintenanceOrder[]
+  spcMeasurements         SpcMeasurement[]
+  acknowledgedAlarms      MachineStatusEvent[]  @relation("AcknowledgedAlarms")
 
   @@index([tenantId])
 }
@@ -283,6 +285,8 @@ model Part {
   productionProposals ProductionProposal[]
   rfqLines            RFQLine[]
   salesOrderLines     SalesOrderLine[]
+  recipeHeaders       RecipeHeader[]
+  spcCharacteristics  SpcCharacteristic[]
 
   @@unique([tenantId, partNo, revision])
   @@index([tenantId])
@@ -391,6 +395,7 @@ model Machine {
   statusEvents      MachineStatusEvent[]
   calibrations      Calibration[]
   maintenanceOrders MaintenanceOrder[]
+  alarmDefinitions  AlarmDefinition[]
 
   @@index([tenantId])
 }
@@ -428,17 +433,50 @@ model MachineEventDedup {
 /// zaman damgasıyla kalıcı olarak burada tutulur. OEE trend ve duruş (downtime) Pareto
 /// analizi bu geçmişten türetilir — MachineEventDedup yalnızca idempotency içindir, geçmiş tutmaz.
 model MachineStatusEvent {
-  id          String           @id @default(uuid())
-  tenantId    String
-  machineId   String
-  type        MachineEventType
-  message     String?
-  workOrderId String?
-  occurredAt  DateTime         @default(now())
+  id               String           @id @default(uuid())
+  tenantId         String
+  machineId        String
+  type             MachineEventType
+  message          String?
+  workOrderId      String?
+  occurredAt       DateTime         @default(now())
+  /// Faz F Alarm Management: ALARM tipi olaylar için onay (acknowledge) işareti —
+  /// diğer olay tiplerinde kullanılmaz, servis katmanında type=ALARM kontrolü yapılır.
+  acknowledgedById String?
+  acknowledgedAt   DateTime?
+  ackNote          String?
 
-  machine Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  machine        Machine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  acknowledgedBy User?   @relation("AcknowledgedAlarms", fields: [acknowledgedById], references: [id])
 
   @@index([tenantId, machineId, occurredAt])
+}
+
+enum AlarmSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+/// Alarm kod kataloğu — Faz F Alarm Management. MachineStatusEvent.message serbest
+/// metin olmaya devam eder (connector/adapter tarafı henüz kod göndermiyor); bu tablo
+/// yalnızca operatör/ustabaşının bildiği alarm kodları için önem derecesi ve açıklama
+/// standardizasyonu sağlar, MachineStatusEvent'e hard FK ile bağlanmaz.
+model AlarmDefinition {
+  id          String        @id @default(uuid())
+  tenantId    String
+  code        String
+  description String
+  severity    AlarmSeverity @default(MEDIUM)
+  machineId   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  machine Machine? @relation(fields: [machineId], references: [id])
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
 }
 
 enum MachineEventType {
@@ -508,6 +546,7 @@ model WorkOrder {
   activeOnMachines Machine[]             @relation("ActiveWorkOrder")
   nonConformances  NonConformance[]
   inspections      Inspection[]
+  spcMeasurements  SpcMeasurement[]
 
   @@index([tenantId])
   @@index([status])
@@ -650,6 +689,10 @@ model MaterialConsumption {
   workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
   material  Material  @relation(fields: [materialId], references: [id])
   createdBy User      @relation(fields: [createdById], references: [id])
+  /// Faz F: tüketilen malzemenin hangi lottan geldiği — backward traceability'nin temeli
+  /// (bkz. LotsService.trace). Opsiyonel: lot takibi yapılmayan malzemelerde null kalır.
+  lot       Lot?      @relation(fields: [lotId], references: [id])
+  lotId     String?
 
   @@index([tenantId])
 }
@@ -693,6 +736,10 @@ model FinishedGoodsEntry {
   workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
   part      Part      @relation(fields: [partId], references: [id])
   createdBy User      @relation(fields: [createdById], references: [id])
+  /// Faz F: bu girişle üretilen mamulün atandığı lot — forward traceability'nin temeli
+  /// (bkz. LotsService.trace). Opsiyonel: lot takibi yapılmayan mamullerde null kalır.
+  lot       Lot?      @relation(fields: [lotId], references: [id])
+  lotId     String?
 
   @@index([tenantId])
 }
@@ -834,6 +881,89 @@ model BomLine {
   material  Material  @relation(fields: [materialId], references: [id])
 
   @@index([tenantId, bomHeaderId])
+}
+
+/// Faz F: Süreç reçetesi (Recipe) versiyonlama — BomHeader ile aynı desen (bir Part
+/// için aynı anda tek aktif revizyon, app-level kontrol). BOM "neyin ne kadar
+/// tüketildiğini", Recipe ise "hangi sırayla, hangi parametrelerle işlendiğini" tanımlar
+/// — NcProgram (G-kod dosyası versiyonlama) ile karıştırılmamalı, bu yapısal/parametrik
+/// bir süreç tanımıdır, dosya deposu değildir.
+model RecipeHeader {
+  id        String   @id @default(uuid())
+  tenantId  String
+  partId    String
+  revision  String   @default("A")
+  isActive  Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  part  Part         @relation(fields: [partId], references: [id])
+  steps RecipeStep[]
+
+  @@unique([tenantId, partId, revision])
+  @@index([tenantId, partId, isActive])
+}
+
+model RecipeStep {
+  id             String   @id @default(uuid())
+  tenantId       String
+  recipeHeaderId String
+  seq            Int
+  name           String
+  parameterName  String?
+  parameterValue String?
+  unit           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  recipeHeader RecipeHeader @relation(fields: [recipeHeaderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, recipeHeaderId])
+}
+
+/// Faz F: SPC (İstatistiksel Süreç Kontrolü) karakteristik tanımı — bir Part için
+/// izlenen ölçülebilir bir özellik (ör. "Çap", "Uzunluk") ve tolerans limitleri.
+/// target/uslUpper/lslLower opsiyonel — hiçbiri girilmezse ölçüm kaydedilir ama
+/// spec-dışı kontrolü/Cp-Cpk hesaplanamaz (sahte sayı üretilmez).
+model SpcCharacteristic {
+  id        String   @id @default(uuid())
+  tenantId  String
+  partId    String
+  name      String
+  unit      String?
+  target    Decimal? @db.Decimal(18, 6)
+  uslUpper  Decimal? @db.Decimal(18, 6)
+  lslLower  Decimal? @db.Decimal(18, 6)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  part         Part             @relation(fields: [partId], references: [id])
+  measurements SpcMeasurement[]
+
+  @@unique([tenantId, partId, name])
+  @@index([tenantId, partId])
+}
+
+/// Ölçüm kaydı — limit dışı (out-of-spec) ölçüm otomatik NonConformance üretir
+/// (Inspection'ın FAIL sonucunda yaptığı çapraz-modül çağrı deseniyle tutarlı,
+/// bkz. SpcService.recordMeasurement).
+model SpcMeasurement {
+  id               String   @id @default(uuid())
+  tenantId         String
+  characteristicId String
+  workOrderId      String?
+  value            Decimal  @db.Decimal(18, 6)
+  inSpec           Boolean?
+  measuredById     String
+  measuredAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  characteristic SpcCharacteristic @relation(fields: [characteristicId], references: [id], onDelete: Cascade)
+  workOrder      WorkOrder?        @relation(fields: [workOrderId], references: [id])
+  measuredBy     User              @relation(fields: [measuredById], references: [id])
+
+  @@index([tenantId, characteristicId, measuredAt])
 }
 
 enum ProposalStatus {
@@ -1156,7 +1286,9 @@ model Lot {
   receivedDate DateTime      @default(now())
   createdAt    DateTime      @default(now())
 
-  stockBalances StockBalance[]
+  stockBalances        StockBalance[]
+  consumptions         MaterialConsumption[]
+  finishedGoodsEntries FinishedGoodsEntry[]
 
   @@unique([tenantId, lotNo])
   @@index([tenantId, itemType, itemId])

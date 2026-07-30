@@ -37,6 +37,76 @@ export class LotsService {
     }
   }
 
+  /**
+   * Faz F: lot-bazlı forward/backward traceability. Granülarite iş emri düzeyinde
+   * (bkz. work-orders.service.ts genealogy) — bir lot, MaterialConsumption/
+   * FinishedGoodsEntry üzerinden bağlı olduğu WorkOrder(lar) aracılığıyla izlenir.
+   * MATERIAL lot: forward = bu lottan tüketen WorkOrder'lar + onların ürettiği PART lot'lar.
+   * PART lot: backward = bu lotu üreten WorkOrder + o WorkOrder'ın tükettiği MATERIAL lot'lar.
+   * Not: Part'lar başka bir WorkOrder'a malzeme olarak girmiyor (BOM sadece Material
+   * satırı destekliyor), bu yüzden zincir tek hop'ta doğal olarak sonlanır.
+   */
+  async trace(tenantId: string, id: string) {
+    const lot = await this.findOne(tenantId, id);
+
+    if (lot.itemType === "MATERIAL") {
+      const consumptions = await this.prisma.materialConsumption.findMany({
+        where: { tenantId, lotId: id },
+        include: {
+          workOrder: {
+            select: {
+              id: true,
+              woNo: true,
+              status: true,
+              part: { select: { id: true, partNo: true, name: true } },
+              finishedEntries: {
+                where: { lotId: { not: null } },
+                select: { id: true, quantity: true, date: true, lotId: true, lot: true },
+              },
+            },
+          },
+        },
+      });
+      return {
+        lot,
+        forward: {
+          consumedByWorkOrders: consumptions.map((c) => ({
+            consumption: { id: c.id, quantity: c.quantity, date: c.date },
+            workOrder: c.workOrder,
+            producedLots: c.workOrder.finishedEntries,
+          })),
+        },
+      };
+    }
+
+    const finishedEntries = await this.prisma.finishedGoodsEntry.findMany({
+      where: { tenantId, lotId: id },
+      include: {
+        workOrder: {
+          select: {
+            id: true,
+            woNo: true,
+            status: true,
+            consumptions: {
+              where: { lotId: { not: null } },
+              include: { material: { select: { id: true, code: true, name: true } }, lot: true },
+            },
+          },
+        },
+      },
+    });
+    return {
+      lot,
+      backward: {
+        producedByWorkOrders: finishedEntries.map((e) => ({
+          entry: { id: e.id, quantity: e.quantity, date: e.date },
+          workOrder: e.workOrder,
+          consumedLots: e.workOrder.consumptions,
+        })),
+      },
+    };
+  }
+
   async remove(tenantId: string, id: string) {
     await this.findOne(tenantId, id);
     try {

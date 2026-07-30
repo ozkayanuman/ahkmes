@@ -37,6 +37,12 @@ export class ConsumptionService {
       }
       const material = await tx.material.findFirst({ where: { id: dto.materialId, tenantId } });
       if (!material) throw new NotFoundException("Malzeme bulunamadı");
+      if (dto.lotId) {
+        const lot = await tx.lot.findFirst({
+          where: { id: dto.lotId, tenantId, itemType: "MATERIAL", itemId: dto.materialId },
+        });
+        if (!lot) throw new NotFoundException("Lot bulunamadı veya bu malzemeye ait değil");
+      }
 
       if (dto.type === "CONSUMED") {
         if (Number(material.stockQty) < dto.quantity) {
@@ -59,6 +65,7 @@ export class ConsumptionService {
           quantity: dto.quantity,
           date: dto.date ?? new Date(),
           createdById: userId,
+          lotId: dto.lotId,
         },
         include: INCLUDE,
       });
