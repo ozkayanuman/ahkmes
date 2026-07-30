@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Factory, Search } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
@@ -22,6 +22,7 @@ interface SalesOrderRow {
 }
 
 export function SalesOrdersPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const canManage = !!user && ["ADMIN", "SALES", "PLANNER"].includes(user.role);
   const canRelease = !!user && ["ADMIN", "PLANNER"].includes(user.role);
@@ -112,10 +113,14 @@ export function SalesOrdersPage() {
           {query.data.map((row) => {
             const allReleased = row.lines.every((l) => l.workOrders.length > 0);
             return (
-              <tr key={row.id} className="hover:bg-slate-50">
+              <tr
+                key={row.id}
+                className="cursor-pointer hover:bg-slate-50"
+                onClick={() => navigate(`/sales-orders/${row.id}`)}
+              >
                 <td className="px-4 py-3 font-medium">{row.soNo}</td>
                 <td className="px-4 py-3">{row.customer.name}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   {row.quote ? (
                     <Link to={`/quotes/${row.quote.id}`} className="text-brand-700 hover:underline">
                       {row.quote.quoteNo}
@@ -129,7 +134,7 @@ export function SalesOrdersPage() {
                 </td>
                 <td className="px-4 py-3">{row.lines.length}</td>
                 <td className="px-4 py-3">{fmtDate(row.createdAt)}</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-wrap gap-1">
                     {canRelease && row.status === "OPEN" && !allReleased && (
                       <Button

@@ -10,6 +10,7 @@ import {
   NonConformanceActionTypeSchema,
   NonConformanceStatusSchema,
   PageKeySchema,
+  InvoiceStatusSchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
   RFQStatusSchema,
@@ -236,6 +237,36 @@ export const salesOrderStatusUpdateSchema = z.object({ status: SalesOrderStatusS
 export type SalesOrderStatusUpdateDto = z.infer<typeof salesOrderStatusUpdateSchema>;
 export const releaseSalesOrderSchema = z.object({ lineIds: z.array(idSchema).optional() });
 export type ReleaseSalesOrderDto = z.infer<typeof releaseSalesOrderSchema>;
+
+// ---- Delivery (Faz C Pass 2) — sevkiyat, tek seferlik olay (taslak yok) ----
+export const deliveryLineInputSchema = z.object({
+  salesOrderLineId: idSchema,
+  qty: positiveQty,
+});
+export const createDeliverySchema = z.object({
+  salesOrderId: idSchema,
+  notes: z.string().optional(),
+  lines: z.array(deliveryLineInputSchema).min(1),
+});
+export type CreateDeliveryDto = z.infer<typeof createDeliverySchema>;
+
+// ---- Invoice (Faz C Pass 2) — sadece kesildi/iptal, ödeme/AR takibi yok ----
+export const invoiceLineInputSchema = z.object({
+  salesOrderLineId: idSchema,
+  qty: positiveQty,
+});
+export const createInvoiceSchema = z.object({
+  salesOrderId: idSchema,
+  notes: z.string().optional(),
+  lines: z.array(invoiceLineInputSchema).min(1),
+});
+export type CreateInvoiceDto = z.infer<typeof createInvoiceSchema>;
+export const invoiceStatusUpdateSchema = z.object({ status: InvoiceStatusSchema });
+export type InvoiceStatusUpdateDto = z.infer<typeof invoiceStatusUpdateSchema>;
+
+// ---- CustomerNote (Faz C Pass 2) — basit CRM, append-only aktivite notu ----
+export const createCustomerNoteSchema = z.object({ note: z.string().min(1) });
+export type CreateCustomerNoteDto = z.infer<typeof createCustomerNoteSchema>;
 
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({

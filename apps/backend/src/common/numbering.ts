@@ -16,8 +16,10 @@ export async function nextDocNo(
     | "purchaseProposal"
     | "productionProposal"
     | "rFQ"
-    | "salesOrder",
-  field: "quoteNo" | "woNo" | "poNo" | "ppNo" | "prNo" | "rfqNo" | "soNo",
+    | "salesOrder"
+    | "delivery"
+    | "invoice",
+  field: "quoteNo" | "woNo" | "poNo" | "ppNo" | "prNo" | "rfqNo" | "soNo" | "dlvNo" | "invNo",
   prefix: string,
 ): Promise<string> {
   const year = new Date().getFullYear();

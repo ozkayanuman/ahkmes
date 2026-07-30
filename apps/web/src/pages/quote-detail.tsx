@@ -128,7 +128,7 @@ export function QuoteDetailPage() {
       qc.invalidateQueries({ queryKey: ["/sales-orders"] });
       setConvertOpen(false);
       toast(`Satış siparişi oluşturuldu: ${res.salesOrder.soNo}`, "success");
-      navigate("/sales-orders");
+      navigate(`/sales-orders/${res.salesOrder.id}`);
     },
     onError,
   });
@@ -269,7 +269,10 @@ export function QuoteDetailPage() {
               {l.salesOrderLines.length === 0 ? (
                 "—"
               ) : (
-                <Link to="/sales-orders" className="text-brand-700 hover:underline">
+                <Link
+                  to={`/sales-orders/${l.salesOrderLines[0].salesOrderId}`}
+                  className="text-brand-700 hover:underline"
+                >
                   Siparişte
                 </Link>
               )}

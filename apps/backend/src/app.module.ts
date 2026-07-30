@@ -33,6 +33,9 @@ import { ApprovalsModule } from "./approvals/approvals.module";
 import { MrpModule } from "./mrp/mrp.module";
 import { RfqModule } from "./rfq/rfq.module";
 import { SalesOrdersModule } from "./sales-orders/sales-orders.module";
+import { DeliveryModule } from "./delivery/delivery.module";
+import { InvoiceModule } from "./invoice/invoice.module";
+import { CustomerNotesModule } from "./customer-notes/customer-notes.module";
 
 @Module({
   imports: [
@@ -70,6 +73,9 @@ import { SalesOrdersModule } from "./sales-orders/sales-orders.module";
     MrpModule,
     RfqModule,
     SalesOrdersModule,
+    DeliveryModule,
+    InvoiceModule,
+    CustomerNotesModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

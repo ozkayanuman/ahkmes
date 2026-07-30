@@ -24,6 +24,9 @@ export type RFQStatus = z.infer<typeof RFQStatusSchema>;
 export const SalesOrderStatusSchema = z.enum(["OPEN", "CLOSED", "CANCELLED"]);
 export type SalesOrderStatus = z.infer<typeof SalesOrderStatusSchema>;
 
+export const InvoiceStatusSchema = z.enum(["ISSUED", "CANCELLED"]);
+export type InvoiceStatus = z.infer<typeof InvoiceStatusSchema>;
+
 export const ProposalStatusSchema = z.enum([
   "DRAFT",
   "PENDING_APPROVAL",

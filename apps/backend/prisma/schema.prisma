@@ -175,6 +175,9 @@ model User {
   groups                  UserPermissionGroup[]
   rfqs                    RFQ[]
   salesOrders             SalesOrder[]
+  deliveries              Delivery[]
+  invoices                Invoice[]
+  customerNotes           CustomerNote[]
 
   @@index([tenantId])
 }
@@ -242,9 +245,10 @@ model Customer {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  quotes      Quote[]
-  rfqs        RFQ[]
-  salesOrders SalesOrder[]
+  quotes        Quote[]
+  rfqs          RFQ[]
+  salesOrders   SalesOrder[]
+  activityNotes CustomerNote[]
 
   @@index([tenantId])
 }
@@ -953,10 +957,12 @@ model SalesOrder {
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
-  customer  Customer         @relation(fields: [customerId], references: [id])
-  quote     Quote?           @relation(fields: [quoteId], references: [id])
-  createdBy User             @relation(fields: [createdById], references: [id])
-  lines     SalesOrderLine[]
+  customer   Customer         @relation(fields: [customerId], references: [id])
+  quote      Quote?           @relation(fields: [quoteId], references: [id])
+  createdBy  User             @relation(fields: [createdById], references: [id])
+  lines      SalesOrderLine[]
+  deliveries Delivery[]
+  invoices   Invoice[]
 
   @@index([tenantId])
 }
@@ -977,10 +983,104 @@ model SalesOrderLine {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  salesOrder SalesOrder  @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
-  quoteLine  QuoteLine?  @relation(fields: [quoteLineId], references: [id])
-  part       Part        @relation(fields: [partId], references: [id])
-  workOrders WorkOrder[]
+  salesOrder    SalesOrder     @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  quoteLine     QuoteLine?     @relation(fields: [quoteLineId], references: [id])
+  part          Part           @relation(fields: [partId], references: [id])
+  workOrders    WorkOrder[]
+  deliveryLines DeliveryLine[]
+  invoiceLines  InvoiceLine[]
 
   @@index([tenantId])
+}
+
+enum InvoiceStatus {
+  ISSUED
+  CANCELLED
+}
+
+/// Sevkiyat — tek seferlik olay (FinishedGoodsEntry gibi, taslak durumu yok).
+/// Oluşturulunca PartStock.qty düşer ve ilgili SalesOrderLine.shippedQty artar.
+model Delivery {
+  id           String   @id @default(uuid())
+  tenantId     String
+  dlvNo        String   @unique
+  salesOrderId String
+  shippedDate  DateTime @default(now())
+  notes        String?
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id])
+  createdBy  User           @relation(fields: [createdById], references: [id])
+  lines      DeliveryLine[]
+
+  @@index([tenantId, salesOrderId])
+}
+
+model DeliveryLine {
+  id               String  @id @default(uuid())
+  tenantId         String
+  deliveryId       String
+  salesOrderLineId String
+  qty              Decimal @db.Decimal(18, 3)
+
+  delivery       Delivery       @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  salesOrderLine SalesOrderLine @relation(fields: [salesOrderLineId], references: [id])
+
+  @@index([tenantId, deliveryId])
+}
+
+/// Fatura — sadece "kesildi/iptal" durumu var, ödeme/AR takibi yok (Faz G
+/// kapsamı, genel muhasebe alt-projesi). Sevk edilmiş-henüz faturalanmamış
+/// miktara karşı netlenir (bkz. InvoiceService.create).
+model Invoice {
+  id           String        @id @default(uuid())
+  tenantId     String
+  invNo        String        @unique
+  salesOrderId String
+  status       InvoiceStatus @default(ISSUED)
+  issuedDate   DateTime      @default(now())
+  notes        String?
+  createdById  String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  salesOrder SalesOrder    @relation(fields: [salesOrderId], references: [id])
+  createdBy  User          @relation(fields: [createdById], references: [id])
+  lines      InvoiceLine[]
+
+  @@index([tenantId, salesOrderId])
+}
+
+model InvoiceLine {
+  id               String  @id @default(uuid())
+  tenantId         String
+  invoiceId        String
+  salesOrderLineId String
+  qty              Decimal @db.Decimal(18, 3)
+  /// Fatura kesim anındaki birim fiyat — SalesOrderLine.unitPrice'tan kopyalanır,
+  /// SalesOrderLine sonradan değişse bile faturanın tutarı sabit kalır.
+  unitPrice        Decimal @db.Decimal(18, 2)
+
+  invoice        Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  salesOrderLine SalesOrderLine @relation(fields: [salesOrderLineId], references: [id])
+
+  @@index([tenantId, invoiceId])
+}
+
+/// Basit CRM: müşteri etkileşim notu — append-only zaman çizelgesi (AuditLog
+/// felsefesiyle tutarlı, düzenleme/silme yok). Lead/fırsat pipeline'ı kapsam
+/// dışı (Faz C MVP kararı).
+model CustomerNote {
+  id         String   @id @default(uuid())
+  tenantId   String
+  customerId String
+  authorId   String
+  note       String
+  createdAt  DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id])
+  author   User     @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, customerId])
 }
