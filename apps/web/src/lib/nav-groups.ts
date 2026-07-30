@@ -26,6 +26,7 @@ import {
   Users,
   Users2,
   Wrench,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { PageKey } from "@ahkmes/shared-types";
@@ -115,6 +116,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/capa", label: "CAPA", icon: ShieldAlert, page: "capa" },
       { to: "/calibrations", label: "Kalibrasyon", icon: ShieldAlert, page: "calibrations" },
       { to: "/maintenance-orders", label: "Bakım Emirleri", icon: Factory, page: "maintenance-orders" },
+      { to: "/energy", label: "Enerji İzleme", icon: Zap, page: "energy" },
       { to: "/recipes", label: "Reçeteler", icon: ListOrdered, page: "recipes" },
       { to: "/spc", label: "SPC", icon: FlaskConical, page: "spc" },
       { to: "/alarms", label: "Alarmlar", icon: Siren, page: "alarms" },

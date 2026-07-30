@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Play, Plus, XCircle } from "lucide-react";
+import { CheckCircle2, Play, Plus, Radar, XCircle } from "lucide-react";
 import { useState } from "react";
 import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -84,6 +84,20 @@ export function MaintenanceOrdersPage() {
     onSuccess: invalidate,
     onError: onError("Tamamlanamadı"),
   });
+  const predictiveCheck = useMutation({
+    mutationFn: () =>
+      apiPost<{ checked: number; due: number; created: number }>("/maintenance-orders/predictive-check", {}),
+    onSuccess: (res) => {
+      invalidate();
+      toast(
+        res.created > 0
+          ? `${res.due} makine eşiği aştı, ${res.created} yeni bakım emri oluşturuldu.`
+          : `${res.checked} makine kontrol edildi, eşiği aşan yok.`,
+        "success",
+      );
+    },
+    onError: onError("Kontrol çalıştırılamadı"),
+  });
 
   function openCreate() {
     setMachineId("");
@@ -97,11 +111,22 @@ export function MaintenanceOrdersPage() {
     <div>
       <div className="mb-6 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Bakım Emirleri</h1>
-        {canWrite && (
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> Yeni Bakım Emri
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {canWrite && (
+            <Button
+              variant="outline"
+              disabled={predictiveCheck.isPending}
+              onClick={() => predictiveCheck.mutate()}
+            >
+              <Radar className="h-4 w-4" /> Öngörülü Bakım Kontrolü
+            </Button>
+          )}
+          {canWrite && (
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" /> Yeni Bakım Emri
+            </Button>
+          )}
+        </div>
       </div>
 
       {query.isLoading && <p className="text-slate-500">Yükleniyor…</p>}

@@ -121,9 +121,10 @@ export class ProductionService {
     const { completeWorkOrder, ...runData } = dto;
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const endedAt = new Date();
       const result = await tx.productionRun.update({
         where: { id },
-        data: { ...runData, endedAt: new Date() },
+        data: { ...runData, endedAt },
         include: RUN_INCLUDE,
       });
       if (completeWorkOrder) {
@@ -131,6 +132,15 @@ export class ProductionService {
         await tx.machine.updateMany({
           where: { tenantId, activeWorkOrderId: run.workOrderId },
           data: { activeWorkOrderId: null },
+        });
+      }
+      // Faz I Predictive Maintenance: kümülatif çalışma saati sayacı — koşu bir
+      // makineye bağlıysa süresi kadar artırılır (geriye alınmaz/sıfırlanmaz).
+      if (run.machineId) {
+        const hours = Math.max(0, (endedAt.getTime() - run.startedAt.getTime()) / 1000 / 3600);
+        await tx.machine.update({
+          where: { id: run.machineId },
+          data: { runtimeHours: { increment: hours } },
         });
       }
       return result;

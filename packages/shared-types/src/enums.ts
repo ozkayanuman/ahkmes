@@ -121,6 +121,7 @@ export const PAGE_KEYS = [
   "capa",
   "calibrations",
   "maintenance-orders",
+  "energy",
   "recipes",
   "spc",
   "alarms",

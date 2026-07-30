@@ -42,6 +42,7 @@ import { AndonPage } from "./pages/andon";
 import { AuditLogPage } from "./pages/audit-log";
 import { ShiftReportPage } from "./pages/shift-report";
 import { LaborPage } from "./pages/labor";
+import { EnergyPage } from "./pages/energy";
 import { PermissionGroupsPage } from "./pages/permission-groups";
 import { PageGuard } from "./components/page-guard";
 import { LaunchpadPage } from "./pages/launchpad";
@@ -104,6 +105,7 @@ export function App() {
         <Route path="/capa" element={<PageGuard page="capa"><CapaPage /></PageGuard>} />
         <Route path="/calibrations" element={<PageGuard page="calibrations"><CalibrationsPage /></PageGuard>} />
         <Route path="/maintenance-orders" element={<PageGuard page="maintenance-orders"><MaintenanceOrdersPage /></PageGuard>} />
+        <Route path="/energy" element={<PageGuard page="energy"><EnergyPage /></PageGuard>} />
         <Route path="/recipes" element={<PageGuard page="recipes"><RecipesPage /></PageGuard>} />
         <Route path="/spc" element={<PageGuard page="spc"><SpcPage /></PageGuard>} />
         <Route path="/alarms" element={<PageGuard page="alarms"><AlarmsPage /></PageGuard>} />

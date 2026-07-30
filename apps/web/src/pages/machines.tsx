@@ -198,6 +198,7 @@ export function MachinesPage() {
           { name: "model", label: "Model", required: true },
           { name: "controller", label: "Kontrol Ünitesi (örn. Fanuc 0i-MF)" },
           { name: "isActive", label: "Aktif", type: "checkbox" },
+          { name: "pmIntervalHours", label: "Öngörülü Bakım Aralığı (saat)", type: "number" },
         ]}
         rowActions={(row) => (
           <div className="flex gap-1">

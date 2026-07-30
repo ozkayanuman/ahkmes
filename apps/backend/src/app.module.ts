@@ -27,6 +27,7 @@ import { OeeModule } from "./oee/oee.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { LaborModule } from "./labor/labor.module";
+import { EnergyModule } from "./energy/energy.module";
 import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
 import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
@@ -81,6 +82,7 @@ import { ArModule } from "./ar/ar.module";
     AuditLogModule,
     ShiftReportModule,
     LaborModule,
+    EnergyModule,
     PermissionGroupsModule,
     LdapModule,
     NotificationsModule,

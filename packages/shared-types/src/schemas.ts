@@ -153,6 +153,9 @@ export const createMachineSchema = z.object({
   connectorConfig: z.record(z.unknown()).optional(),
   /// Saha hiyerarşisindeki yeri — null: yerleştirilmemiş/kaldırılmış.
   unitId: idSchema.nullable().optional(),
+  /// Faz I Predictive Maintenance: eşik girilirse (runtimeHours - lastPmRuntimeHours)
+  /// aştığında öngörülü bakım tetiklenir.
+  pmIntervalHours: z.coerce.number().nonnegative().optional(),
 });
 export const updateMachineSchema = createMachineSchema.partial();
 export type CreateMachineDto = z.infer<typeof createMachineSchema>;
@@ -365,7 +368,7 @@ export const createCalibrationSchema = z.object({
 });
 export type CreateCalibrationDto = z.infer<typeof createCalibrationSchema>;
 
-// ---- MaintenanceOrder (Faz E) — takvim bazlı PM/CM, runtime-hour tetikleme kapsam dışı ----
+// ---- MaintenanceOrder (Faz E takvim bazlı PM/CM + Faz I runtime-hour öngörülü tetikleme) ----
 export const createMaintenanceOrderSchema = z.object({
   machineId: idSchema,
   type: MaintenanceOrderTypeSchema,
@@ -375,6 +378,15 @@ export const createMaintenanceOrderSchema = z.object({
 export type CreateMaintenanceOrderDto = z.infer<typeof createMaintenanceOrderSchema>;
 export const completeMaintenanceOrderSchema = z.object({ notes: z.string().optional() });
 export type CompleteMaintenanceOrderDto = z.infer<typeof completeMaintenanceOrderSchema>;
+
+// ---- EnergyReading (Faz I Energy Monitoring) — manuel kwh girişi, otomatik telemetri yok ----
+export const createEnergyReadingSchema = z.object({
+  machineId: idSchema,
+  kwh: decimalString,
+  recordedAt: isoDate.optional(),
+  notes: z.string().optional(),
+});
+export type CreateEnergyReadingDto = z.infer<typeof createEnergyReadingSchema>;
 
 // ---- WorkOrder (Faz 0b) ----
 export const createWorkOrderSchema = z.object({

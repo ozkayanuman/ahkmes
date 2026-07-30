@@ -45,6 +45,12 @@ export class MaintenanceOrdersController {
     return this.service.create(user.tenantId, user.userId, dto);
   }
 
+  @Post("predictive-check")
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  predictiveCheck(@CurrentUser() user: AuthUser) {
+    return this.service.predictiveCheck(user.tenantId, user.userId);
+  }
+
   @Patch(":id/start")
   @Roles("ADMIN", "PLANNER", "FOREMAN")
   start(@CurrentUser() user: AuthUser, @Param("id") id: string) {

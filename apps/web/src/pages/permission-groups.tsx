@@ -34,6 +34,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   capa: "CAPA",
   calibrations: "Kalibrasyon",
   "maintenance-orders": "Bakım Emirleri",
+  energy: "Enerji İzleme",
   recipes: "Reçeteler",
   spc: "SPC",
   alarms: "Alarmlar",

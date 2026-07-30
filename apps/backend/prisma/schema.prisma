@@ -195,6 +195,7 @@ model User {
   supplierInvoicesCreated SupplierInvoice[]
   supplierPaymentsCreated SupplierPayment[]
   customerPaymentsCreated CustomerPayment[]
+  energyReadingsCreated   EnergyReading[]
 
   @@index([tenantId])
 }
@@ -396,6 +397,15 @@ model Machine {
   /// opsiyonel, girilmezse iş emri maliyet hesaplamasında işçilik/makine katkısı
   /// bu makine için "veri yok" olarak işaretlenir.
   hourlyRate        Decimal?             @db.Decimal(18, 2)
+  /// Faz I Predictive Maintenance: kümülatif çalışma saati — her ProductionRun
+  /// tamamlandığında (bkz. ProductionService.complete) süresi kadar artar, geriye
+  /// alınmaz/sıfırlanmaz. pmIntervalHours girilmişse ve (runtimeHours −
+  /// lastPmRuntimeHours) bu eşiği aşarsa öngörülü bakım tetiklenir (bkz.
+  /// MaintenanceOrdersService.predictiveCheck). lastPmRuntimeHours, en son
+  /// tamamlanan PREVENTIVE bakım emrindeki runtimeHours anlık görüntüsüdür.
+  runtimeHours       Decimal             @default(0) @db.Decimal(18, 2)
+  pmIntervalHours    Decimal?            @db.Decimal(18, 2)
+  lastPmRuntimeHours Decimal             @default(0) @db.Decimal(18, 2)
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
@@ -410,6 +420,7 @@ model Machine {
   calibrations      Calibration[]
   maintenanceOrders MaintenanceOrder[]
   alarmDefinitions  AlarmDefinition[]
+  energyReadings    EnergyReading[]
 
   @@index([tenantId])
 }
@@ -1659,4 +1670,24 @@ model MaintenanceOrder {
 
   @@index([tenantId, machineId])
   @@index([tenantId, status])
+}
+
+/// Faz I Energy Monitoring: makine bazında manuel enerji tüketim kaydı (sayaç
+/// okuma/fatura girişi gibi) — otomatik telemetri henüz yok (connector kwh
+/// göndermiyor), Calibration/SpcMeasurement'la aynı "manuel giriş" deseni.
+model EnergyReading {
+  id          String   @id @default(uuid())
+  tenantId    String
+  machineId   String
+  kwh         Decimal  @db.Decimal(18, 3)
+  recordedAt  DateTime @default(now())
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  machine   Machine @relation(fields: [machineId], references: [id])
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId, machineId])
+  @@index([tenantId, recordedAt])
 }
