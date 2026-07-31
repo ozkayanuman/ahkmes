@@ -26,6 +26,13 @@ export class LotsController {
     return this.service.findAll(user.tenantId, itemType, itemId);
   }
 
+  // "scan/:lotNo" route'u ":id"den ÖNCE tanımlanmalı — aksi halde NestJS
+  // "scan" segmentini bir lot id'si sanıp @Get(":id")'e yönlendirir.
+  @Get("scan/:lotNo")
+  scanByCode(@CurrentUser() user: AuthUser, @Param("lotNo") lotNo: string) {
+    return this.service.scanByCode(user.tenantId, lotNo);
+  }
+
   @Get(":id")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);

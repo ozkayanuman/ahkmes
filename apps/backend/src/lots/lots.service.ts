@@ -107,6 +107,16 @@ export class LotsService {
     };
   }
 
+  /** Barkod/QR tarama ile arama: fiziksel scanner çoğu zaman klavye girişi gibi
+   * davranır ve tarih içeren lotNo'yu (id değil) gönderir — bu yüzden bir arama
+   * girişi lazım. Bulunca aynı trace() zincirini döner (etiketten doğrudan
+   * izlenebilirlik ekranına geçmek için). */
+  async scanByCode(tenantId: string, lotNo: string) {
+    const lot = await this.prisma.lot.findFirst({ where: { tenantId, lotNo } });
+    if (!lot) throw new NotFoundException("Bu koda ait lot bulunamadı");
+    return this.trace(tenantId, lot.id);
+  }
+
   async remove(tenantId: string, id: string) {
     await this.findOne(tenantId, id);
     try {

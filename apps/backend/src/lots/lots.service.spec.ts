@@ -77,3 +77,25 @@ describe("LotsService.trace", () => {
     await expect(service.trace("t1", "missing")).rejects.toThrow();
   });
 });
+
+describe("LotsService.scanByCode", () => {
+  it("lotNo ile bulup trace() zincirini döner", async () => {
+    const { service, prisma } = buildService();
+    prisma.lot.findFirst
+      .mockResolvedValueOnce({ id: "lot-mat-1", tenantId: "t1", lotNo: "LOT-001", itemType: "MATERIAL", itemId: "mat-1" })
+      .mockResolvedValueOnce({ id: "lot-mat-1", itemType: "MATERIAL", itemId: "mat-1" });
+    prisma.materialConsumption.findMany.mockResolvedValue([]);
+
+    const result = await service.scanByCode("t1", "LOT-001");
+
+    expect(prisma.lot.findFirst).toHaveBeenNthCalledWith(1, { where: { tenantId: "t1", lotNo: "LOT-001" } });
+    expect(result.forward!.consumedByWorkOrders).toEqual([]);
+  });
+
+  it("koda ait lot yoksa hata fırlatır", async () => {
+    const { service, prisma } = buildService();
+    prisma.lot.findFirst.mockResolvedValue(null);
+
+    await expect(service.scanByCode("t1", "YOK")).rejects.toThrow();
+  });
+});
