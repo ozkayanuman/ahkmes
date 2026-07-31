@@ -36,6 +36,12 @@ export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export const ProjectTaskStatusSchema = z.enum(["TODO", "IN_PROGRESS", "DONE"]);
 export type ProjectTaskStatus = z.infer<typeof ProjectTaskStatusSchema>;
 
+export const LeadStatusSchema = z.enum(["NEW", "QUALIFIED", "DISQUALIFIED", "CONVERTED"]);
+export type LeadStatus = z.infer<typeof LeadStatusSchema>;
+
+export const OpportunityStageSchema = z.enum(["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"]);
+export type OpportunityStage = z.infer<typeof OpportunityStageSchema>;
+
 export const TransferOrderStatusSchema = z.enum(["COMPLETED", "CANCELLED"]);
 export type TransferOrderStatus = z.infer<typeof TransferOrderStatusSchema>;
 
@@ -115,6 +121,7 @@ export type AlarmSeverity = z.infer<typeof AlarmSeveritySchema>;
 /// NAV listesiyle birebir eşleşir ("dashboard" hariç, o her zaman herkese görünür).
 export const PAGE_KEYS = [
   "customers",
+  "leads",
   "rfq",
   "quotes",
   "sales-orders",

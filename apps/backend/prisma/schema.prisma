@@ -271,6 +271,8 @@ model Customer {
   salesOrders   SalesOrder[]
   activityNotes CustomerNote[]
   payments      CustomerPayment[]
+  opportunities Opportunity[]
+  convertedLeads Lead[]
 
   @@index([tenantId])
 }
@@ -1824,4 +1826,62 @@ model ProjectTimeEntry {
   user User        @relation(fields: [userId], references: [id])
 
   @@index([tenantId, taskId])
+}
+
+enum LeadStatus {
+  NEW
+  QUALIFIED
+  DISQUALIFIED
+  CONVERTED
+}
+
+enum OpportunityStage {
+  NEW
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
+/// Faz M: gerçek CRM'in ilk parçası — henüz Customer olmayan potansiyel kontak.
+/// convert() Quote.convert() → SalesOrder deseniyle aynı mantık: tek yönlü,
+/// geri alınamaz bir dönüşüm, yeni bir Customer kaydı üretir.
+model Lead {
+  id                  String     @id @default(uuid())
+  tenantId            String
+  companyName         String
+  contactName         String?
+  email               String?
+  phone               String?
+  source              String?
+  status              LeadStatus @default(NEW)
+  convertedCustomerId String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  convertedCustomer Customer? @relation(fields: [convertedCustomerId], references: [id])
+
+  @@index([tenantId])
+}
+
+/// Mevcut Customer'a bağlı satış fırsatı — CustomerNote'un (aktivite zaman
+/// çizelgesi) yanında, customers.tsx'e gömülü ikinci bir panel olarak sunulur,
+/// ayrı bir NAV sayfası açılmadı (opportunities "customers" sayfa iznini kullanır).
+model Opportunity {
+  id                String           @id @default(uuid())
+  tenantId          String
+  customerId        String
+  title             String
+  stage             OpportunityStage @default(NEW)
+  estimatedValue    Decimal?         @db.Decimal(18, 2)
+  expectedCloseDate DateTime?
+  wonAt             DateTime?
+  lostAt            DateTime?
+  lostReason        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([tenantId, customerId])
 }

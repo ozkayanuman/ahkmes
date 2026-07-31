@@ -44,6 +44,8 @@ import { WarehousesModule } from "./warehouses/warehouses.module";
 import { LotsModule } from "./lots/lots.module";
 import { SerialNumbersModule } from "./serial-numbers/serial-numbers.module";
 import { ProjectsModule } from "./projects/projects.module";
+import { LeadsModule } from "./leads/leads.module";
+import { OpportunitiesModule } from "./opportunities/opportunities.module";
 import { TransferOrdersModule } from "./transfer-orders/transfer-orders.module";
 import { CycleCountsModule } from "./cycle-counts/cycle-counts.module";
 import { InspectionsModule } from "./inspections/inspections.module";
@@ -103,6 +105,8 @@ import { ArModule } from "./ar/ar.module";
     LotsModule,
     SerialNumbersModule,
     ProjectsModule,
+    LeadsModule,
+    OpportunitiesModule,
     TransferOrdersModule,
     CycleCountsModule,
     InspectionsModule,

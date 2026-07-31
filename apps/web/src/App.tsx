@@ -23,6 +23,7 @@ import { LotsPage } from "./pages/lots";
 import { SerialNumbersPage } from "./pages/serial-numbers";
 import { ProjectsPage } from "./pages/projects";
 import { ProjectDetailPage } from "./pages/project-detail";
+import { LeadsPage } from "./pages/leads";
 import { TransferOrdersPage } from "./pages/transfer-orders";
 import { CycleCountsPage } from "./pages/cycle-counts";
 import { InspectionsPage } from "./pages/inspections";
@@ -61,6 +62,7 @@ export function App() {
       <Route element={<AppLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
+        <Route path="/leads" element={<PageGuard page="leads"><LeadsPage /></PageGuard>} />
         <Route path="/rfq" element={<PageGuard page="rfq"><RfqPage /></PageGuard>} />
         <Route path="/quotes" element={<PageGuard page="quotes"><QuotesPage /></PageGuard>} />
         <Route path="/quotes/:id" element={<PageGuard page="quotes"><QuoteDetailPage /></PageGuard>} />

@@ -13,7 +13,9 @@ import {
   PageKeySchema,
   InspectionResultSchema,
   InvoiceStatusSchema,
+  LeadStatusSchema,
   MaintenanceOrderTypeSchema,
+  OpportunityStageSchema,
   ProjectStatusSchema,
   ProjectTaskStatusSchema,
   PurchaseOrderStatusSchema,
@@ -362,6 +364,43 @@ export const createProjectTimeEntrySchema = z.object({
   date: isoDate.optional(),
 });
 export type CreateProjectTimeEntryDto = z.infer<typeof createProjectTimeEntrySchema>;
+
+// ---- CRM: Lead + Opportunity (Faz M) ----
+export const createLeadSchema = z.object({
+  companyName: z.string().min(1),
+  contactName: z.string().optional(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  source: z.string().optional(),
+});
+export type CreateLeadDto = z.infer<typeof createLeadSchema>;
+
+export const updateLeadSchema = z.object({
+  companyName: z.string().min(1).optional(),
+  contactName: z.string().optional(),
+  email: z.string().email().optional(),
+  phone: z.string().optional(),
+  source: z.string().optional(),
+  status: LeadStatusSchema.optional(),
+});
+export type UpdateLeadDto = z.infer<typeof updateLeadSchema>;
+
+export const createOpportunitySchema = z.object({
+  customerId: idSchema,
+  title: z.string().min(1),
+  estimatedValue: decimalString.optional(),
+  expectedCloseDate: isoDate.optional(),
+});
+export type CreateOpportunityDto = z.infer<typeof createOpportunitySchema>;
+
+export const updateOpportunitySchema = z.object({
+  title: z.string().min(1).optional(),
+  stage: OpportunityStageSchema.optional(),
+  estimatedValue: decimalString.optional(),
+  expectedCloseDate: isoDate.optional(),
+  lostReason: z.string().optional(),
+});
+export type UpdateOpportunityDto = z.infer<typeof updateOpportunitySchema>;
 
 // ---- TransferOrder (Faz D) — Bin→Bin, Delivery gibi tek seferlik olay ----
 export const transferOrderLineInputSchema = z.object({

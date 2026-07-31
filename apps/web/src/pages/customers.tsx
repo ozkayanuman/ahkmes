@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, Users } from "lucide-react";
+import { MessageSquare, Target, Users } from "lucide-react";
 import { useState } from "react";
 import { CrudPage } from "../components/crud-page";
-import { apiGet, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
-import { Button, Modal, Textarea } from "../components/ui";
+import { Button, Input, Label, Modal, Select, Textarea } from "../components/ui";
 import { useToast } from "../components/toast";
 
 interface CustomerRow {
@@ -78,8 +78,119 @@ function CustomerNotesModal({ customer, onClose }: { customer: CustomerRow; onCl
   );
 }
 
+interface OpportunityRow {
+  id: string;
+  title: string;
+  stage: "NEW" | "QUALIFIED" | "PROPOSAL" | "WON" | "LOST";
+  estimatedValue: string | null;
+  expectedCloseDate: string | null;
+  lostReason: string | null;
+}
+
+const STAGE_LABEL: Record<OpportunityRow["stage"], string> = {
+  NEW: "Yeni",
+  QUALIFIED: "Nitelikli",
+  PROPOSAL: "Teklif",
+  WON: "Kazanıldı",
+  LOST: "Kaybedildi",
+};
+
+function OpportunitiesModal({ customer, onClose }: { customer: CustomerRow; onClose: () => void }) {
+  const { user } = useAuth();
+  const canWrite = !!user && ["ADMIN", "SALES"].includes(user.role);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [title, setTitle] = useState("");
+  const [estimatedValue, setEstimatedValue] = useState("");
+
+  const opportunities = useQuery({
+    queryKey: ["/opportunities", customer.id],
+    queryFn: () => apiGet<OpportunityRow[]>(`/opportunities?customerId=${customer.id}`),
+  });
+
+  const create = useMutation({
+    mutationFn: () =>
+      apiPost("/opportunities", {
+        customerId: customer.id,
+        title,
+        ...(estimatedValue ? { estimatedValue: Number(estimatedValue) } : {}),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/opportunities", customer.id] });
+      setTitle("");
+      setEstimatedValue("");
+    },
+    onError: () => toast("Fırsat eklenemedi", "error"),
+  });
+
+  const setStage = useMutation({
+    mutationFn: ({ id, stage }: { id: string; stage: OpportunityRow["stage"] }) =>
+      apiPatch(`/opportunities/${id}`, { stage }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/opportunities", customer.id] }),
+    onError: () => toast("Aşama güncellenemedi", "error"),
+  });
+
+  return (
+    <Modal open title={`${customer.name} — Fırsatlar`} onClose={onClose}>
+      <div className="mb-4 max-h-80 space-y-3 overflow-y-auto">
+        {opportunities.isLoading && <p className="text-sm text-slate-500">Yükleniyor…</p>}
+        {opportunities.data?.length === 0 && <p className="text-sm text-slate-400">Henüz fırsat yok.</p>}
+        {opportunities.data?.map((o) => (
+          <div key={o.id} className="rounded-md bg-slate-50 p-3 text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-slate-700">{o.title}</span>
+              {o.estimatedValue && <span className="text-slate-500">{o.estimatedValue}</span>}
+            </div>
+            <div className="mt-1 flex items-center gap-2 text-xs text-slate-400">
+              {o.expectedCloseDate && <span>Beklenen kapanış: {fmtDate(o.expectedCloseDate)}</span>}
+            </div>
+            {canWrite ? (
+              <Select
+                className="mt-2 text-xs"
+                value={o.stage}
+                onChange={(e) => setStage.mutate({ id: o.id, stage: e.target.value as OpportunityRow["stage"] })}
+              >
+                {Object.entries(STAGE_LABEL).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <div className="mt-1 text-xs">{STAGE_LABEL[o.stage]}</div>
+            )}
+          </div>
+        ))}
+      </div>
+      {canWrite && (
+        <div className="space-y-2">
+          <div>
+            <Label htmlFor="oppTitle">Fırsat Başlığı</Label>
+            <Input id="oppTitle" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="oppValue">Tahmini Değer</Label>
+            <Input
+              id="oppValue"
+              type="number"
+              value={estimatedValue}
+              onChange={(e) => setEstimatedValue(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button disabled={!title.trim() || create.isPending} onClick={() => create.mutate()}>
+              Fırsat Ekle
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 export function CustomersPage() {
   const [notesCustomer, setNotesCustomer] = useState<CustomerRow | null>(null);
+  const [oppCustomer, setOppCustomer] = useState<CustomerRow | null>(null);
 
   return (
     <>
@@ -105,12 +216,18 @@ export function CustomersPage() {
           { name: "notes", label: "Notlar" },
         ]}
         rowActions={(row) => (
-          <Button variant="ghost" className="px-2 py-1" title="Aktivite Notları" onClick={() => setNotesCustomer(row)}>
-            <MessageSquare className="h-4 w-4" />
-          </Button>
+          <div className="flex gap-1">
+            <Button variant="ghost" className="px-2 py-1" title="Aktivite Notları" onClick={() => setNotesCustomer(row)}>
+              <MessageSquare className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" className="px-2 py-1" title="Fırsatlar" onClick={() => setOppCustomer(row)}>
+              <Target className="h-4 w-4" />
+            </Button>
+          </div>
         )}
       />
       {notesCustomer && <CustomerNotesModal customer={notesCustomer} onClose={() => setNotesCustomer(null)} />}
+      {oppCustomer && <OpportunitiesModal customer={oppCustomer} onClose={() => setOppCustomer(null)} />}
     </>
   );
 }
