@@ -11,6 +11,28 @@ const SECRET = "test-secret-min-32-chars-aaaaaaaaaaaaaaaa";
 const ISSUER = "https://idp.example.com";
 const CLIENT_ID = "test-client";
 
+/** Gerçek IdP'ler (Google, Microsoft) authorization/token/jwks endpoint'lerini
+ * issuer'dan FARKLI host'larda barındırabilir (bkz. oidc-providers.service.ts
+ * yorumu) — bu yüzden testlerde bilinçli olarak issuer'dan farklı bir host
+ * kullanılıyor, "aynı host" varsayımına geri dönülmediğini kanıtlamak için. */
+function providerRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "p1",
+    tenantId: "t1",
+    issuer: ISSUER,
+    authorizationEndpoint: "https://login.idp.example.com/authorize",
+    tokenEndpoint: "https://token.idp.example.com/token",
+    jwksUri: "https://keys.idp.example.com/jwks",
+    clientId: CLIENT_ID,
+    clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
+    scope: "openid email profile",
+    emailClaim: "email",
+    isActive: true,
+    oidcProviderId: null,
+    ...overrides,
+  };
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma = {
@@ -39,6 +61,7 @@ describe("OidcAuthService.handleCallback", () => {
   let publicJwk: Record<string, unknown>;
   let privateKey: KeyLike;
   const kid = "test-key-1";
+  const row = providerRow();
 
   beforeAll(async () => {
     const { publicKey, privateKey: pk } = await generateKeyPair("RS256");
@@ -46,23 +69,16 @@ describe("OidcAuthService.handleCallback", () => {
     publicJwk = { ...(await exportJWK(publicKey)), kid, alg: "RS256", use: "sig" };
   });
 
-  function mockDiscoveryAndJwks(idTokenBody: string) {
+  /** authorizeUrl/handleCallback artık discovery çekmiyor (sabitlenmiş
+   * provider.tokenEndpoint/jwksUri kullanılır) — sadece token exchange ve
+   * JWKS istekleri mock'lanır. */
+  function mockTokenAndJwks(idTokenBody: string) {
     const mock = safeRequest.safeFetch as jest.Mock;
     mock.mockImplementation(async (url: string, options: { method: string; body?: string }) => {
-      if (url.endsWith("/.well-known/openid-configuration")) {
-        return {
-          status: 200,
-          body: JSON.stringify({
-            authorization_endpoint: `${ISSUER}/authorize`,
-            token_endpoint: `${ISSUER}/token`,
-            jwks_uri: `${ISSUER}/jwks`,
-          }),
-        };
-      }
-      if (url === `${ISSUER}/jwks`) {
+      if (url === row.jwksUri) {
         return { status: 200, body: JSON.stringify({ keys: [publicJwk] }) };
       }
-      if (url === `${ISSUER}/token` && options.method === "POST") {
+      if (url === row.tokenEndpoint && options.method === "POST") {
         return { status: 200, body: idTokenBody };
       }
       throw new Error(`beklenmeyen URL: ${url}`);
@@ -70,21 +86,17 @@ describe("OidcAuthService.handleCallback", () => {
   }
 
   async function validState(service: OidcAuthService, providerId: string) {
-    return (service as unknown as { signState: (id: string) => Promise<string> }).signState(providerId);
+    const nonce = "test-nonce-value";
+    const nonceHash = require("node:crypto").createHash("sha256").update(nonce).digest("hex");
+    const state = await (
+      service as unknown as { signState: (id: string, nonceHash: string) => Promise<string> }
+    ).signState(providerId, nonceHash);
+    return { state, nonce };
   }
 
   it("geçerli state + geçerli id_token + eşleşen OIDC kullanıcısı: token döner ve provider'a bağlar", async () => {
     const { service, prisma, authService } = buildService();
-    prisma.oidcProvider.findFirst.mockResolvedValue({
-      id: "p1",
-      tenantId: "t1",
-      issuer: ISSUER,
-      clientId: CLIENT_ID,
-      clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
-      scope: "openid email profile",
-      emailClaim: "email",
-      isActive: true,
-    });
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
     prisma.user.findUnique.mockResolvedValue({
       id: "u1",
       email: "user@acme.com",
@@ -97,10 +109,10 @@ describe("OidcAuthService.handleCallback", () => {
     });
 
     const idToken = await makeIdToken(privateKey, kid, {});
-    mockDiscoveryAndJwks(JSON.stringify({ id_token: idToken }));
-    const state = await validState(service, "p1");
+    mockTokenAndJwks(JSON.stringify({ id_token: idToken }));
+    const { state, nonce } = await validState(service, "p1");
 
-    const result = await service.handleCallback("p1", "auth-code", state);
+    const result = await service.handleCallback("p1", "auth-code", state, nonce);
 
     expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { oidcProviderId: "p1" } });
     expect(authService.issueTokens).toHaveBeenCalledWith("u1", "user@acme.com", "Kullanıcı", "OPERATOR", "t1");
@@ -109,50 +121,26 @@ describe("OidcAuthService.handleCallback", () => {
 
   it("state başka bir providerId için imzalanmışsa reddedilir", async () => {
     const { service, prisma } = buildService();
-    prisma.oidcProvider.findFirst.mockResolvedValue({
-      id: "p1",
-      issuer: ISSUER,
-      clientId: CLIENT_ID,
-      clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
-      scope: "openid",
-      emailClaim: "email",
-      isActive: true,
-    });
-    const stateForOtherProvider = await validState(service, "p2");
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    const { state: stateForOtherProvider, nonce } = await validState(service, "p2");
 
-    await expect(service.handleCallback("p1", "auth-code", stateForOtherProvider)).rejects.toThrow();
+    await expect(service.handleCallback("p1", "auth-code", stateForOtherProvider, nonce)).rejects.toThrow();
   });
 
   it("kullanıcı email'i eşleşmiyorsa reddedilir", async () => {
     const { service, prisma } = buildService();
-    prisma.oidcProvider.findFirst.mockResolvedValue({
-      id: "p1",
-      issuer: ISSUER,
-      clientId: CLIENT_ID,
-      clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
-      scope: "openid",
-      emailClaim: "email",
-      isActive: true,
-    });
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
     prisma.user.findUnique.mockResolvedValue(null);
     const idToken = await makeIdToken(privateKey, kid, {});
-    mockDiscoveryAndJwks(JSON.stringify({ id_token: idToken }));
-    const state = await validState(service, "p1");
+    mockTokenAndJwks(JSON.stringify({ id_token: idToken }));
+    const { state, nonce } = await validState(service, "p1");
 
-    await expect(service.handleCallback("p1", "auth-code", state)).rejects.toThrow();
+    await expect(service.handleCallback("p1", "auth-code", state, nonce)).rejects.toThrow();
   });
 
   it("kullanıcı authSource=LOCAL ise OIDC girişini reddeder", async () => {
     const { service, prisma } = buildService();
-    prisma.oidcProvider.findFirst.mockResolvedValue({
-      id: "p1",
-      issuer: ISSUER,
-      clientId: CLIENT_ID,
-      clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
-      scope: "openid",
-      emailClaim: "email",
-      isActive: true,
-    });
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
     prisma.user.findUnique.mockResolvedValue({
       id: "u1",
       email: "user@acme.com",
@@ -161,23 +149,15 @@ describe("OidcAuthService.handleCallback", () => {
       oidcProviderId: null,
     });
     const idToken = await makeIdToken(privateKey, kid, {});
-    mockDiscoveryAndJwks(JSON.stringify({ id_token: idToken }));
-    const state = await validState(service, "p1");
+    mockTokenAndJwks(JSON.stringify({ id_token: idToken }));
+    const { state, nonce } = await validState(service, "p1");
 
-    await expect(service.handleCallback("p1", "auth-code", state)).rejects.toThrow();
+    await expect(service.handleCallback("p1", "auth-code", state, nonce)).rejects.toThrow();
   });
 
   it("kullanıcı zaten başka bir sağlayıcıya bağlıysa reddeder", async () => {
     const { service, prisma } = buildService();
-    prisma.oidcProvider.findFirst.mockResolvedValue({
-      id: "p1",
-      issuer: ISSUER,
-      clientId: CLIENT_ID,
-      clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
-      scope: "openid",
-      emailClaim: "email",
-      isActive: true,
-    });
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
     prisma.user.findUnique.mockResolvedValue({
       id: "u1",
       email: "user@acme.com",
@@ -186,29 +166,37 @@ describe("OidcAuthService.handleCallback", () => {
       oidcProviderId: "p-other",
     });
     const idToken = await makeIdToken(privateKey, kid, {});
-    mockDiscoveryAndJwks(JSON.stringify({ id_token: idToken }));
-    const state = await validState(service, "p1");
+    mockTokenAndJwks(JSON.stringify({ id_token: idToken }));
+    const { state, nonce } = await validState(service, "p1");
 
-    await expect(service.handleCallback("p1", "auth-code", state)).rejects.toThrow();
+    await expect(service.handleCallback("p1", "auth-code", state, nonce)).rejects.toThrow();
+  });
+
+  it("nonce cookie'si eksikse reddedilir (login CSRF koruması)", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    const { state } = await validState(service, "p1");
+
+    await expect(service.handleCallback("p1", "auth-code", state, undefined)).rejects.toThrow();
+  });
+
+  it("nonce cookie'si state'teki hash ile eşleşmiyorsa reddedilir (saldırgan kendi akışının state'ini kurbana enjekte edemez)", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    const { state } = await validState(service, "p1");
+
+    await expect(service.handleCallback("p1", "auth-code", state, "farkli-bir-nonce")).rejects.toThrow();
   });
 
   it("geçersiz imzalı id_token reddedilir (sahte IdP)", async () => {
     const { service, prisma } = buildService();
-    prisma.oidcProvider.findFirst.mockResolvedValue({
-      id: "p1",
-      issuer: ISSUER,
-      clientId: CLIENT_ID,
-      clientSecretEnc: require("../common/crypto").encryptSecret("shh", SECRET),
-      scope: "openid",
-      emailClaim: "email",
-      isActive: true,
-    });
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
     const { privateKey: forgedKey } = await generateKeyPair("RS256");
     const forgedIdToken = await makeIdToken(forgedKey, kid, {});
-    mockDiscoveryAndJwks(JSON.stringify({ id_token: forgedIdToken }));
-    const state = await validState(service, "p1");
+    mockTokenAndJwks(JSON.stringify({ id_token: forgedIdToken }));
+    const { state, nonce } = await validState(service, "p1");
 
-    await expect(service.handleCallback("p1", "auth-code", state)).rejects.toThrow();
+    await expect(service.handleCallback("p1", "auth-code", state, nonce)).rejects.toThrow();
   });
 });
 
@@ -218,5 +206,20 @@ describe("OidcAuthService.authorizeUrl", () => {
     prisma.oidcProvider.findFirst.mockResolvedValue(null);
 
     await expect(service.authorizeUrl("missing")).rejects.toThrow();
+  });
+
+  it("her çağrıda farklı, tahmin edilemez bir nonce üretir (login CSRF koruması için) — discovery'ye çıkmadan, sabitlenmiş endpoint'i kullanır", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(providerRow());
+    (safeRequest.safeFetch as jest.Mock).mockClear();
+
+    const first = await service.authorizeUrl("p1");
+    const second = await service.authorizeUrl("p1");
+
+    expect(safeRequest.safeFetch).not.toHaveBeenCalled();
+    expect(first.nonce).not.toBe(second.nonce);
+    expect(first.url).toContain("state=");
+    expect(new URL(first.url).searchParams.get("state")).not.toBe(new URL(second.url).searchParams.get("state"));
+    expect(new URL(first.url).origin + new URL(first.url).pathname).toBe("https://login.idp.example.com/authorize");
   });
 });

@@ -1937,24 +1937,39 @@ model ServiceTicket {
 /// seçti, aynı tenant'ta birden fazla OidcProvider satırı olabilir (örn. hem
 /// Azure AD hem Google Workspace). clientSecretEnc, LdapConfig.bindPasswordEnc
 /// ile aynı AES-256-GCM şemasını (common/crypto.ts) kullanır.
+/// Güvenlik incelemesi düzeltmesi: discovery belgesi (authorization/token/jwks
+/// endpoint'leri) artık HER GİRİŞTE değil, sadece sağlayıcı OLUŞTURULURKEN bir
+/// kez çekilip burada SABİTLENİR (LdapConfig'in "test-connection" deseniyle
+/// tutarlı — ADMIN, oluşturma anında gördüğü endpoint'leri zımnen onaylamış
+/// olur). İlk tasarım "endpoint host'u issuer host'uyla aynı olmalı" kontrolü
+/// içeriyordu; gerçek bir IdP'ye (Google) karşı test edilince bunun YANLIŞ
+/// olduğu ortaya çıktı — Google'ın gerçek token_endpoint'i
+/// oauth2.googleapis.com'da, jwks_uri'si www.googleapis.com'da, issuer ise
+/// accounts.google.com'da (üçü FARKLI host, hepsi meşru). Pinleme, hem bu
+/// yanlış pozitifi ortadan kaldırır hem de asıl riski (sonradan değişen/ele
+/// geçirilmiş bir discovery yanıtının client_secret'i farklı bir host'a
+/// sızdırması) host eşleştirmesinden daha güvenilir şekilde kapatır.
 model OidcProvider {
-  id              String   @id @default(uuid())
-  tenantId        String
+  id                    String   @id @default(uuid())
+  tenantId              String
   /// Login sayfasındaki "X ile giriş yap" butonunun etiketi.
-  name            String
-  /// örn. https://login.microsoftonline.com/{tenant}/v2.0 — discovery doc
-  /// bu URL + "/.well-known/openid-configuration"den her istekte taze çekilir,
-  /// cache'lenmez (MVP kapsamı, ayrıca yapılandırma değişikliği anında yansır).
-  issuer          String
-  clientId        String
-  clientSecretEnc String
-  scope           String   @default("openid email profile")
+  name                  String
+  /// örn. https://login.microsoftonline.com/{tenant}/v2.0 — sadece oluşturma
+  /// anında discovery için kullanılır, id_token doğrulamasında issuer claim'iyle
+  /// karşılaştırılır.
+  issuer                String
+  authorizationEndpoint String
+  tokenEndpoint         String
+  jwksUri               String
+  clientId              String
+  clientSecretEnc       String
+  scope                 String   @default("openid email profile")
   /// id_token claim'lerinden hangisi kullanıcı email'i olarak kullanılacak.
-  emailClaim      String   @default("email")
-  defaultRole     Role     @default(OPERATOR)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  emailClaim            String   @default("email")
+  defaultRole           Role     @default(OPERATOR)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   users User[]
 

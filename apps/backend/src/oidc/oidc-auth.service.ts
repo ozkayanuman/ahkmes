@@ -1,25 +1,22 @@
-import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { createLocalJWKSet, jwtVerify, SignJWT } from "jose";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { AuthService } from "../auth/auth.service";
 import { decryptSecret } from "../common/crypto";
 import { assertPublicUrl, safeFetch } from "../common/safe-request";
-
-interface DiscoveryDoc {
-  authorization_endpoint: string;
-  token_endpoint: string;
-  jwks_uri: string;
-}
 
 /**
  * Faz O: SSO/OIDC login akışı — LdapService.verifyCredentials()'ın OIDC
  * eşdeğeri. LDAP'tan farklı olarak burada kullanıcı adı/şifre değil,
  * tarayıcı yönlendirmeli authorization-code akışı var: authorizeUrl() IdP'ye
  * yönlendirme URL'i üretir, handleCallback() dönen kodu id_token'a çevirir
- * ve doğrular. Tüm dış istekler (discovery/token/JWKS) common/safe-request.ts
- * üzerinden SSRF korumalı gider (issuer ADMIN girişi olsa da — bkz. Faz J
- * "ADMIN-only endpoint'ler bile yaygın SSRF hedefi" dersi).
+ * ve doğrular. Discovery belgesi (authorization/token/jwks endpoint'leri)
+ * SADECE sağlayıcı oluşturulurken (OidcProvidersService.create) çekilip
+ * sabitlenir — burada tekrar çekilmez, sadece pinlenmiş değerler kullanılır
+ * (bkz. schema.prisma OidcProvider yorumu). Token/JWKS istekleri
+ * common/safe-request.ts üzerinden SSRF korumalı gider.
  */
 @Injectable()
 export class OidcAuthService {
@@ -53,33 +50,30 @@ export class OidcAuthService {
     return provider;
   }
 
-  private async discovery(issuer: string): Promise<DiscoveryDoc> {
-    const url = `${issuer.replace(/\/$/, "")}/.well-known/openid-configuration`;
-    const res = await safeFetch(url, { method: "GET" }, "OIDC discovery belgesi");
-    if (res.status !== 200) throw new BadRequestException("OIDC discovery belgesi alınamadı");
-    try {
-      return JSON.parse(res.body) as DiscoveryDoc;
-    } catch {
-      throw new BadRequestException("OIDC discovery belgesi geçersiz JSON");
-    }
-  }
-
   /**
-   * "state" parametresi burada üretilir (çağıranın ürettiği bir değer kabul
-   * edilmez) — cookie/sunucu-taraflı oturum kullanmadan CSRF/replay koruması
-   * için kısa ömürlü (10dk), HS256 ile imzalı bir JWT (JWT_SECRET ile).
-   * callback() bunu doğrular; sahte bir state ile providerId değiştirilip
-   * başka bir sağlayıcının akışına enjekte edilmesi de böylece engellenir.
+   * Güvenlik incelemesi bulgusu (login CSRF): state sadece providerId taşıyıp
+   * imzalıysa, saldırgan KENDİ hesabıyla meşru bir authorize akışı başlatıp
+   * elde ettiği geçerli state+code çiftini kurbana enjekte edebilir (login
+   * CSRF/session fixation) — imzalı olması sahteciliği değil, TARAYICI
+   * BAĞLAMSIZLIĞINI engellemiyordu. Düzeltme: authorizeUrl() rastgele bir
+   * nonce üretir, controller bunu HttpOnly cookie'ye yazar; state JWT'si
+   * nonce'un kendisini değil SHA-256 hash'ini taşır (cookie XSS ile okunsa
+   * bile state'i sahte üretmeye yetmez). callback() cookie'deki nonce'u
+   * hash'leyip state'teki hash'le sabit-zamanlı karşılaştırır — sadece
+   * authorize()'ı başlatan TARAYICI callback'i tamamlayabilir.
    */
-  private async signState(providerId: string) {
-    return new SignJWT({ providerId })
+  private async signState(providerId: string, nonceHash: string) {
+    return new SignJWT({ providerId, nonceHash })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime("10m")
       .sign(new TextEncoder().encode(this.secretKey()));
   }
 
-  private async verifyState(state: string, providerId: string) {
+  private async verifyState(state: string, providerId: string, cookieNonce: string | undefined) {
+    if (!cookieNonce) {
+      throw new UnauthorizedException("Eksik oturum çerezi (state doğrulanamıyor)");
+    }
     let payload: Record<string, unknown>;
     try {
       ({ payload } = await jwtVerify(state, new TextEncoder().encode(this.secretKey())));
@@ -89,21 +83,28 @@ export class OidcAuthService {
     if (payload.providerId !== providerId) {
       throw new UnauthorizedException("state sağlayıcı ile eşleşmiyor");
     }
+    const expectedHash = createHash("sha256").update(cookieNonce).digest();
+    const actualHash = Buffer.from(String(payload.nonceHash ?? ""), "hex");
+    if (actualHash.length !== expectedHash.length || !timingSafeEqual(actualHash, expectedHash)) {
+      throw new UnauthorizedException("state çerezle eşleşmiyor");
+    }
   }
 
   async authorizeUrl(providerId: string) {
     const provider = await this.findActiveProvider(providerId);
-    const doc = await this.discovery(provider.issuer);
-    assertPublicUrl(doc.authorization_endpoint, "Authorization endpoint");
+    assertPublicUrl(provider.authorizationEndpoint, "Authorization endpoint");
 
-    const state = await this.signState(provider.id);
-    const url = new URL(doc.authorization_endpoint);
+    const nonce = randomBytes(32).toString("base64url");
+    const nonceHash = createHash("sha256").update(nonce).digest("hex");
+    const state = await this.signState(provider.id, nonceHash);
+
+    const url = new URL(provider.authorizationEndpoint);
     url.searchParams.set("client_id", provider.clientId);
     url.searchParams.set("redirect_uri", this.redirectUri(provider.id));
     url.searchParams.set("response_type", "code");
     url.searchParams.set("scope", provider.scope);
     url.searchParams.set("state", state);
-    return url.toString();
+    return { url: url.toString(), nonce };
   }
 
   /**
@@ -112,11 +113,10 @@ export class OidcAuthService {
    * seçeneği tercih etmedi). İlk başarılı girişte oidcProviderId bağlanır;
    * sonraki girişlerde başka bir sağlayıcıyla eşleşme reddedilir.
    */
-  async handleCallback(providerId: string, code: string, state: string) {
-    await this.verifyState(state, providerId);
+  async handleCallback(providerId: string, code: string, state: string, cookieNonce: string | undefined) {
+    await this.verifyState(state, providerId, cookieNonce);
     const provider = await this.findActiveProvider(providerId);
-    const doc = await this.discovery(provider.issuer);
-    assertPublicUrl(doc.token_endpoint, "Token endpoint");
+    assertPublicUrl(provider.tokenEndpoint, "Token endpoint");
 
     const clientSecret = decryptSecret(provider.clientSecretEnc, this.secretKey());
     const body = new URLSearchParams({
@@ -127,7 +127,7 @@ export class OidcAuthService {
       client_secret: clientSecret,
     }).toString();
     const tokenRes = await safeFetch(
-      doc.token_endpoint,
+      provider.tokenEndpoint,
       { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body },
       "Token endpoint",
     );
@@ -141,8 +141,8 @@ export class OidcAuthService {
     }
     if (!idToken) throw new UnauthorizedException("IdP id_token döndürmedi");
 
-    assertPublicUrl(doc.jwks_uri, "JWKS URL'i");
-    const jwksRes = await safeFetch(doc.jwks_uri, { method: "GET" }, "JWKS URL'i");
+    assertPublicUrl(provider.jwksUri, "JWKS URL'i");
+    const jwksRes = await safeFetch(provider.jwksUri, { method: "GET" }, "JWKS URL'i");
     if (jwksRes.status !== 200) throw new UnauthorizedException("JWKS alınamadı");
     const jwks = createLocalJWKSet(JSON.parse(jwksRes.body));
 
