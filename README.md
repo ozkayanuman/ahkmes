@@ -47,6 +47,18 @@ pnpm --filter @ahkmes/backend test:e2e   # 56 e2e testi (auth, CRUD, Faz 0b, Faz
 pnpm typecheck
 ```
 
+### İzole e2e (önerilen)
+
+```bash
+pnpm test:e2e
+```
+
+Bu komut yalnızca geçici Docker Compose kaynaklarıyla PostgreSQL, MinIO ve LDAP
+başlatır; host portu açmaz, `.env` veya geliştirme/üretim veritabanını kullanmaz.
+Test sonucu ve altyapı logları terminalde görünür. Koşum bittiğinde (başarısız
+olsa da) geçici konteyner ve volume'lar silinir. Docker Desktop/Engine çalışır
+durumda olmalıdır.
+
 Web testleri Vitest + React Testing Library ile çalışır (jsdom); API istemcisinin token
 yenileme akışı ve satınalma teslim alma ekranı davranış olarak kapsanır.
 

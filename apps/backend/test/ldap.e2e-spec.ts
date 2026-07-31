@@ -9,8 +9,10 @@ const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@ahkmes.local";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "Admin1234!";
 const STAMP = Date.now();
 
-const LDAP_HOST = "localhost";
-const LDAP_PORT = 3389;
+// Varsayılanlar mevcut CI ve elle başlatılan yerel LDAP sunucusuyla uyumludur.
+// İzole Docker e2e koşumu bunları compose servis ağına yönlendirir.
+const LDAP_HOST = process.env.LDAP_TEST_HOST ?? "localhost";
+const LDAP_PORT = Number(process.env.LDAP_TEST_PORT ?? "3389");
 const LDAP_BIND_DN = "cn=admin,dc=ahkmes,dc=test";
 const LDAP_BIND_PASSWORD = "admin123";
 const LDAP_BASE_DN = "dc=ahkmes,dc=test";

@@ -63,7 +63,21 @@ pnpm --filter @ahkmes/web dev
 
 Bkz. `docs/yedekleme.md`.
 
-## 8. Bilinen Kısıtlamalar (v0.9)
+## 8. İzole e2e doğrulaması
+
+Geliştirici veritabanını koruyarak backend e2e paketini çalıştırmak için:
+
+```bash
+pnpm test:e2e
+```
+
+Komut geçici, host porta bağlı olmayan PostgreSQL, MinIO ve LDAP konteynerleri
+oluşturur; migration ve seed'i bu boş PostgreSQL'e uygular, e2e testlerini
+çalıştırır ve sonuçtan sonra bütün geçici kaynakları siler. Docker Desktop veya
+Docker Engine çalışıyor olmalıdır. Ürün Compose yığınını veya `.env` dosyasını
+kullanmaz.
+
+## 9. Bilinen Kısıtlamalar (v0.9)
 
 - Tek-tenant mimari — birden fazla şirkete aynı kurulumdan hizmet vermek için ek geliştirme gerekir.
 - Machine Connector (OPC-UA/Mitsubishi M80) ayrı bir süreç olarak çalıştırılmalı, Docker Compose'a henüz opsiyonel servis olarak eklenmedi.

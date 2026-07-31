@@ -74,6 +74,7 @@ jobs:
       - run: pnpm --filter @ahkmes/backend exec prisma migrate deploy
       - run: pnpm --filter @ahkmes/backend exec prisma db seed
       - run: pnpm --filter @ahkmes/backend typecheck
+      - run: pnpm --filter @ahkmes/backend build
       - run: pnpm --filter @ahkmes/backend test:e2e
 
   connector:
@@ -101,4 +102,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ahkmes/shared-types build
       - run: pnpm --filter @ahkmes/web typecheck
+      - run: pnpm --filter @ahkmes/web build
       - run: pnpm --filter @ahkmes/web test
