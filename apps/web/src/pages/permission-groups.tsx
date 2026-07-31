@@ -23,6 +23,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   materials: "Malzemeler",
   warehouses: "Depolar",
   lots: "Lot / Parti",
+  "serial-numbers": "Seri Numaraları",
   "transfer-orders": "Transfer Emirleri",
   "cycle-counts": "Stok Sayımı",
   machines: "Tezgahlar",

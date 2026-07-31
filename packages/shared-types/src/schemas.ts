@@ -311,6 +311,15 @@ export const createLotSchema = z.object({
 });
 export type CreateLotDto = z.infer<typeof createLotSchema>;
 
+// ---- SerialNumber (Faz K) — Lot'a paralel, tekil fiziksel ürün birimi takibi ----
+export const createSerialNumberSchema = z.object({
+  serialNo: z.string().min(1),
+  partId: idSchema,
+  workOrderId: idSchema.optional(),
+  lotId: idSchema.optional(),
+});
+export type CreateSerialNumberDto = z.infer<typeof createSerialNumberSchema>;
+
 // ---- TransferOrder (Faz D) — Bin→Bin, Delivery gibi tek seferlik olay ----
 export const transferOrderLineInputSchema = z.object({
   itemType: StockItemTypeSchema,

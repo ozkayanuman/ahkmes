@@ -42,6 +42,7 @@ import { InvoiceModule } from "./invoice/invoice.module";
 import { CustomerNotesModule } from "./customer-notes/customer-notes.module";
 import { WarehousesModule } from "./warehouses/warehouses.module";
 import { LotsModule } from "./lots/lots.module";
+import { SerialNumbersModule } from "./serial-numbers/serial-numbers.module";
 import { TransferOrdersModule } from "./transfer-orders/transfer-orders.module";
 import { CycleCountsModule } from "./cycle-counts/cycle-counts.module";
 import { InspectionsModule } from "./inspections/inspections.module";
@@ -99,6 +100,7 @@ import { ArModule } from "./ar/ar.module";
     CustomerNotesModule,
     WarehousesModule,
     LotsModule,
+    SerialNumbersModule,
     TransferOrdersModule,
     CycleCountsModule,
     InspectionsModule,

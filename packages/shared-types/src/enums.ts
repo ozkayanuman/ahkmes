@@ -115,6 +115,7 @@ export const PAGE_KEYS = [
   "work-orders",
   "warehouses",
   "lots",
+  "serial-numbers",
   "transfer-orders",
   "cycle-counts",
   "inspections",

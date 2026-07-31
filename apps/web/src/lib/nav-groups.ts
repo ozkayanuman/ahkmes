@@ -100,6 +100,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/materials", label: "Malzemeler", icon: Boxes, page: "materials" },
       { to: "/warehouses", label: "Depolar", icon: Boxes, page: "warehouses" },
       { to: "/lots", label: "Lot / Parti", icon: Boxes, page: "lots" },
+      { to: "/serial-numbers", label: "Seri Numaraları", icon: Boxes, page: "serial-numbers" },
       { to: "/transfer-orders", label: "Transfer Emirleri", icon: Boxes, page: "transfer-orders" },
       { to: "/cycle-counts", label: "Stok Sayımı", icon: Boxes, page: "cycle-counts" },
     ],

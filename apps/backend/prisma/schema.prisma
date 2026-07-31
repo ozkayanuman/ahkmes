@@ -299,6 +299,7 @@ model Part {
   salesOrderLines     SalesOrderLine[]
   recipeHeaders       RecipeHeader[]
   spcCharacteristics  SpcCharacteristic[]
+  serialNumbers       SerialNumber[]
 
   @@unique([tenantId, partNo, revision])
   @@index([tenantId])
@@ -573,6 +574,7 @@ model WorkOrder {
   nonConformances  NonConformance[]
   inspections      Inspection[]
   spcMeasurements  SpcMeasurement[]
+  serialNumbers    SerialNumber[]
 
   @@index([tenantId])
   @@index([status])
@@ -1436,9 +1438,32 @@ model Lot {
   stockBalances        StockBalance[]
   consumptions         MaterialConsumption[]
   finishedGoodsEntries FinishedGoodsEntry[]
+  serialNumbers        SerialNumber[]
 
   @@unique([tenantId, lotNo])
   @@index([tenantId, itemType, itemId])
+}
+
+/// Barcode/QR MVP'nin 2. seçeneği — Lot (parti/batch) yerine tekil fiziksel
+/// ürün birimi takibi. Lot ile birebir aynı desen (Faz D), ama zorunlu olarak
+/// bir Part'a bağlıdır (malzeme değil, sadece üretilen mamul serileştirilir).
+/// workOrderId/lotId opsiyonel: seri numarası üretim öncesi (örn. gövde
+/// üzerine erken damgalama) tanımlanabilir, sonradan iş emri/lota bağlanabilir.
+model SerialNumber {
+  id          String   @id @default(uuid())
+  tenantId    String
+  serialNo    String
+  partId      String
+  workOrderId String?
+  lotId       String?
+  createdAt   DateTime @default(now())
+
+  part      Part       @relation(fields: [partId], references: [id])
+  workOrder WorkOrder? @relation(fields: [workOrderId], references: [id])
+  lot       Lot?       @relation(fields: [lotId], references: [id])
+
+  @@unique([tenantId, serialNo])
+  @@index([tenantId, partId])
 }
 
 /// Bin başına malzeme/mamul bakiyesi — polimorfik itemType/itemId deseni
