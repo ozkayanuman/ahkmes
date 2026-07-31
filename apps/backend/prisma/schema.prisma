@@ -199,6 +199,7 @@ model User {
   webhooksCreated         WebhookSubscription[]
   assignedProjectTasks    ProjectTask[]
   projectTimeEntries      ProjectTimeEntry[]
+  serviceTicketsCreated   ServiceTicket[]
 
   @@index([tenantId])
 }
@@ -273,6 +274,7 @@ model Customer {
   payments      CustomerPayment[]
   opportunities Opportunity[]
   convertedLeads Lead[]
+  serviceTickets ServiceTicket[]
 
   @@index([tenantId])
 }
@@ -1884,4 +1886,42 @@ model Opportunity {
   customer Customer @relation(fields: [customerId], references: [id])
 
   @@index([tenantId, customerId])
+}
+
+enum ServiceTicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ServiceTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+/// Faz N: Service Management'ın ilk parçası — MaintenanceOrder'ın (dahili,
+/// makine bazlı bakım) müşteri tarafındaki eşdeğeri: bir müşteriden gelen
+/// servis/şikayet talebi. NonConformance.resolve() ile aynı desen — RESOLVED'a
+/// geçerken çözüm notu zorunlu.
+model ServiceTicket {
+  id             String                @id @default(uuid())
+  tenantId       String
+  customerId     String
+  subject        String
+  description    String?
+  priority       ServiceTicketPriority @default(MEDIUM)
+  status         ServiceTicketStatus   @default(OPEN)
+  resolutionNote String?
+  resolvedAt     DateTime?
+  createdById    String
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  customer  Customer @relation(fields: [customerId], references: [id])
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
 }

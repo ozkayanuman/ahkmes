@@ -23,6 +23,8 @@ import {
   RFQStatusSchema,
   RoleSchema,
   SalesOrderStatusSchema,
+  ServiceTicketPrioritySchema,
+  ServiceTicketStatusSchema,
   StockItemTypeSchema,
   WorkOrderStatusSchema,
 } from "./enums";
@@ -401,6 +403,22 @@ export const updateOpportunitySchema = z.object({
   lostReason: z.string().optional(),
 });
 export type UpdateOpportunityDto = z.infer<typeof updateOpportunitySchema>;
+
+// ---- Service Management (Faz N) ----
+export const createServiceTicketSchema = z.object({
+  customerId: idSchema,
+  subject: z.string().min(1),
+  description: z.string().optional(),
+  priority: ServiceTicketPrioritySchema.optional(),
+});
+export type CreateServiceTicketDto = z.infer<typeof createServiceTicketSchema>;
+
+export const resolveServiceTicketSchema = z.object({
+  status: ServiceTicketStatusSchema,
+  /// NonConformance.resolve() ile aynı desen — sadece status=RESOLVED iken zorunlu.
+  resolutionNote: z.string().min(1).optional(),
+});
+export type ResolveServiceTicketDto = z.infer<typeof resolveServiceTicketSchema>;
 
 // ---- TransferOrder (Faz D) — Bin→Bin, Delivery gibi tek seferlik olay ----
 export const transferOrderLineInputSchema = z.object({

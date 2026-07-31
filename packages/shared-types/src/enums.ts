@@ -42,6 +42,12 @@ export type LeadStatus = z.infer<typeof LeadStatusSchema>;
 export const OpportunityStageSchema = z.enum(["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"]);
 export type OpportunityStage = z.infer<typeof OpportunityStageSchema>;
 
+export const ServiceTicketPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH"]);
+export type ServiceTicketPriority = z.infer<typeof ServiceTicketPrioritySchema>;
+
+export const ServiceTicketStatusSchema = z.enum(["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"]);
+export type ServiceTicketStatus = z.infer<typeof ServiceTicketStatusSchema>;
+
 export const TransferOrderStatusSchema = z.enum(["COMPLETED", "CANCELLED"]);
 export type TransferOrderStatus = z.infer<typeof TransferOrderStatusSchema>;
 
@@ -122,6 +128,7 @@ export type AlarmSeverity = z.infer<typeof AlarmSeveritySchema>;
 export const PAGE_KEYS = [
   "customers",
   "leads",
+  "service-tickets",
   "rfq",
   "quotes",
   "sales-orders",

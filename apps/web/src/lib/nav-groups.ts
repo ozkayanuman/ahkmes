@@ -13,6 +13,7 @@ import {
   GitBranch,
   History,
   LayoutDashboard,
+  LifeBuoy,
   Map,
   Network,
   Radio,
@@ -74,6 +75,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/customers", label: "Müşteriler", icon: Users, page: "customers" },
       { to: "/leads", label: "Potansiyel Müşteriler", icon: Users2, page: "leads" },
+      { to: "/service-tickets", label: "Servis Talepleri", icon: LifeBuoy, page: "service-tickets" },
       { to: "/rfq", label: "Teklif Talepleri (RFQ)", icon: FileText, page: "rfq" },
       { to: "/quotes", label: "Teklifler", icon: FileText, page: "quotes" },
       { to: "/sales-orders", label: "Satış Siparişleri", icon: ShoppingCart, page: "sales-orders" },

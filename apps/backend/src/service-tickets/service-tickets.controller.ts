@@ -1,0 +1,52 @@
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  createServiceTicketSchema,
+  resolveServiceTicketSchema,
+  type CreateServiceTicketDto,
+  type ResolveServiceTicketDto,
+} from "@ahkmes/shared-types";
+import { ServiceTicketsService } from "./service-tickets.service";
+import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
+import { RolesGuard } from "../common/guards/roles.guard";
+import { PagesGuard } from "../common/guards/pages.guard";
+import { Roles } from "../common/decorators/roles.decorator";
+import { RequirePage } from "../common/decorators/require-page.decorator";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
+import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import type { AuthUser } from "../common/types";
+
+@Controller("service-tickets")
+@RequirePage("service-tickets")
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
+export class ServiceTicketsController {
+  constructor(private readonly service: ServiceTicketsService) {}
+
+  @Get()
+  findAll(@CurrentUser() user: AuthUser, @Query("customerId") customerId?: string, @Query("status") status?: string) {
+    return this.service.findAll(user.tenantId, customerId, status);
+  }
+
+  @Get(":id")
+  findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.findOne(user.tenantId, id);
+  }
+
+  @Post()
+  @Roles("ADMIN", "SALES")
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(createServiceTicketSchema)) dto: CreateServiceTicketDto,
+  ) {
+    return this.service.create(user.tenantId, user.userId, dto);
+  }
+
+  @Patch(":id/resolve")
+  @Roles("ADMIN", "SALES")
+  resolve(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(resolveServiceTicketSchema)) dto: ResolveServiceTicketDto,
+  ) {
+    return this.service.resolve(user.tenantId, id, dto);
+  }
+}

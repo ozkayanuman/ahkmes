@@ -46,6 +46,7 @@ import { SerialNumbersModule } from "./serial-numbers/serial-numbers.module";
 import { ProjectsModule } from "./projects/projects.module";
 import { LeadsModule } from "./leads/leads.module";
 import { OpportunitiesModule } from "./opportunities/opportunities.module";
+import { ServiceTicketsModule } from "./service-tickets/service-tickets.module";
 import { TransferOrdersModule } from "./transfer-orders/transfer-orders.module";
 import { CycleCountsModule } from "./cycle-counts/cycle-counts.module";
 import { InspectionsModule } from "./inspections/inspections.module";
@@ -107,6 +108,7 @@ import { ArModule } from "./ar/ar.module";
     ProjectsModule,
     LeadsModule,
     OpportunitiesModule,
+    ServiceTicketsModule,
     TransferOrdersModule,
     CycleCountsModule,
     InspectionsModule,

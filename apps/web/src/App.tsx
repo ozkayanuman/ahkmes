@@ -24,6 +24,7 @@ import { SerialNumbersPage } from "./pages/serial-numbers";
 import { ProjectsPage } from "./pages/projects";
 import { ProjectDetailPage } from "./pages/project-detail";
 import { LeadsPage } from "./pages/leads";
+import { ServiceTicketsPage } from "./pages/service-tickets";
 import { TransferOrdersPage } from "./pages/transfer-orders";
 import { CycleCountsPage } from "./pages/cycle-counts";
 import { InspectionsPage } from "./pages/inspections";
@@ -63,6 +64,7 @@ export function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
         <Route path="/leads" element={<PageGuard page="leads"><LeadsPage /></PageGuard>} />
+        <Route path="/service-tickets" element={<PageGuard page="service-tickets"><ServiceTicketsPage /></PageGuard>} />
         <Route path="/rfq" element={<PageGuard page="rfq"><RfqPage /></PageGuard>} />
         <Route path="/quotes" element={<PageGuard page="quotes"><QuotesPage /></PageGuard>} />
         <Route path="/quotes/:id" element={<PageGuard page="quotes"><QuoteDetailPage /></PageGuard>} />
