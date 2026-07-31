@@ -76,6 +76,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/rfq", label: "Teklif Talepleri (RFQ)", icon: FileText, page: "rfq" },
       { to: "/quotes", label: "Teklifler", icon: FileText, page: "quotes" },
       { to: "/sales-orders", label: "Satış Siparişleri", icon: ShoppingCart, page: "sales-orders" },
+      { to: "/projects", label: "Projeler", icon: ClipboardList, page: "projects" },
       { to: "/purchase-orders", label: "Satınalma", icon: ShoppingCart, page: "purchase-orders" },
       { to: "/ar", label: "Alacaklar (AR)", icon: Landmark, page: "ar" },
       { to: "/ap", label: "Borçlar (AP)", icon: Receipt, page: "ap" },

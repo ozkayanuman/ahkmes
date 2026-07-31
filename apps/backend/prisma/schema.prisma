@@ -197,6 +197,8 @@ model User {
   customerPaymentsCreated CustomerPayment[]
   energyReadingsCreated   EnergyReading[]
   webhooksCreated         WebhookSubscription[]
+  assignedProjectTasks    ProjectTask[]
+  projectTimeEntries      ProjectTimeEntry[]
 
   @@index([tenantId])
 }
@@ -1742,4 +1744,84 @@ model WebhookSubscription {
 
   @@index([tenantId])
   @@index([tenantId, event])
+}
+
+enum ProjectStatus {
+  PLANNED
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum ProjectTaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+/// Faz L: Project Management — WorkOrder'dan bağımsız, üretim dışı proje
+/// takibi (örn. bir makine kurulumu, bir müşteri özel projesi). Scheduling.tsx'in
+/// basit Gantt deseniyle tutarlı: kapasite planlama algoritması yok, manuel
+/// tarih/durum takibi.
+model Project {
+  id        String        @id @default(uuid())
+  tenantId  String
+  code      String
+  name      String
+  status    ProjectStatus @default(PLANNED)
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  tasks ProjectTask[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+/// WBS (Work Breakdown Structure) — self-referencing tek seviye değil,
+/// gerçek ağaç (parentTaskId), Lot/SerialNumber'daki polimorfik desenden
+/// farklı olarak burada gerçek bir hiyerarşi gerekiyordu.
+model ProjectTask {
+  id           String            @id @default(uuid())
+  tenantId     String
+  projectId    String
+  parentTaskId String?
+  name         String
+  assigneeId   String?
+  startDate    DateTime?
+  endDate      DateTime?
+  status       ProjectTaskStatus @default(TODO)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  project     Project            @relation(fields: [projectId], references: [id])
+  parentTask  ProjectTask?       @relation("ProjectTaskParent", fields: [parentTaskId], references: [id])
+  childTasks  ProjectTask[]      @relation("ProjectTaskParent")
+  assignee    User?              @relation(fields: [assigneeId], references: [id])
+  timeEntries ProjectTimeEntry[]
+
+  @@index([tenantId, projectId])
+}
+
+/// Labor Tracking'in (Faz H) ProjectTask tarafındaki eşdeğeri — ayrı bir
+/// Timesheet/clock-in modeli değil, görev başına basit saat girişi.
+/// GET /projects/:id/cost bunu User.hourlyRate ile çarpıp work-orders.cost()'un
+/// "partial" desenini izler (hourlyRate girilmemiş kullanıcılarda sessizce
+/// atlanmaz, kullanıcıya görünür bir uyarı döner).
+model ProjectTimeEntry {
+  id        String   @id @default(uuid())
+  tenantId  String
+  taskId    String
+  userId    String
+  hours     Decimal  @db.Decimal(10, 2)
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  task ProjectTask @relation(fields: [taskId], references: [id])
+  user User        @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, taskId])
 }

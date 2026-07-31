@@ -25,6 +25,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   lots: "Lot / Parti",
   "serial-numbers": "Seri Numaraları",
   "transfer-orders": "Transfer Emirleri",
+  projects: "Projeler",
   "cycle-counts": "Stok Sayımı",
   machines: "Tezgahlar",
   hierarchy: "Hiyerarşi",

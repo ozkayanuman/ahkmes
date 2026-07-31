@@ -14,6 +14,8 @@ import {
   InspectionResultSchema,
   InvoiceStatusSchema,
   MaintenanceOrderTypeSchema,
+  ProjectStatusSchema,
+  ProjectTaskStatusSchema,
   PurchaseOrderStatusSchema,
   QuoteStatusSchema,
   RFQStatusSchema,
@@ -319,6 +321,47 @@ export const createSerialNumberSchema = z.object({
   lotId: idSchema.optional(),
 });
 export type CreateSerialNumberDto = z.infer<typeof createSerialNumberSchema>;
+
+// ---- Project Management (Faz L) ----
+export const createProjectSchema = z.object({
+  code: z.string().min(1),
+  name: z.string().min(1),
+  startDate: isoDate.optional(),
+  endDate: isoDate.optional(),
+});
+export type CreateProjectDto = z.infer<typeof createProjectSchema>;
+
+export const updateProjectSchema = z.object({
+  name: z.string().min(1).optional(),
+  status: ProjectStatusSchema.optional(),
+  startDate: isoDate.optional(),
+  endDate: isoDate.optional(),
+});
+export type UpdateProjectDto = z.infer<typeof updateProjectSchema>;
+
+export const createProjectTaskSchema = z.object({
+  name: z.string().min(1),
+  parentTaskId: idSchema.optional(),
+  assigneeId: idSchema.optional(),
+  startDate: isoDate.optional(),
+  endDate: isoDate.optional(),
+});
+export type CreateProjectTaskDto = z.infer<typeof createProjectTaskSchema>;
+
+export const updateProjectTaskSchema = z.object({
+  name: z.string().min(1).optional(),
+  assigneeId: idSchema.optional(),
+  startDate: isoDate.optional(),
+  endDate: isoDate.optional(),
+  status: ProjectTaskStatusSchema.optional(),
+});
+export type UpdateProjectTaskDto = z.infer<typeof updateProjectTaskSchema>;
+
+export const createProjectTimeEntrySchema = z.object({
+  hours: positiveQty,
+  date: isoDate.optional(),
+});
+export type CreateProjectTimeEntryDto = z.infer<typeof createProjectTimeEntrySchema>;
 
 // ---- TransferOrder (Faz D) — Bin→Bin, Delivery gibi tek seferlik olay ----
 export const transferOrderLineInputSchema = z.object({
