@@ -21,6 +21,7 @@ enum Role {
 enum UserAuthSource {
   LOCAL
   LDAP
+  OIDC
 }
 
 enum QuoteStatus {
@@ -154,6 +155,10 @@ model User {
   authSource   UserAuthSource @default(LOCAL)
   /// LDAP kullanıcılarında distinguishedName — girişte bu DN ile bind denenir.
   externalDn   String?
+  /// OIDC kullanıcılarında ilk başarılı girişte bağlanan sağlayıcı — aynı tenant'ta
+  /// birden fazla sağlayıcı olabildiğinden (Faz O, çoklu sağlayıcı) sadece email
+  /// eşleştirmesi yetmez, login'in hangi provider üzerinden doğrulanacağı bilinmeli.
+  oidcProviderId String?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -200,6 +205,7 @@ model User {
   assignedProjectTasks    ProjectTask[]
   projectTimeEntries      ProjectTimeEntry[]
   serviceTicketsCreated   ServiceTicket[]
+  oidcProvider            OidcProvider?         @relation(fields: [oidcProviderId], references: [id])
 
   @@index([tenantId])
 }
@@ -1924,4 +1930,34 @@ model ServiceTicket {
 
   @@index([tenantId, customerId])
   @@index([tenantId, status])
+}
+
+/// Faz O: SSO/OIDC — LdapConfig'e paralel (bkz. o modelin yorumu), ama
+/// @@unique([tenantId]) YOK: kullanıcı en geniş seçeneği ("çoklu sağlayıcı")
+/// seçti, aynı tenant'ta birden fazla OidcProvider satırı olabilir (örn. hem
+/// Azure AD hem Google Workspace). clientSecretEnc, LdapConfig.bindPasswordEnc
+/// ile aynı AES-256-GCM şemasını (common/crypto.ts) kullanır.
+model OidcProvider {
+  id              String   @id @default(uuid())
+  tenantId        String
+  /// Login sayfasındaki "X ile giriş yap" butonunun etiketi.
+  name            String
+  /// örn. https://login.microsoftonline.com/{tenant}/v2.0 — discovery doc
+  /// bu URL + "/.well-known/openid-configuration"den her istekte taze çekilir,
+  /// cache'lenmez (MVP kapsamı, ayrıca yapılandırma değişikliği anında yansır).
+  issuer          String
+  clientId        String
+  clientSecretEnc String
+  scope           String   @default("openid email profile")
+  /// id_token claim'lerinden hangisi kullanıcı email'i olarak kullanılacak.
+  emailClaim      String   @default("email")
+  defaultRole     Role     @default(OPERATOR)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
 }

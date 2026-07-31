@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeySquare, Upload, Wrench } from "lucide-react";
+import { KeySquare, ShieldCheck, Trash2, Upload, Wrench } from "lucide-react";
 import { useRef, useState } from "react";
 import { CrudPage } from "../components/crud-page";
 import { Button, Input, Label, Modal, Select } from "../components/ui";
-import { ApiError, apiGet, apiPost, apiUpload } from "../lib/api";
+import { ApiError, apiDelete, apiGet, apiPost, apiUpload } from "../lib/api";
 import { useToast } from "../components/toast";
+import { useConfirm } from "../components/confirm-dialog";
 
 interface UserRow {
   id: string;
@@ -12,7 +13,7 @@ interface UserRow {
   name: string;
   role: string;
   isActive: boolean;
-  authSource?: "LOCAL" | "LDAP";
+  authSource?: "LOCAL" | "LDAP" | "OIDC";
 }
 
 const ROLE_OPTIONS = [
@@ -276,9 +277,136 @@ function LdapSettingsModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+interface OidcProviderRow {
+  id: string;
+  name: string;
+  issuer: string;
+  isActive: boolean;
+}
+
+/** LdapSettingsModal ile aynı yerde (Kullanıcılar sayfası) ama farklı desen —
+ * LDAP tek yapılandırma (upsert), OIDC çoklu sağlayıcı (liste + ekle/sil). */
+function OidcSettingsModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [name, setName] = useState("");
+  const [issuer, setIssuer] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [defaultRole, setDefaultRole] = useState("OPERATOR");
+
+  const providers = useQuery({
+    queryKey: ["/oidc-providers"],
+    queryFn: () => apiGet<OidcProviderRow[]>("/oidc-providers"),
+  });
+
+  const create = useMutation({
+    mutationFn: () => apiPost("/oidc-providers", { name, issuer, clientId, clientSecret, defaultRole }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/oidc-providers"] });
+      setName("");
+      setIssuer("");
+      setClientId("");
+      setClientSecret("");
+      toast("OIDC sağlayıcısı eklendi", "success");
+    },
+    onError: (e) => {
+      const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+      toast(msg ?? "Sağlayıcı eklenemedi", "error");
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => apiDelete(`/oidc-providers/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/oidc-providers"] }),
+    onError: () => toast("Silinemedi", "error"),
+  });
+
+  return (
+    <Modal open title="SSO / OIDC Sağlayıcıları" onClose={onClose} className="max-w-xl">
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          Bir sağlayıcı eklendikten sonra, o sağlayıcıyla giriş yapacak kullanıcıları "Kaynak: OIDC" olarak elle
+          oluşturmanız gerekir (otomatik kayıt yok) — ilk başarılı girişte kullanıcı bu sağlayıcıya bağlanır.
+        </p>
+
+        <div className="max-h-48 space-y-2 overflow-y-auto">
+          {providers.data?.length === 0 && <p className="text-sm text-slate-400">Henüz sağlayıcı yok.</p>}
+          {providers.data?.map((p) => (
+            <div key={p.id} className="flex items-center justify-between rounded-md bg-slate-50 p-2 text-sm">
+              <div>
+                <div className="font-medium">{p.name}</div>
+                <div className="text-xs text-slate-400">{p.issuer}</div>
+              </div>
+              <Button
+                variant="ghost"
+                className="px-2 py-1 text-red-600"
+                onClick={async () => {
+                  if (await confirm({ message: `${p.name} silinsin mi?`, danger: true })) remove.mutate(p.id);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <div className="space-y-3 border-t border-slate-100 pt-4">
+          <div>
+            <Label htmlFor="oidcName">Ad (giriş butonunda görünür)</Label>
+            <Input id="oidcName" value={name} onChange={(e) => setName(e.target.value)} placeholder="Azure AD" />
+          </div>
+          <div>
+            <Label htmlFor="oidcIssuer">Issuer</Label>
+            <Input
+              id="oidcIssuer"
+              value={issuer}
+              onChange={(e) => setIssuer(e.target.value)}
+              placeholder="https://login.microsoftonline.com/{tenant}/v2.0"
+            />
+          </div>
+          <div>
+            <Label htmlFor="oidcClientId">Client ID</Label>
+            <Input id="oidcClientId" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="oidcClientSecret">Client Secret</Label>
+            <Input
+              id="oidcClientSecret"
+              type="password"
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="oidcDefaultRole">Varsayılan Rol</Label>
+            <Select id="oidcDefaultRole" value={defaultRole} onChange={(e) => setDefaultRole(e.target.value)}>
+              {ROLE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex justify-end">
+            <Button
+              disabled={!name.trim() || !issuer.trim() || !clientId.trim() || !clientSecret.trim() || create.isPending}
+              onClick={() => create.mutate()}
+            >
+              Sağlayıcı Ekle
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 export function UsersPage() {
   const [showImport, setShowImport] = useState(false);
   const [showLdap, setShowLdap] = useState(false);
+  const [showOidc, setShowOidc] = useState(false);
 
   return (
     <>
@@ -292,6 +420,9 @@ export function UsersPage() {
           <>
             <Button variant="outline" onClick={() => setShowLdap(true)}>
               <KeySquare className="h-4 w-4" /> AD/LDAP
+            </Button>
+            <Button variant="outline" onClick={() => setShowOidc(true)}>
+              <ShieldCheck className="h-4 w-4" /> SSO/OIDC
             </Button>
             <Button variant="outline" onClick={() => setShowImport(true)}>
               <Upload className="h-4 w-4" /> İçe Aktar
@@ -314,6 +445,10 @@ export function UsersPage() {
                 <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
                   AD/LDAP
                 </span>
+              ) : r.authSource === "OIDC" ? (
+                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">
+                  SSO/OIDC
+                </span>
               ) : (
                 <span className="text-xs text-slate-400">Yerel</span>
               ),
@@ -329,10 +464,20 @@ export function UsersPage() {
           { name: "department", label: "Departman" },
           { name: "position", label: "Pozisyon" },
           { name: "hourlyRate", label: "Saatlik Ücret", type: "number" },
+          {
+            name: "authSource",
+            label: "Giriş Kaynağı (LDAP için AD/LDAP panelini kullanın)",
+            type: "select",
+            options: [
+              { value: "LOCAL", label: "Yerel (e-posta/şifre)" },
+              { value: "OIDC", label: "SSO/OIDC" },
+            ],
+          },
         ]}
       />
       {showImport && <ImportCsvModal onClose={() => setShowImport(false)} />}
       {showLdap && <LdapSettingsModal onClose={() => setShowLdap(false)} />}
+      {showOidc && <OidcSettingsModal onClose={() => setShowOidc(false)} />}
     </>
   );
 }

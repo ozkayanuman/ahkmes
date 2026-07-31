@@ -116,7 +116,7 @@ export type NonConformanceStatus = z.infer<typeof NonConformanceStatusSchema>;
 export const NonConformanceActionTypeSchema = z.enum(["GENERIC", "SCRAP", "REWORK", "BLOCKING"]);
 export type NonConformanceActionType = z.infer<typeof NonConformanceActionTypeSchema>;
 
-export const UserAuthSourceSchema = z.enum(["LOCAL", "LDAP"]);
+export const UserAuthSourceSchema = z.enum(["LOCAL", "LDAP", "OIDC"]);
 export type UserAuthSource = z.infer<typeof UserAuthSourceSchema>;
 
 // ---- Alarm Management (Faz F) ----

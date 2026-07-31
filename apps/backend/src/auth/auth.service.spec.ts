@@ -1,0 +1,29 @@
+import { AuthService } from "./auth.service";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildService(overrides: any = {}) {
+  const prisma = { user: { findUnique: jest.fn() }, ...overrides };
+  const jwt = { signAsync: jest.fn(), verifyAsync: jest.fn() };
+  const config = { get: jest.fn() };
+  const permissionGroups = { computeUserPages: jest.fn().mockResolvedValue("*") };
+  const ldap = { verifyCredentials: jest.fn() };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const service = new AuthService(prisma as any, jwt as any, config as any, permissionGroups as any, ldap as any);
+  return { service, prisma, ldap };
+}
+
+describe("AuthService.login", () => {
+  it("authSource=OIDC kullanıcısı local şifre ile giriş yapamaz (sadece SSO akışı)", async () => {
+    const { service, prisma, ldap } = buildService();
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "user@acme.com",
+      isActive: true,
+      authSource: "OIDC",
+      passwordHash: "irrelevant",
+    });
+
+    await expect(service.login({ email: "user@acme.com", password: "anything" })).rejects.toThrow();
+    expect(ldap.verifyCredentials).not.toHaveBeenCalled();
+  });
+});

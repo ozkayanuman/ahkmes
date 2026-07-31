@@ -67,6 +67,8 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-ahkmes-documents}
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost}
       MINIO_PUBLIC_PORT: ${MINIO_PUBLIC_PORT:-9000}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8080}
     ports:
       - "3000:3000"
     depends_on:

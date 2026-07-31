@@ -24,7 +24,12 @@ export class AuthService {
       throw new UnauthorizedException("E-posta veya şifre hatalı");
     }
 
-    if (user.authSource === "LDAP") {
+    if (user.authSource === "OIDC") {
+      // OIDC kullanıcıları local /auth/login ile hiç giriş yapamaz — sadece
+      // /auth/oidc/:id/authorize akışı üzerinden. Önceki halde bu dal yoktu
+      // ve authSource==="OIDC" sessizce bcrypt.compare dalına düşüyordu.
+      throw new UnauthorizedException("Bu kullanıcı sadece SSO/OIDC ile giriş yapabilir");
+    } else if (user.authSource === "LDAP") {
       if (!user.externalDn) {
         throw new UnauthorizedException("LDAP kullanıcısının dizin kaydı bulunamadı, tekrar içe aktarın");
       }
@@ -56,7 +61,7 @@ export class AuthService {
     return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId);
   }
 
-  private async issueTokens(
+  async issueTokens(
     sub: string,
     email: string,
     name: string,

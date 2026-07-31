@@ -1,8 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package } from "lucide-react";
+import { LogIn, Package } from "lucide-react";
 import { Button, Input, Label } from "../components/ui";
 import { useAuth } from "../lib/auth";
+import { apiGet } from "../lib/api";
+
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+
+interface OidcProviderOption {
+  id: string;
+  name: string;
+}
 
 /** Dijitalizasyon temalı, tamamen CSS/SVG ile üretilen arka plan — harici görsel
  * bağımlılığı/telif riski olmadan; devre/ağ düğümleri Endüstri 4.0 imasını taşır. */
@@ -66,6 +74,13 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [oidcProviders, setOidcProviders] = useState<OidcProviderOption[]>([]);
+
+  useEffect(() => {
+    apiGet<OidcProviderOption[]>("/auth/oidc/providers")
+      .then(setOidcProviders)
+      .catch(() => setOidcProviders([]));
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -127,6 +142,24 @@ export function LoginPage() {
             {busy ? "Giriş yapılıyor…" : "Giriş Yap"}
           </Button>
         </form>
+
+        {oidcProviders.length > 0 && (
+          <div className="mt-4 space-y-2 border-t border-slate-100 pt-4">
+            {oidcProviders.map((p) => (
+              <Button
+                key={p.id}
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  window.location.href = `${API_URL}/auth/oidc/${p.id}/authorize`;
+                }}
+              >
+                <LogIn className="h-4 w-4" /> {p.name} ile giriş yap
+              </Button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

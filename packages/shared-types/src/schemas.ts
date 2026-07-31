@@ -52,6 +52,10 @@ export const createUserSchema = z.object({
   department: z.string().optional(),
   position: z.string().optional(),
   hourlyRate: z.coerce.number().nonnegative().optional(),
+  /// LDAP burada YOK — o kaynak sadece /ldap/sync (AD içe aktarma) ile atanır.
+  /// OIDC ise burada elle seçilebilir, çünkü LDAP'ın aksine bir "dizin
+  /// senkronizasyonu" adımı yok (bkz. Faz O).
+  authSource: z.enum(["LOCAL", "OIDC"]).optional(),
 });
 export const updateUserSchema = createUserSchema.partial().omit({ password: true }).extend({
   password: z.string().min(8).optional(),
@@ -85,6 +89,19 @@ export const ldapConfigSchema = z.object({
   defaultRole: RoleSchema.default("OPERATOR"),
 });
 export type LdapConfigDto = z.infer<typeof ldapConfigSchema>;
+
+// ---- OIDC Provider (Faz O) ----
+export const createOidcProviderSchema = z.object({
+  name: z.string().min(1),
+  issuer: z.string().url(),
+  clientId: z.string().min(1),
+  clientSecret: z.string().min(1),
+  scope: z.string().min(1).default("openid email profile"),
+  emailClaim: z.string().min(1).default("email"),
+  defaultRole: RoleSchema.default("OPERATOR"),
+  isActive: z.boolean().default(true),
+});
+export type CreateOidcProviderDto = z.infer<typeof createOidcProviderSchema>;
 
 // ---- Customer ----
 export const createCustomerSchema = z.object({

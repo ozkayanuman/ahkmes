@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 import { AppLayout } from "./components/layout";
 import { LoginPage } from "./pages/login";
+import { OidcCallbackPage } from "./pages/oidc-callback";
 import { DashboardPage } from "./pages/dashboard";
 import { CustomersPage } from "./pages/customers";
 import { PartsPage } from "./pages/parts";
@@ -58,6 +59,7 @@ export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/oidc-callback" element={<OidcCallbackPage />} />
       <Route path="/" element={<LaunchpadPage />} />
       <Route path="/andon" element={<AndonPage />} />
       <Route element={<AppLayout />}>
