@@ -2,9 +2,11 @@ import { ArrowLeft, LogOut } from "lucide-react";
 import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAuth, hasPageAccess } from "../lib/auth";
 import { NAV_GROUPS, type NavGroup } from "../lib/nav-groups";
 import { GlobalStatusBar } from "./global-status-bar";
+import { LanguageSwitcher } from "./language-switcher";
 
 function isGroupActive(group: NavGroup, pathname: string) {
   return group.items.some((i) => (i.end ? pathname === i.to : pathname.startsWith(i.to)));
@@ -24,6 +26,7 @@ function GroupIcon({
   onOpen: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const location = useLocation();
   const active = isGroupActive(group, location.pathname);
   const GroupIconCmp = group.icon;
@@ -34,7 +37,7 @@ function GroupIcon({
       <NavLink
         to={only.to}
         end={only.end}
-        title={group.label}
+        title={t(group.label)}
         className={({ isActive }) =>
           clsx(
             "flex items-center justify-center rounded-md py-2 text-sm font-medium",
@@ -51,7 +54,7 @@ function GroupIcon({
     <div className="relative" onMouseEnter={onOpen} onMouseLeave={onClose}>
       <button
         onClick={() => (open ? onClose() : onOpen())}
-        title={group.label}
+        title={t(group.label)}
         className={clsx(
           "flex w-full items-center justify-center rounded-md py-2 text-sm font-medium",
           active || open ? "bg-brand-50 text-brand-700" : "text-slate-600 hover:bg-slate-100",
@@ -62,7 +65,7 @@ function GroupIcon({
       {open && (
         <div className="absolute left-full top-0 z-50 ml-1 w-48 rounded-lg border border-slate-200 bg-white py-2 shadow-lg">
           <div className="px-3 pb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-            {group.label}
+            {t(group.label)}
           </div>
           {group.items.map((item) => {
             const ItemIcon = item.icon;
@@ -80,7 +83,7 @@ function GroupIcon({
                 }
               >
                 <ItemIcon className="h-4 w-4 shrink-0" />
-                {item.label}
+                {t(item.label)}
               </NavLink>
             );
           })}
@@ -95,11 +98,12 @@ function GroupIcon({
  * ikon gösterilir, her biri üzerine gelinince/tıklanınca sağa açılan bir flyout ile
  * alt sayfaları listeler. */
 export function AppLayout() {
+  const { t } = useTranslation();
   const { user, loading, logout } = useAuth();
   const [openGroup, setOpenGroup] = useState<string | null>(null);
 
   if (loading) {
-    return <div className="flex h-screen items-center justify-center text-slate-500">Yükleniyor…</div>;
+    return <div className="flex h-screen items-center justify-center text-slate-500">{t("Yükleniyor…")}</div>;
   }
   if (!user) return <Navigate to="/login" replace />;
 
@@ -115,7 +119,7 @@ export function AppLayout() {
       <aside className="flex w-16 flex-col border-r border-slate-200 bg-white print:hidden">
         <Link
           to="/"
-          title="Ana Sayfaya Dön"
+          title={t("Ana Sayfaya Dön")}
           className="flex items-center justify-center border-b border-slate-200 py-4 text-slate-500 hover:bg-slate-100 hover:text-brand-700"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -132,9 +136,10 @@ export function AppLayout() {
           ))}
         </nav>
         <div className="border-t border-slate-200 p-2">
+          <LanguageSwitcher />
           <button
             onClick={logout}
-            title="Çıkış"
+            title={t("Çıkış")}
             className="flex w-full items-center justify-center rounded-md py-2 text-sm text-slate-600 hover:bg-slate-100"
           >
             <LogOut className="h-4 w-4 shrink-0" />

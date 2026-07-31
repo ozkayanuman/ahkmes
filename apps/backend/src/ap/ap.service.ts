@@ -78,6 +78,7 @@ export class ApService {
           sinNo,
           purchaseOrderId: dto.purchaseOrderId,
           supplierId: po.supplierId,
+          currency: po.currency,
           notes: dto.notes,
           createdById: userId,
           lines: {
@@ -191,25 +192,33 @@ export class ApService {
     return created;
   }
 
-  /** Tedarikçi bazında açık bakiye: ISSUED faturaların toplamı - tahsis edilen ödemeler. */
+  /**
+   * Tedarikçi bazında açık bakiye — Faz P: AR.summary() ile aynı düzeltme,
+   * customerId yerine supplierId için: para birimine göre ayrı gruplanır.
+   */
   async summary(tenantId: string) {
     const invoices = await this.prisma.supplierInvoice.findMany({
       where: { tenantId, status: "ISSUED" },
       include: { lines: true, allocations: true, supplier: { select: { id: true, name: true } } },
     });
 
-    const bySupplier = new Map<string, { supplierId: string; supplierName: string; outstanding: number }>();
+    const bySupplier = new Map<
+      string,
+      { supplierId: string; supplierName: string; currency: string; outstanding: number }
+    >();
     for (const inv of invoices) {
       const total = inv.lines.reduce((sum, l) => sum + Number(l.qty) * Number(l.unitPrice), 0);
       const allocated = inv.allocations.reduce((sum, a) => sum + Number(a.amount), 0);
       const outstanding = total - allocated;
-      const entry = bySupplier.get(inv.supplierId) ?? {
+      const key = `${inv.supplierId}:${inv.currency}`;
+      const entry = bySupplier.get(key) ?? {
         supplierId: inv.supplierId,
         supplierName: inv.supplier.name,
+        currency: inv.currency,
         outstanding: 0,
       };
       entry.outstanding += outstanding;
-      bySupplier.set(inv.supplierId, entry);
+      bySupplier.set(key, entry);
     }
     return Array.from(bySupplier.values()).sort((a, b) => b.outstanding - a.outstanding);
   }

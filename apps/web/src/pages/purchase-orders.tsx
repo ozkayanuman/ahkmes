@@ -54,6 +54,7 @@ export function PurchaseOrdersPage() {
   const [status, setStatus] = useState("");
   const [open, setOpen] = useState(false);
   const [supplierId, setSupplierId] = useState("");
+  const [currency, setCurrency] = useState("TRY");
   const [orderDate, setOrderDate] = useState(todayInput());
   const [expectedDate, setExpectedDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -84,6 +85,7 @@ export function PurchaseOrdersPage() {
     mutationFn: () =>
       apiPost<PoRow>("/purchase-orders", {
         supplierId,
+        currency,
         orderDate,
         ...(expectedDate ? { expectedDate } : {}),
         ...(notes ? { notes } : {}),
@@ -124,6 +126,7 @@ export function PurchaseOrdersPage() {
           <Button
             onClick={() => {
               setSupplierId("");
+              setCurrency("TRY");
               setOrderDate(todayInput());
               setExpectedDate("");
               setNotes("");
@@ -210,6 +213,14 @@ export function PurchaseOrdersPage() {
                   {s.name}
                 </option>
               ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="currency">Para Birimi</Label>
+            <Select id="currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option value="TRY">TRY</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
             </Select>
           </div>
           <div className="grid grid-cols-2 gap-3">

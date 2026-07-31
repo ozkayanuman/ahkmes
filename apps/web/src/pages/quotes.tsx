@@ -50,6 +50,7 @@ export function QuotesPage() {
   const [status, setStatus] = useState("");
   const [open, setOpen] = useState(false);
   const [customerId, setCustomerId] = useState("");
+  const [currency, setCurrency] = useState("TRY");
   const [validUntil, setValidUntil] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([emptyLine()]);
@@ -79,6 +80,7 @@ export function QuotesPage() {
     mutationFn: () =>
       apiPost<QuoteRow>("/quotes", {
         customerId,
+        currency,
         ...(validUntil ? { validUntil } : {}),
         ...(notes ? { notes } : {}),
         lines: lines.map((l) => ({
@@ -103,6 +105,7 @@ export function QuotesPage() {
 
   function openCreate() {
     setCustomerId("");
+    setCurrency("TRY");
     setValidUntil("");
     setNotes("");
     setLines([emptyLine()]);
@@ -199,6 +202,14 @@ export function QuotesPage() {
                   {c.name}
                 </option>
               ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="currency">Para Birimi</Label>
+            <Select id="currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option value="TRY">TRY</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
             </Select>
           </div>
           <div>

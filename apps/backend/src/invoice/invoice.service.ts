@@ -73,6 +73,7 @@ export class InvoiceService {
           tenantId,
           invNo,
           salesOrderId: dto.salesOrderId,
+          currency: so.currency,
           notes: dto.notes,
           createdById: userId,
           lines: {

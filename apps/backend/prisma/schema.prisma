@@ -159,6 +159,12 @@ model User {
   /// birden fazla sağlayıcı olabildiğinden (Faz O, çoklu sağlayıcı) sadece email
   /// eşleştirmesi yetmez, login'in hangi provider üzerinden doğrulanacağı bilinmeli.
   oidcProviderId String?
+  /// Faz P: kullanıcı bazlı dil/saat dilimi tercihi — sunucu tarafında bir
+  /// çeviri yapılmıyor (i18n tamamen web'de react-i18next ile), burası sadece
+  /// tercihin kalıcı saklandığı yer ve JWT payload'ına eklenir (login sonrası
+  /// tekrar sorgu atmadan uygulanabilsin diye).
+  locale         String         @default("tr")
+  timezone       String         @default("Europe/Istanbul")
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
@@ -688,6 +694,7 @@ model PurchaseOrder {
   poNo         String              @unique
   supplierId   String
   status       PurchaseOrderStatus @default(ORDERED)
+  currency     String              @default("TRY")
   orderDate    DateTime
   expectedDate DateTime?
   notes        String?
@@ -734,6 +741,7 @@ model SupplierInvoice {
   purchaseOrderId String
   supplierId      String
   status          InvoiceStatus @default(ISSUED)
+  currency        String        @default("TRY")
   issuedDate      DateTime      @default(now())
   notes           String?
   createdById     String
@@ -1341,6 +1349,7 @@ model Invoice {
   invNo        String        @unique
   salesOrderId String
   status       InvoiceStatus @default(ISSUED)
+  currency     String        @default("TRY")
   issuedDate   DateTime      @default(now())
   notes        String?
   createdById  String

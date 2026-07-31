@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { Role } from "@ahkmes/shared-types";
 import { api, apiPost, clearTokens, getTokens, setTokens } from "./api";
+import { setAppLocale } from "./i18n";
 
 export interface AuthUser {
   userId: string;
@@ -9,6 +10,13 @@ export interface AuthUser {
   role: Role;
   tenantId: string;
   pages: "*" | string[];
+  locale: string;
+  timezone: string;
+}
+
+function applyUserLocale(user: AuthUser) {
+  setAppLocale(user.locale);
+  return user;
 }
 
 /** Kullanıcının bir NAV sayfasına erişimi olup olmadığını kontrol eder — gruba
@@ -24,6 +32,10 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  /** Token çiftini (yeniden) uygular ve kullanıcıyı tazeler — login dışında,
+   * örn. dil/saat dilimi tercihi güncellendiğinde yeni bir token çifti
+   * geldiğinde kullanılır (bkz. language-switcher.tsx). */
+  applyTokens: (accessToken: string, refreshToken: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -31,6 +43,7 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
   login: async () => undefined,
   logout: () => undefined,
+  applyTokens: async () => undefined,
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -50,7 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     api<AuthUser>("/auth/me")
-      .then(setUser)
+      .then((u) => setUser(applyUserLocale(u)))
       .catch(() => clearTokens())
       .finally(() => setLoading(false));
   }, []);
@@ -61,7 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
     });
     setTokens(tokens.accessToken, tokens.refreshToken);
-    setUser(await api<AuthUser>("/auth/me"));
+    setUser(applyUserLocale(await api<AuthUser>("/auth/me")));
   }, []);
 
   const logout = useCallback(() => {
@@ -69,8 +82,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const applyTokens = useCallback(async (accessToken: string, refreshToken: string) => {
+    setTokens(accessToken, refreshToken);
+    setUser(applyUserLocale(await api<AuthUser>("/auth/me")));
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, applyTokens }}>
       {children}
     </AuthContext.Provider>
   );

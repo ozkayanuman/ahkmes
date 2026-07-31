@@ -11,6 +11,8 @@ export interface JwtPayload {
   role: Role;
   tenantId: string;
   pages: UserPages;
+  locale: string;
+  timezone: string;
 }
 
 export interface AuthUser {
@@ -20,4 +22,6 @@ export interface AuthUser {
   role: Role;
   tenantId: string;
   pages: UserPages;
+  locale: string;
+  timezone: string;
 }

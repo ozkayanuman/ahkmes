@@ -39,7 +39,7 @@ export class AuthService {
       throw new UnauthorizedException("E-posta veya şifre hatalı");
     }
 
-    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId);
+    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
   }
 
   async refresh(refreshToken: string) {
@@ -58,7 +58,14 @@ export class AuthService {
     ) {
       throw new UnauthorizedException("Geçersiz yenileme token'ı");
     }
-    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId);
+    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
+  }
+
+  /** Kendi kendine dil/saat dilimi güncelleme — ADMIN yetkisi gerekmez, herhangi
+   * bir kullanıcı kendi tercihini değiştirebilir (Faz P i18n). */
+  async updateProfile(userId: string, dto: { locale?: string; timezone?: string }) {
+    const user = await this.prisma.user.update({ where: { id: userId }, data: dto });
+    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
   }
 
   async issueTokens(
@@ -67,9 +74,11 @@ export class AuthService {
     name: string,
     role: string,
     tenantId: string,
+    locale: string,
+    timezone: string,
   ) {
     const pages: UserPages = await this.permissionGroups.computeUserPages(sub);
-    const payload = { sub, email, name, role, tenantId, pages };
+    const payload = { sub, email, name, role, tenantId, pages, locale, timezone };
     const accessToken = await this.jwt.signAsync(payload, {
       expiresIn: this.config.get("JWT_ACCESS_TTL") ?? "15m",
     });

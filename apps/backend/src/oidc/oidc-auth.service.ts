@@ -169,6 +169,6 @@ export class OidcAuthService {
       await this.prisma.user.update({ where: { id: user.id }, data: { oidcProviderId: provider.id } });
     }
 
-    return this.authService.issueTokens(user.id, user.email, user.name, user.role, user.tenantId);
+    return this.authService.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
   }
 }

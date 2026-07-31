@@ -79,7 +79,13 @@ export class ArService {
     return created;
   }
 
-  /** Müşteri bazında açık bakiye: ISSUED faturaların toplamı - tahsis edilen ödemeler. */
+  /**
+   * Müşteri bazında açık bakiye: ISSUED faturaların toplamı - tahsis edilen
+   * ödemeler. Faz P: para birimine göre AYRI ayrı gruplanır — farklı kurlar
+   * (örn. bir fatura TRY, diğeri USD) toplanırsa anlamsız/yanıltıcı bir tutar
+   * ortaya çıkardı; bu yüzden anahtar customerId+currency (sadece customerId
+   * değil).
+   */
   async summary(tenantId: string) {
     const invoices = await this.prisma.invoice.findMany({
       where: { tenantId, status: "ISSUED" },
@@ -90,19 +96,24 @@ export class ArService {
       },
     });
 
-    const byCustomer = new Map<string, { customerId: string; customerName: string; outstanding: number }>();
+    const byCustomer = new Map<
+      string,
+      { customerId: string; customerName: string; currency: string; outstanding: number }
+    >();
     for (const inv of invoices) {
       const total = inv.lines.reduce((sum, l) => sum + Number(l.qty) * Number(l.unitPrice), 0);
       const allocated = inv.allocations.reduce((sum, a) => sum + Number(a.amount), 0);
       const outstanding = total - allocated;
       const customerId = inv.salesOrder.customerId;
-      const entry = byCustomer.get(customerId) ?? {
+      const key = `${customerId}:${inv.currency}`;
+      const entry = byCustomer.get(key) ?? {
         customerId,
         customerName: inv.salesOrder.customer.name,
+        currency: inv.currency,
         outstanding: 0,
       };
       entry.outstanding += outstanding;
-      byCustomer.set(customerId, entry);
+      byCustomer.set(key, entry);
     }
     return Array.from(byCustomer.values()).sort((a, b) => b.outstanding - a.outstanding);
   }

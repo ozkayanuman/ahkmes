@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, UseGuards, UsePipes } from "@nestjs/common";
-import { loginSchema, type LoginDto } from "@ahkmes/shared-types";
+import { Body, Controller, Get, Patch, Post, UseGuards, UsePipes } from "@nestjs/common";
+import { loginSchema, updateProfileSchema, type LoginDto, type UpdateProfileDto } from "@ahkmes/shared-types";
 import { AuthService } from "./auth.service";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
@@ -25,5 +25,17 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthUser) {
     return user;
+  }
+
+  /** Kendi dil/saat dilimi tercihini güncelleme — herhangi bir rol, ADMIN
+   * gerekmez (Faz P i18n). Yeni token çifti döner (payload'da locale/timezone
+   * güncellenmiş olsun diye — /auth/me'yi tekrar sorgulamaya gerek kalmadan). */
+  @Patch("me")
+  @UseGuards(JwtAuthGuard)
+  updateProfile(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(updateProfileSchema)) dto: UpdateProfileDto,
+  ) {
+    return this.auth.updateProfile(user.userId, dto);
   }
 }

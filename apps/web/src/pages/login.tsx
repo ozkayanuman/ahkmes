@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { LogIn, Package } from "lucide-react";
 import { Button, Input, Label } from "../components/ui";
 import { useAuth } from "../lib/auth";
@@ -68,6 +69,7 @@ function DigitalBackground() {
 }
 
 export function LoginPage() {
+  const { t } = useTranslation();
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -90,7 +92,7 @@ export function LoginPage() {
       await login(email, password);
       navigate("/");
     } catch {
-      setError("E-posta veya şifre hatalı");
+      setError(t("E-posta veya şifre hatalı"));
     } finally {
       setBusy(false);
     }
@@ -112,12 +114,12 @@ export function LoginPage() {
 
       <div className="relative w-full max-w-sm rounded-xl bg-white/95 p-8 shadow-2xl backdrop-blur">
         <div className="mb-6 text-center">
-          <h1 className="text-xl font-bold text-slate-800">Hoş Geldiniz</h1>
-          <p className="mt-1 text-sm text-slate-500">Devam etmek için giriş yapın</p>
+          <h1 className="text-xl font-bold text-slate-800">{t("Hoş Geldiniz")}</h1>
+          <p className="mt-1 text-sm text-slate-500">{t("Devam etmek için giriş yapın")}</p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="email">E-posta</Label>
+            <Label htmlFor="email">{t("E-posta")}</Label>
             <Input
               id="email"
               type="email"
@@ -128,7 +130,7 @@ export function LoginPage() {
             />
           </div>
           <div>
-            <Label htmlFor="password">Şifre</Label>
+            <Label htmlFor="password">{t("Şifre")}</Label>
             <Input
               id="password"
               type="password"
@@ -139,7 +141,7 @@ export function LoginPage() {
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? "Giriş yapılıyor…" : "Giriş Yap"}
+            {busy ? t("Giriş yapılıyor…") : t("Giriş Yap")}
           </Button>
         </form>
 
@@ -155,7 +157,7 @@ export function LoginPage() {
                   window.location.href = `${API_URL}/auth/oidc/${p.id}/authorize`;
                 }}
               >
-                <LogIn className="h-4 w-4" /> {p.name} ile giriş yap
+                <LogIn className="h-4 w-4" /> {t("{{name}} ile giriş yap", { name: p.name })}
               </Button>
             ))}
           </div>

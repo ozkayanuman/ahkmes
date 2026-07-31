@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { useState } from "react";
 import { ApiError, apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtMoney } from "../lib/format";
 import { Button, Input, Label, Modal, Select, Table, Textarea } from "../components/ui";
 import { useToast } from "../components/toast";
 
@@ -51,6 +51,7 @@ interface SupplierPaymentRow {
 interface SummaryRow {
   supplierId: string;
   supplierName: string;
+  currency: string;
   outstanding: number;
 }
 
@@ -163,18 +164,19 @@ export function ApPage() {
       <div>
         <h1 className="mb-4 text-2xl font-bold">Borçlar (AP) — Tedarikçi Faturaları ve Ödemeler</h1>
         <h2 className="mb-2 text-lg font-semibold">Açık Bakiye (Tedarikçi Bazında)</h2>
-        <Table headers={["Tedarikçi", "Açık Bakiye"]}>
+        <Table headers={["Tedarikçi", "Para Birimi", "Açık Bakiye"]}>
           {(summary.data ?? []).length === 0 && (
             <tr>
-              <td colSpan={2} className="px-4 py-8 text-center text-slate-400">
+              <td colSpan={3} className="px-4 py-8 text-center text-slate-400">
                 Açık bakiye yok
               </td>
             </tr>
           )}
           {(summary.data ?? []).map((s) => (
-            <tr key={s.supplierId}>
+            <tr key={`${s.supplierId}:${s.currency}`}>
               <td className="px-4 py-3 font-medium">{s.supplierName}</td>
-              <td className="px-4 py-3">{s.outstanding.toFixed(2)}</td>
+              <td className="px-4 py-3">{s.currency}</td>
+              <td className="px-4 py-3">{fmtMoney(s.outstanding, s.currency)}</td>
             </tr>
           ))}
         </Table>

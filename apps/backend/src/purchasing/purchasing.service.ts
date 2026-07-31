@@ -82,6 +82,7 @@ export class PurchasingService {
           tenantId,
           poNo,
           supplierId: dto.supplierId,
+          currency: dto.currency,
           orderDate: dto.orderDate,
           expectedDate: dto.expectedDate,
           notes: dto.notes,

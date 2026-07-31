@@ -341,6 +341,7 @@ export class MrpService {
     // başarısız olursa ApprovalRequest PENDING kalır ve karar tekrar denenebilir.
     const po = await this.purchasing.create(tenantId, decidedById, {
       supplierId: chosenSupplierId,
+      currency: "TRY",
       orderDate: new Date(),
       notes: `MRP önerisinden (${proposal.ppNo}) otomatik oluşturuldu`,
       lines: proposal.lines.map((l) => ({

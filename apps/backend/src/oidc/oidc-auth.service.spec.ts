@@ -106,6 +106,8 @@ describe("OidcAuthService.handleCallback", () => {
       isActive: true,
       authSource: "OIDC",
       oidcProviderId: null,
+      locale: "tr",
+      timezone: "Europe/Istanbul",
     });
 
     const idToken = await makeIdToken(privateKey, kid, {});
@@ -115,7 +117,15 @@ describe("OidcAuthService.handleCallback", () => {
     const result = await service.handleCallback("p1", "auth-code", state, nonce);
 
     expect(prisma.user.update).toHaveBeenCalledWith({ where: { id: "u1" }, data: { oidcProviderId: "p1" } });
-    expect(authService.issueTokens).toHaveBeenCalledWith("u1", "user@acme.com", "Kullanıcı", "OPERATOR", "t1");
+    expect(authService.issueTokens).toHaveBeenCalledWith(
+      "u1",
+      "user@acme.com",
+      "Kullanıcı",
+      "OPERATOR",
+      "t1",
+      "tr",
+      "Europe/Istanbul",
+    );
     expect(result).toEqual({ accessToken: "app-access", refreshToken: "app-refresh" });
   });
 

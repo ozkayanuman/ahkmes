@@ -42,6 +42,12 @@ export const loginSchema = z.object({
 });
 export type LoginDto = z.infer<typeof loginSchema>;
 
+export const updateProfileSchema = z.object({
+  locale: z.enum(["tr", "en"]).optional(),
+  timezone: z.string().optional(),
+});
+export type UpdateProfileDto = z.infer<typeof updateProfileSchema>;
+
 // ---- User ----
 export const createUserSchema = z.object({
   email: z.string().email(),
@@ -555,6 +561,7 @@ export const purchaseOrderLineInputSchema = z.object({
 });
 export const createPurchaseOrderSchema = z.object({
   supplierId: idSchema,
+  currency: z.string().default("TRY"),
   orderDate: isoDate,
   expectedDate: isoDate.optional(),
   notes: z.string().optional(),
