@@ -10,6 +10,7 @@ import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { SkipAudit } from "../common/decorators/skip-audit.decorator";
 
 @Controller("approvals")
 @UseGuards(JwtAuthGuard)
@@ -17,6 +18,7 @@ export class ApprovalsController {
   constructor(private readonly service: ApprovalsService) {}
 
   @Post()
+  @SkipAudit()
   request(
     @CurrentUser() user: AuthUser,
     @Body(new ZodValidationPipe(createApprovalRequestSchema)) dto: CreateApprovalRequestDto,
@@ -30,6 +32,7 @@ export class ApprovalsController {
   }
 
   @Patch(":id/approve")
+  @SkipAudit()
   approve(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,
@@ -39,6 +42,7 @@ export class ApprovalsController {
   }
 
   @Patch(":id/reject")
+  @SkipAudit()
   reject(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,

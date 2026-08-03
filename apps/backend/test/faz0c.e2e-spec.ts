@@ -23,6 +23,7 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
   let supplierId: string;
   let materialId: string;
   let quoteId: string;
+  let salesOrderId: string;
   let woId: string;
   let poId: string;
   let runId: string;
@@ -70,6 +71,7 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
       await prisma.workOrder.deleteMany({ where: { id: woId } }).catch(() => undefined);
     }
     await prisma.partStock.deleteMany({ where: { partId } }).catch(() => undefined);
+    if (salesOrderId) await prisma.salesOrder.deleteMany({ where: { id: salesOrderId } }).catch(() => undefined);
     if (quoteId) await prisma.quote.deleteMany({ where: { id: quoteId } }).catch(() => undefined);
     if (poId) await prisma.purchaseOrder.deleteMany({ where: { id: poId } }).catch(() => undefined);
     await prisma.material.deleteMany({ where: { id: materialId } }).catch(() => undefined);
@@ -79,7 +81,7 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
     await app.close();
   });
 
-  it("teklif → onay → iş emri", async () => {
+  it("teklif → onay → satış siparişi → iş emri", async () => {
     const quote = await auth(
       api()
         .post("/quotes")
@@ -89,7 +91,9 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
     await auth(api().patch(`/quotes/${quoteId}/status`).send({ status: "SENT" })).expect(200);
     await auth(api().patch(`/quotes/${quoteId}/status`).send({ status: "APPROVED" })).expect(200);
     const conv = await auth(api().post(`/quotes/${quoteId}/convert`).send({})).expect(201);
-    woId = conv.body.workOrders[0].id;
+    salesOrderId = conv.body.salesOrder.id;
+    const release = await auth(api().post(`/sales-orders/${salesOrderId}/release`).send({})).expect(201);
+    woId = release.body.workOrders[0].id;
   });
 
   it("PO → teslim → hammadde stoğu 30", async () => {
@@ -131,6 +135,9 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
           .send({ workOrderId: woId, materialId, type: "CONSUMED", quantity: 10 }),
       ).expect(201);
       consumptionIds.push(res.body.id);
+      const movements = await auth(api().get(`/inventory/movements?sourceType=MATERIAL_CONSUMPTION&sourceId=${res.body.id}`)).expect(200);
+      expect(movements.body).toHaveLength(1);
+      expect(Number(movements.body[0].quantityDelta)).toBe(-10);
       const mat = await auth(api().get(`/materials/${materialId}`)).expect(200);
       expect(Number(mat.body.stockQty)).toBe(20);
     });
@@ -182,6 +189,9 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
       ).expect(201);
       expect(res.body.completionSuggested).toBe(false);
       expect(res.body.totalProduced).toBe(2);
+      const movements = await auth(api().get(`/inventory/movements?sourceType=FINISHED_GOODS_ENTRY&sourceId=${res.body.entry.id}`)).expect(200);
+      expect(movements.body).toHaveLength(1);
+      expect(Number(movements.body[0].quantityDelta)).toBe(2);
     });
 
     it("kalan giriş → toplam 5, tamamlama önerilir; iş emri COMPLETED yapılır", async () => {

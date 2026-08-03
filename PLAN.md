@@ -68,19 +68,19 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 ## 4. Modül envanteri
 
-| Modül | Gerçek durum | Kaynakla doğrulanan kapsam |
+| Modül | Gerçek durum | Kanıt / kaynakla doğrulanan kapsam |
 |---|---|---|
-| Platform Core | `PARTIAL` | JWT, RBAC, sayfa izin grupları, LDAP, OIDC, audit, bildirim, onay, hiyerarşi. |
-| MES Core | `PARTIAL` | İş emri, production run, makine atama, manuel üretim, OEE, vardiya görünümü. Operasyon/rota yürütme modeli yok. |
+| Platform Core | `PARTIAL` | `apps/backend/src/auth/auth.service.ts`, `common/guards/pages.guard.ts`, `platform-modules/*`, `approvals/*`, `audit.interceptor.ts`, `prisma/schema.prisma`: JWT/RBAC, page permission, entitlement, audit, onay ve hiyerarşi var; tenant sınırı global zorlanmıyor. |
+| MES Core | `PARTIAL` | İş emri, revizyonu sabit rota operasyonları, operasyon bazlı makine atama/WIP, manuel üretim, OEE ve vardiya görünümü. Setup, kalite kapısı ve kapasite modeli eksik. |
 | Machine Connect / AGW | `PARTIAL` | Makine anahtarı, telemetri, tag CRUD/değerleri, simulator, OPC-UA ve deneysel M80. |
 | Quality | `PARTIAL` | NCR, inspection, CAPA, SPC, alarm, kalibrasyon. Kontrollü doküman/deviation/e-imza eksik. |
-| Inventory / Warehouse | `PARTIAL` | Material, depo/bin, lot, serial, transfer, sayım; toplam stok ve bin bakiyesi çift kaynak. |
+| Inventory / Warehouse | `PARTIAL` | Material, depo/bin, lot, serial, transfer ve sayım; immutable hareket defteri ile toplam/bakiye projeksiyonları transaction içinde tutulur. Heat/CoC/kabul ve zorunlu lot politikası vardır; karantina rafı/ölçümle bağ henüz yoktur. |
 | Planning / MRP | `PARTIAL` | Tek seviyeli BOM, netleme, satın alma/üretim önerisi, manuel Gantt. |
 | MRP II / Capacity | `NOT_STARTED` | Sonlu kapasite, rota süresi, alternatif kaynak, ATP/CTP yok. |
 | Maintenance | `PARTIAL` | Planlı/düzeltici bakım, runtime saat ve enerji manuel/temel. |
-| Integration Gateway | `PROTOTYPE` | HMAC webhook ve CSV export var; ERP adapter, outbox/inbox, mapping yok. |
+| Integration Gateway | `PARTIAL` | `apps/backend/src/webhooks/*`, `prisma/schema.prisma` (`WebhookDeliveryEvent`): HMAC webhook, retry/DLQ/replay ve CSV export var; genel inbox, ERP adapter ve mapping yok. |
 | Reporting / Analytics | `PROTOTYPE` | Dashboard, OEE ve sınırlı CSV; metrik/tracing/veri ambarı yok. |
-| AI Copilot | `NOT_STARTED` | Güvenli command/tool katmanı, model sağlayıcısı veya onay orkestrasyonu yok. |
+| AI Copilot | `PROTOTYPE` | `apps/backend/src/copilot/*`, `apps/web/src/pages/copilot.tsx`: yetki-bağlı taslak/öneri var; model sağlayıcısı, kalıcı approval ve mutation tool yok. |
 | ERP yardımcı modülleri | `PARTIAL` | RFQ/teklif/satış, teslimat/fatura, AR/AP, CRM, proje, servis talebi. Genel muhasebe değildir. |
 
 ## 5. Çalışan özellikler
@@ -108,15 +108,19 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
   kapsar; route map birçok yeni modülü içermediğinden tüm iş mutasyonları audit
   kapsamına girmez. Audit yazma hatası isteği başarısız kılmaz ve yalnızca
   console'a yazılır.
-- `PARTIAL` — Lot/seri izlenebilirliği iş emri düzeyindedir. Heat number,
-  malzeme sertifikası/CoC, kabul/karantina, as-built/as-inspected ilişki ve
-  lotun zorunlu tüketim/üretim bağları yoktur.
-- `PARTIAL` — Recipe adımları ad, sıra ve parametre taşır; iş emrine donmuş
-  rota/revizyon, operasyon istasyonu, takım/program, setup, yetkin operatör ve
-  operasyon bazlı kalite kapısı içermez.
-- `PARTIAL` — `Material.stockQty`/`PartStock.qty` ile `StockBalance` bilinçli
-  olarak paraleldir; satın alma, tüketim, mamul ve teslim akışlarının tamamı
-  bin/lot bakiyesine henüz bağlı değildir.
+- `VERIFIED_DONE` — Material lotunda heat, tedarikçi lotu, CoC numarası ve
+  kabul/karantina/red durumu saklanır. Kabul edilmemiş lot teslim/tüketime
+  giremez; zorunlu lot politikası ve iş emri düzeyinde as-built bağ doğrulandı.
+  As-inspected ölçüm bağı ve fiziksel karantina rafı henüz yoktur.
+- `PARTIAL` — Aktif Recipe, iş emrine revizyonu ve adım parametreleriyle
+  immutable operasyon snapshot'ı olarak kopyalanır. Operasyon makine ataması,
+  sıralı başlatma ve koşulardan türetilen WIP vardır; takım/program, setup,
+  yetkin operatör, kalite kapısı ve alternatif kaynak yoktur.
+- `VERIFIED_DONE` — `InventoryMovement` immutable hareket defteri stok
+  değişiminin kaynağıdır. `Material.stockQty`, `PartStock.qty` ve
+  `StockBalance` transaction içi projeksiyonlardır; satın alma, tüketim/madde
+  iadesi, mamul, sevkiyat, transfer ve sayım bu sınırdan geçer. Eski toplamlar
+  kaybolmadan `UNASSIGNED` başlangıç bakiyesine taşınır.
 - `PARTIAL` — Webhook teslimi imzalı ve SSRF'e karşı korunmuş olsa da
   fire-and-forget'tir; durable outbox, retry, teslim geçmişi ve dead-letter yoktur.
 - `PARTIAL` — OEE, enerji, bakım ve çizelgeleme gerçek iş verisini kullanır;
@@ -139,8 +143,8 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 - Çok tenant şirket/fabrika izolasyonu, tenant provisioning, RLS ve tenant
   yönetim yaşam döngüsü.
-- Operasyon/rota yürütme, iş merkezi kapasitesi, takım/fixture/program
-  bağlama, operatör yetkinliği ve dispatching.
+- İş merkezi kapasitesi, takım/fixture/program bağlama, setup, operatör
+  yetkinliği, kalite kapısı ve dispatching.
 - Çok seviyeli/alt montaj BOM, alternate material/supplier, lead-time ve
   capacity-aware MRP II.
 - Transactional outbox/inbox, kalıcı queue/worker, dead-letter/replay ve
@@ -173,9 +177,11 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 1. **Tenant izolasyonu:** `DEFAULT_TENANT_ID` sabiti ve RLS olmaması cloud
    ürününe doğrudan taşınamaz. `CRITICAL`.
-2. **Stok çift doğrusu:** toplam stok ile bin/lot stoğu ayrışabilir. `CRITICAL`.
-3. **Operasyon/rota eksikliği:** gerçek CNC iş akışı ve kapasite planı güvenilir
-   biçimde modellenemez. `CRITICAL`.
+2. **Legacy lokasyon doğruluğu:** eski toplamlarla uzlaştırılan `UNASSIGNED`
+   bakiye fiziksel sayımla gerçek rafa taşınmalıdır. `HIGH`.
+3. **Rota kapsamı:** operasyon snapshot/WIP çekirdeği vardır; ancak setup,
+   takım/program, kalite kapısı ve kaynak kapasitesi olmadan gerçek CNC
+   planlama/dispatch güvenilir değildir. `HIGH`.
 4. **M80 saha doğrulaması yok:** simülatör başarısı gerçek tezgâh entegrimi
    anlamına gelmez. `HIGH`.
 5. **Audit kapsam/başarısızlık davranışı:** immutable tablo tam audit trail
@@ -208,10 +214,12 @@ yönetimi. Bu standartlar hedef olarak yazılabilir; sertifikasyon iddiası yap�
 
 - Organization/Company/Fabrication site yapısı tenant'tan ayrı ve bağlayıcı
   değildir; Plant > Area > Workplace > Unit yalnız fiziki hiyerarşidir.
-- Route, OperationDefinition, WorkOrderOperation, resource requirement,
-  operation status/quantity, setup ve operasyon bazlı WIP yoktur.
-- Material masterda grade/form/heat/CoC/sertifika, supplier approval ve kabul
-  statüsü yoktur.
+- Recipe kaynak rota tanımı ve WorkOrderOperation snapshot/status/WIP vardır;
+  OperationDefinition, resource requirement, setup, takım/program ve kalite
+  kapısı eksiktir.
+- Material masterda grade/form ve supplier approval yoktur. Heat/CoC ve kabul
+  statüsü material lotunda tutulur; CoC dosyasını karar anında zorunlu
+  bağlayan kontrollü iş akışı henüz yoktur.
 - Lot/serial kaydı vardır fakat seri birimi, ölçüm, NCR, rework, sevkiyat ve
   as-built doküman ilişkileri zorunlu/kapsamlı değildir.
 - Doküman, NC programı, teknik resim ve recipe için controlled release,
@@ -311,28 +319,57 @@ belirlememeli; on-premise/offline grace, audit ve destek prosedürü iş kararı
 | ID | Başlık | Modül | Durum | Öncelik | Bağımlılık / risk | Kabul kriteri | Test | Boyut | Faz |
 |---|---|---|---|---|---|---|---|---|---|
 | AHK-001 | Plan/README/rehber tutarlılığı | Platform | `PARTIAL` | P0 | Stale belge yanlış kurulum/ürün beklentisi doğurur | README, kurulum ve entegrasyon rehberi güncel modül/connector/error/webhook durumunu açıkça belirtir | Link/komut smoke | S | 0 |
-| AHK-002 | Yerel izole e2e + CI build gate | Platform | `VERIFIED_DONE` | P0 | Gerçek DB'ye test koşturulması riskli; CI build eksik | `pnpm test:e2e` host portu/kalıcı volume olmadan PostgreSQL, MinIO ve LDAP ile migration+seed+e2e çalıştırır; CI backend/web production build ve fresh-db migration e2e koşar | Yerel Docker e2e, build/type-check/lint ve test kanıtı | M | 0 |
-| AHK-003 | Stok tek doğrusu ve movement ledger | Inventory | `PARTIAL` | P0 | Mevcut total/bin/lot bakiyeleri ayrışabilir | Her stok değişimi immutable hareket üretir; toplam/balance tutarlılık testi geçer | Transaction/e2e | XL | 1 |
-| AHK-004 | Rota ve WorkOrderOperation çekirdeği | MES | `NOT_STARTED` | P0 | Gerçek operasyon, kalite ve kapasite bunun üzerine kurulur | Revizyonlu rota, operasyon statüsü/qty, kaynak ve WIP iş emrine snapshot olarak bağlanır | Unit/e2e/UI | XL | 1 |
-| AHK-005 | Traceability foundation | Quality/Inventory | `PARTIAL` | P0 | Savunma denetimi ve recall için heat/CoC eksik | Material lot heat/CoC/kabul durumu; tüketim/üretimde zorunlu bağ ve as-built trace | E2e/replay | XL | 2 |
-| AHK-006 | Audit coverage ve elektronik onay tasarımı | Platform/Quality | `PARTIAL` | P0 | Kısmi audit denetlenebilirlik iddiasını zayıflatır | Tüm command mutasyonları atomik audit/event üretir; imza policy karar kaydı vardır | Audit matrix/e2e | L | 2-3 |
-| AHK-007 | M80 keşif ve hardware acceptance | Machine Connect | `BLOCKED` | P0 | M80 API dokümanı, IP/ağ erişimi ve bakım penceresi gerekir | Gerçek iki tezgâhta protocol contract, read-only pilot, event doğruluk ve rollback kanıtı | Hardware acceptance | L | 4 |
-| AHK-008 | Güvenli factory edge | Machine Connect | `NOT_STARTED` | P1 | Connector bellek kuyruğu/tek key üretim dayanıklılığı için yetersiz | Kalıcı kuyruk, device identity, outbound-only TLS ve health/metrics | Fault-injection | L | 4 |
-| AHK-009 | Outbox/inbox ve DLQ | Integration Gateway | `NOT_STARTED` | P1 | Webhook fire-and-forget veri kaybedebilir | Atomik outbox, consumer inbox dedup, retry/backoff/DLQ/replay ekranı | Contract/e2e | XL | 5 |
-| AHK-010 | ERP ownership matrix + ilk adapter | Integration Gateway | `NEEDS_DECISION` | P1 | Hedef ERP ve master-data sahibi seçilmeden kodlanamaz | Seçilen ERP için mapping, mutabakat ve hata yönetimiyle dar pilot | Contract/UAT | L | 5 |
-| AHK-011 | MRP II / finite capacity | Planning | `NOT_STARTED` | P1 | Rota ve güvenilir stok gerektirir | Alternatif kaynak, süre, kapasite takvimi ve senaryo sonucu | Algorithm/e2e | XL | 6 |
-| AHK-012 | Quality plan/deviation/rework | Quality | `NOT_STARTED` | P1 | Operation model ve controlled docs gerekir | Kontrol planı, cihaz, deviation onayı ve rework route as-built kayda bağlıdır | E2e/UAT | XL | 3 |
-| AHK-013 | AI command gateway | AI Copilot | `NOT_STARTED` | P1 | Command/audit/approval çekirdeği gerekir | Taslak, policy, onay ve audit olmadan hiçbir mutation tool çalışmaz | Security/contract | XL | 7 |
-| AHK-014 | Tenant/entitlement foundation | Platform | `NOT_STARTED` | P2 | Ürün/hosting kararı gerekir | Tenant context, RLS/izolasyon testi ve modül entitlement policy'si | Isolation/e2e | XL | 8 |
-| AHK-015 | Air-gap/DR/observability paketi | Deployment | `NOT_STARTED` | P2 | Operasyon sahipliği ve altyapı kararı gerekir | Offline bundle/SBOM, MinIO+Postgres restore drill, metrics/logging/alerting | Drill | L | 8 |
-| AHK-016 | MSSQL portability assessment | Data | `NOT_STARTED` | P3 | PostgreSQL-only kontratların envanteri gerekir | Karar kaydı, uyum matrisi ve POC CI; aksi halde resmî destek verilmez | Matrix/POC | L | 8 |
+| AHK-002 | Yerel izole e2e + CI build gate | Platform | `VERIFIED_DONE` | P0 | Gerçek DB'ye test koşturulması riskli; CI build eksik | `pnpm test:e2e` host portu/kalıcı volume olmadan PostgreSQL, MinIO ve LDAP ile migration+seed+e2e çalıştırır; CI backend/web production build ve fresh-db migration e2e koşar. İzole e2e başlangıç timeout'u 20 sn olarak düzeltildi; 19 paket/126 test temiz ortamda geçti. | Yerel Docker e2e, build/type-check/lint ve test kanıtı | M | 0 |
+| AHK-003 | Stok tek doğrusu ve movement ledger | Inventory | `VERIFIED_DONE` | P0 | Eski verinin fiziksel lokasyonu bilinmeyebilir | Her stok değişimi immutable hareket üretir; toplam/balance tutarlılık testi geçer. Legacy miktar `UNASSIGNED` başlangıç hareketiyle korunur. | Transaction/e2e | XL | 1 |
+| AHK-004 | Rota ve WorkOrderOperation çekirdeği | MES | `VERIFIED_DONE` | P0 | Setup/kalite kapısı/kapasite sonraki işlere bırakıldı | Aktif Recipe revizyonu/adımları iş emrine immutable snapshot olarak kopyalanır; operasyon sırası, makine ataması ve koşu temelli WIP korunur. | Type-check, build, unit ve fresh-db e2e | XL | 1 |
+| AHK-005 | Traceability foundation | Quality/Inventory | `VERIFIED_DONE` | P0 | Karantina rafı ve CoC dosyasının sertifika numarasıyla zorunlu eşleştirilmesi ileri iştir | Material lot heat/CoC/kabul durumu; kabul edilmemiş lot stoğa/tüketime girmez, zorunlu lot bağlantısı ve as-built trace korunur | Fresh-db E2E/replay | XL | 2 |
+| AHK-006 | Audit coverage ve elektronik onay tasarımı | Platform/Quality | `PARTIAL` | P0 | Global interceptor kayıtları çoğu mutasyonda hâlâ transaction dışındadır; imza policy/reauth yok | Global audit; lot kabulü ile QualityPlan ve Inspection oluşturma, kayıtlarıyla aynı transaction içinde audit yazar ve interceptor çift kaydı önler. ApprovalRequest oluşturma ve kararları, CAPA/MRP'nin çağırdığı aynı transaction içinde audit yazar; bildirim commit sonrasındadır. Ortak `InventoryService` sınırı, satın alma teslimi/tüketim-iade/mamul/transfer/sevkiyat/sayım hareketini kendi transaction'ında auditler. Sayım oluşturma ve post komutları, aktör ve durum geçişi için ayrı transaction-içi audit yazar. Kaynakla doğrulanmış açıklar `docs/audit-matrisi.md` içindedir; diğer kritik command'lerde transaction-içi audit ve elektronik imza policy'si gerekir | Audit matrix/unit/e2e | L | 2-3 |
+| AHK-007 | M80 keşif ve hardware acceptance | Machine Connect | `PARTIAL` | P0 | Simülatörle read-only contract, event/tag, bağlantı kesilmesi ve otomatik yeniden bağlanma doğrulandı; M80 API dokümanı, IP/ağ erişimi ve bakım penceresi gerçek saha kabulü için gerekir. Prosedür `docs/m80-hardware-acceptance.md` içinde hazır | Gerçek iki tezgâhta protocol contract, read-only pilot, event doğruluk ve rollback kanıtı | Simulator + hardware acceptance | L | 4 |
+| AHK-008 | Güvenli factory edge | Machine Connect | `PARTIAL` | P1 | Kalıcı event kuyruğu disk üzerinde atomic rename ile eklendi; Docker profilinde adlandırılmış volume'a bağlandı ve simülasyon testleriyle doğrulandı. Makine anahtarı bcrypt hash olarak saklanır; connector yalnızca loopback sağlık/Prometheus metric ucu açar ve Docker healthcheck ile denetlenir. Karşılıklı cihaz sertifikası, sertifika yenileme, outbound TLS zorlaması ve merkezi metric toplama eksik | Kalıcı kuyruk, device identity, outbound-only TLS ve health/metrics | Fault-injection | L | 4 |
+| AHK-009 | Outbox/inbox ve DLQ | Integration Gateway | `PARTIAL` | P1 | Kalıcı webhook teslim outbox'ı, claim, retry, DLQ ve admin replay endpoint'i eklendi. Abonelik başına `eventId` unique anahtarı aynı olayın tekrar kuyruklanmasını engeller. Mutasyonların tamamında transaction-içi outbox ve gelen mesaj inbox dedup henüz yok | Atomik outbox, consumer inbox dedup, retry/backoff/DLQ/replay ekranı | Contract/e2e | XL | 5 |
+| AHK-010 | ERP ownership matrix + ilk adapter | Integration Gateway | `NEEDS_DECISION` | P1 | Hedef ERP ve master-data sahibi seçilmeden adapter kodlanamaz. Hedeften bağımsız sahiplik/sözleşme matrisi `docs/erp-ownership-matrix.md` içinde hazır | Seçilen ERP için mapping, mutabakat ve hata yönetimiyle dar pilot | Contract/UAT | L | 5 |
+| AHK-011 | MRP II / finite capacity | Planning | `PARTIAL` | P1 | Kapasite hazırlık endpoint/ekranı makine yükünü, atanmamış ve bloke operasyonları gösterir; standart süre, vardiya, bakım takvimi ve alternatif kaynak modeli olmadığı için finite schedule üretmez | Alternatif kaynak, süre, kapasite takvimi ve senaryo sonucu | Algorithm/e2e | XL | 6 |
+| AHK-012 | Quality plan/deviation/rework | Quality | `PARTIAL` | P1 | Tenant kapsamlı QualityPlan/QualityPlanCheck modeli, migration, yetkili API ve muayene ekranı eklendi. Plan satırı seçildiğinde ölçüm zorunluluğu/toleransı sunucuda zorlanır; tolerans dışı ölçüm FAIL ve NCR üretir. Kontrollü revizyon, satırları kopyalar, eski planı pasifleştirir ve geçmiş muayene bağını korur. Cihaz kalibrasyon bağı, deviation onayı, rework route ve as-built akışı henüz yok. Sınır `docs/quality-plan-roadmap.md` içinde | Kontrol planı, cihaz, deviation onayı ve rework route as-built kayda bağlıdır | Unit + e2e/UAT | XL | 3 |
+| AHK-013 | AI command gateway | AI Copilot | `PROTOTYPE` | P1 | Yetkili `/copilot/drafts` API'si ve ekranı, kullanıcının sayfa yetkisine göre iş emri/üretim, stok-lot, kalite, MRP, satın alma/satış, tezgah-bakım, rota, raporlama ve entegrasyon yeteneklerini eşleştirir; malzeme kaydında tenant içi mükerrer ve eksik alan taslağı vardır. Model sağlayıcısı, kalıcı draft/approval kaydı ve mutation tool'u yok; `executionAllowed=false` zorlanır | Taslak, policy, onay ve audit olmadan hiçbir mutation tool çalışmaz | Unit/security/contract | XL | 7 |
+| AHK-014 | Tenant module entitlement foundation | Platform | `VERIFIED_DONE` | P0 | `TenantModuleEntitlement` katalog varsayılanlarını korur; admin PATCH atomik değişiklik + transaction-içi audit yazar. `PagesGuard` kapalı modülün backend endpoint'ini engeller, SPA aynı API ile görsel geri bildirim verir. Eşzamanlı aynı-state isteklerde tek audit kaydı E2E ile doğrulandı. Genel tenant izolasyonu bu işin parçası değildir; AHK-017'de ayrı ele alınır. | Migration + unit/guard + fresh PostgreSQL E2E: tenantId enjeksiyonu, RBAC, kapat/aç, audit ve concurrency geçer | M | 0 |
+| AHK-017 | Uygulama katmanı tenant-isolation sınırı | Platform | `PARTIAL` | P0 | Material ve WorkOrder mutasyonlarının Prisma yazım predicate'leri artık `tenantId` içerir; Inventory material projection yazımı da aynı sınırdadır. Fresh PostgreSQL E2E iki tenant yöneticisiyle cross-tenant read/update/delete ve WorkOrder status değişikliğini reddeder. Ancak Prisma katmanında zorunlu tenant context/RLS yok; diğer aggregate'ler için aynı negatif matris tamamlanmadı. | Materials/WorkOrders/Inventory'nin ardından child FK yazımları, satış-satın alma, kalite, bakım ve entegrasyon aggregate'lerine scoped-write policy uygulanır; PostgreSQL RLS kararı cloud varyantı için ADR ile verilir. | XL | 0-1 |
+| CAT-001 | Merkezi capability/product katalog ve core koruması | Platform | `PARTIAL` | P0 | `product-catalog.ts` suite, canonical module, implementation durumu, dependency, route/page/permission ve legacy entitlement eşlemesini tek kaynakta tutar. Platform Core kapatılamaz; beta veya uygulanmamış legacy entitlement tenant tarafından toggle edilemez. Kapsama matrisi `docs/capability-coverage-matrix.md` içindedir. | Canonical child entitlement migration'ı (CAT-002), sayfa guard'ın child kodlara taşınması ve lisans/edition limiti gerekir. | Unit + platform entitlement E2E | L | 0 |
+| CAT-002 | Canonical child entitlement migration | Platform | `VERIFIED_DONE` | P0 | Canonical child enum'u, legacy-to-child compatibility map'i ve PostgreSQL backfill migration'ı eklendi. Page guard/SPA her sayfayı child entitlement ile zorlar; Platform Core kalıcı tenant entitlement'ı değildir. | Temiz PostgreSQL migration+seed, canonical catalog/unit/guard testleri ve iki-tenant platform entitlement E2E geçer. | XL | 0 |
+| PLM-001 | Kontrollü teknik doküman ve NC revizyon yayını | PLM/CNC | `VERIFIED_DONE` | P1 | `NcProgram` SHA-256, revision-history, Draft→Review→Approved→Published→Superseded/Archived, effectivity ve tek yayınlı revizyon kontrolünü taşır. RecipeStep/WorkOrderOperation yalnızca yayınlı snapshot bağlar; HMI başlangıçta tekrar doğrular. | Prisma migration/backfill, canonical `PLM_NC_PROGRAM` entitlement, RBAC/SoD, AHK-006 focused reauth/e-imza, transaction audit ve isolated PostgreSQL E2E geçer. Genel controlled-document lifecycle PLM_CHANGE_CONTROL kapsamıdır. | Unit + integration + fresh PostgreSQL E2E | XL | 1 |
+| MES-TOOL-001 | CNC tooling ve fixture master data | MES/CNC | `VERIFIED_DONE` | P1 | **Canonical iş kodu:** `MES-TOOL-001`; `AHK-019` alias/dependency etiketidir, ayrı backlog değildir. Forward-only tooling migration, tenant-scoped DB reservation constraints, immutable as-built snapshot, PUBLISHED NC/start gate, idempotent life consumption, persistent action grants and HMI/setup/requirement UI tamamlandı. | Presetter/offset/DNC, predictive life ve fixture maintenance/calibration validity kapsam dışı bağımlılıklarda kalır. | Shared DTO unit + fresh PostgreSQL E2E (8/8), backend/web typecheck ve production build, Prisma validate, diff check | XL | 0 |
+| MES-FIXTURE-MAINT-001 | Fixture bakım ve kalibrasyon uygunluğu | MES/EAM/QMS | `IN_PROGRESS` | P2 | Forward-only policy/event/record modeli, tenant-scoped idempotency anahtarları, action grants, bakım/kalibrasyon API’ları ve setup/start policy değerlendirmesi eklendi. Policy olmayan fixture mevcut MES-TOOL-001 davranışını korur; BLOCKING policy gerçek bakım/kalibrasyon kanıtı olmadan geçmez. | Gerçek PostgreSQL negatif/concurrency matrisi, event/kalibrasyon yönetim UI aksiyonları ve tam regresyon kabulü tamamlanmadan doğrulanmış sayılmaz. | Fixture’ı bakım/kalibrasyon gerektiren tenant policy altında ancak geçerli plan/sertifika ile doğrulayan PostgreSQL E2E. MES-TOOL-001 için blocker değildir: mevcut güvenli status kapısı kullanılmayan fixture’ı reddeder, fakat ileri bakım doğrulamasını temsil etmez. | L | 3 |
+| AHK-015 | Air-gap/DR/observability paketi | Deployment | `PARTIAL` | P2 | PostgreSQL backup scripti var; offline bundle/SBOM, MinIO restore drill, metrics/logging/alerting eksik. İşletim sınırı `docs/airgap-operasyon.md` içinde | Offline bundle/SBOM, MinIO+Postgres restore drill, metrics/logging/alerting | Drill | L | 8 |
+| AHK-016 | MSSQL portability assessment | Data | `PARTIAL` | P3 | PostgreSQL-only kontratlar kaynakta envanterlendi; SQL Server provider/POC/CI yok | Karar kaydı, uyum matrisi ve POC CI; aksi halde resmî destek verilmez. Kaynak kanıtı ve POC kabul kriterleri `docs/mssql-portability-assessment.md` içindedir | Matrix/POC | L | 8 |
+
+### PLM-001 sonrası platform açıkları
+
+- **AHK-006:** `apps/backend/src/auth/auth.service.ts#reauthenticate` local ve
+  LDAP reauth'ını PLM kritik komutlarında uygular; OIDC için provider-side
+  `prompt=login` kanıtı ve CAPA/MRP için ortak e-imza policy'si hâlâ yoktur.
+- **AHK-017:** `PartsService.assertNcProgramUsable`,
+  `RecipesService.create/update` ve `WorkOrdersService.createWithRoute` tenant
+  predicate kullanır. Zorunlu Prisma tenant context/RLS bu PLM sınırının
+  dışındadır ve AHK-017'de izlenmeye devam eder.
 
 ### Önerilen ilk geliştirme işi
 
-**AHK-002 — Yerel izole e2e + CI build gate** tamamlandı. `pnpm test:e2e`,
-geçici ağdaki PostgreSQL, MinIO ve LDAP üzerinde migration, seed ve e2e paketini
-çalıştırır; tamamlandığında volume'ları da siler. CI backend ve web production
-build'lerini de doğrular. Sonraki iş AHK-003 (stok tek doğrusu) olmalıdır;
+**AHK-005 — Traceability foundation** `VERIFIED_DONE` durumundadır.
+Material ve Part için lot zorunluluğu tanımlanabilir; material lotunda heat,
+tedarikçi lotu, CoC numarası ve kabul kararı saklanır. Sertifika zorunlu
+malzeme sertifikasız kabul edilemez; yalnızca kabul edilmiş material lotu satın
+alma teslimine ve tüketime girebilir. Mamul girişi lot-zorunlu partlarda lot
+ister; iki yönlü as-built trace lot → iş emri → mamul lot ve ters yönüyle temiz
+veritabanı E2E'de doğrulandı. Lot ekranı kabul/karantina/red, sertifika alanı
+ve lot belgelerini sunar. Sıradaki iş AHK-006 ile audit kapsamı ve elektronik
+onay tasarımını güçlendirmektir.
+
+**AHK-002 — Yerel izole e2e + CI build gate** `VERIFIED_DONE` durumundadır.
+`pnpm test:e2e`, geçici ağdaki PostgreSQL, MinIO ve LDAP
+üzerinde migration, seed ve e2e paketini çalıştırır; tamamlandığında volume'ları
+da siler. CI backend ve web production build'lerini de doğrular. Konteynerde
+OEE trend paketinin başlangıç maliyeti için Jest e2e timeout'u 20 sn'ye
+çıkarıldı; 2026-08-01'de temiz ortamda migration+seed sonrası 19 paket ve 126
+test geçti. Sonraki iş AHK-003 (stok tek doğrusu) olmalıdır;
 AHK-004 (rota/operasyon çekirdeği) onunla birlikte ürünün gerçek MES omurgasını
 kurar.
 
@@ -349,8 +386,10 @@ AHK-002 kabul kriterleri:
    Bu monorepo'da henüz lint komutu tanımlı değildir; boş/yanıltıcı bir lint
    kapısı eklenmedi. AHK-001/sonraki platform işi olarak ESLint+Prettier ve CI
    kapısı seçilmelidir.
-5. **Doğrulandı:** Mevcut 196 birim testin yeşil kalması ve e2e sonucunun CI'da kanıtlanması
-   zorunludur.
+5. **Açık kabul kriteri:** Mevcut 196 birim testin yeşil kalması ve e2e sonucunun CI'da kanıtlanması
+   zorunludur. İzole koşumda OEE trend başlangıç timeout'u gözlendi ve 20 sn
+   sınırla düzeltildi; bu ortamın süreç sınırı tam paketin son çıkış kodunu
+   toplamayı engellediği için CI veya sınırı olmayan yerel koşum kanıtı gerekir.
 
 ---
 

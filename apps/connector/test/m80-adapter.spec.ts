@@ -85,4 +85,39 @@ describe("M80Adapter (sim sunucusuna karşı entegrasyon)", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(events.length).toBe(countAfterDisconnect);
   }, 10_000);
+
+  it("read-only pilot bağlantısı kesilip tekrar açıldığında tag okumaya güvenle döner", async () => {
+    server = await startM80SimServer({ port: 6833, cycleTimeMs: 10_000, alarmProbability: 0 });
+    adapter = new M80Adapter({
+      host: "127.0.0.1",
+      port: 6833,
+      tags: [{ name: "PartCount", address: "1:2" }],
+    });
+    await adapter.connect();
+    expect((await adapter.readTags!())[0]).toMatchObject({ name: "PartCount", value: "0" });
+
+    await adapter.disconnect();
+    await adapter.connect();
+    expect((await adapter.readTags!())[0]).toMatchObject({ name: "PartCount", value: "0" });
+  }, 10_000);
+
+  it("simüle edilmiş ağ kesintisinden sonra read-only bağlantıyı otomatik kurar", async () => {
+    server = await startM80SimServer({ port: 6834, cycleTimeMs: 10_000, alarmProbability: 0 });
+    adapter = new M80Adapter({
+      host: "127.0.0.1",
+      port: 6834,
+      reconnectDelayMs: 20,
+      pollIntervalMs: 20,
+      tags: [{ name: "PartCount", address: "1:2" }],
+    });
+    await adapter.connect();
+    expect((await adapter.readTags!())[0]).toMatchObject({ name: "PartCount", value: "0" });
+
+    server.disconnectClients();
+
+    await vi.waitFor(
+      async () => expect((await adapter!.readTags!())[0]).toMatchObject({ name: "PartCount", value: "0" }),
+      { timeout: 3_000, interval: 25 },
+    );
+  }, 10_000);
 });

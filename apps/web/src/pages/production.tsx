@@ -37,6 +37,17 @@ interface RunRow {
   };
   machine?: { id: string; name: string } | null;
   operator: { id: string; name: string };
+  operation?: { id: string; seq: number; name: string; status: string } | null;
+}
+interface RouteOperation {
+  id: string;
+  seq: number;
+  name: string;
+  status: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "BLOCKED" | "SKIPPED";
+  completedQty: string;
+  scrapQty: string;
+  machine?: { id: string; name: string } | null;
+  ncProgram?: { id: string; version: number; status: string; fileName: string; checksum: string; effectivityScope: string } | null;
 }
 interface WoRow {
   id: string;
@@ -46,11 +57,34 @@ interface WoRow {
   dueDate: string;
   part: { id: string; partNo: string; name: string };
   machine?: { id: string; name: string } | null;
+  recipeRevision?: string | null;
+  operations?: RouteOperation[];
 }
 interface MachineOption {
   id: string;
   name: string;
   isActive: boolean;
+}
+interface ToolingSetup { operation: { id: string; machineId?: string | null; ncProgramId?: string | null; ncProgramVersion?: number | null; ncProgramChecksum?: string | null; toolRequirements: any[]; fixtureRequirements: any[] }; verification: any | null; fixtureCompliance?: Array<{ fixtureId: string; evaluation: { warnings: string[]; blockers: string[] } }>; }
+
+function ToolingChecklist({ operationId, onChanged }: { operationId: string; onChanged: () => void }) {
+  const toast = useToast(); const qc = useQueryClient();
+  const actions = useQuery({ queryKey: ["/tooling/actions"], queryFn: () => apiGet<string[]>("/tooling/actions") });
+  const setup = useQuery({ queryKey: ["/tooling/operations", operationId, "setup"], queryFn: () => apiGet<ToolingSetup>(`/tooling/operations/${operationId}/setup`) });
+  const tooling = useQuery({ queryKey: ["/tooling"], queryFn: () => apiGet<any>("/tooling"), enabled: actions.data?.includes("TOOL_READ") === true });
+  const [toolValues, setToolValues] = useState<Record<string, string>>({}); const [fixtureValues, setFixtureValues] = useState<Record<string, string>>({});
+  const canManage = actions.data?.includes("OPERATION_SETUP_MANAGE") === true; const canVerify = actions.data?.includes("OPERATION_SETUP_VERIFY") === true;
+  const failure = (e: unknown) => toast(e instanceof ApiError ? String((e.body as any)?.message ?? "Setup işlemi başarısız") : "Setup işlemi başarısız", "error");
+  const refresh = () => { qc.invalidateQueries({ queryKey: ["/tooling/operations", operationId, "setup"] }); onChanged(); };
+  const assign = useMutation({ mutationFn: () => apiPost(`/tooling/operations/${operationId}/setup/assignments`, { toolAssignments: Object.entries(toolValues).filter(([, v]) => v).map(([selectionKey, physicalToolInstanceId]) => ({ requirementId: selectionKey.split(":")[0], physicalToolInstanceId })), fixtureAssignments: Object.entries(fixtureValues).filter(([, v]) => v).map(([selectionKey, physicalFixtureInstanceId]) => ({ requirementId: selectionKey.split(":")[0], physicalFixtureInstanceId })) }), onSuccess: refresh, onError: failure });
+  const verify = useMutation({ mutationFn: () => apiPost(`/tooling/operations/${operationId}/setup/verify`, {}), onSuccess: refresh, onError: failure });
+  if (actions.isError || setup.isError) return <Card className="mt-4 border-red-200"><p className="text-sm text-red-700">Tooling checklist erişilemedi; backend başlangıç kapısı yine de zorunludur.</p></Card>;
+  if (!setup.data || (!setup.data.operation.toolRequirements.length && !setup.data.operation.fixtureRequirements.length)) return <Card className="mt-4"><p className="text-sm text-slate-500">Bu operasyonda tooling requirement tanımlı değil; tooling başlangıç kapısı uygulanmaz.</p></Card>;
+  const tools = tooling.data?.toolDefinitions?.flatMap((d: any) => d.instances.map((i: any) => ({ ...i, code: d.code }))) ?? [];
+  const fixtures = tooling.data?.fixtureDefinitions?.flatMap((d: any) => d.instances.map((i: any) => ({ ...i, code: d.code }))) ?? [];
+  const verification = setup.data.verification;
+  const compliance = setup.data.fixtureCompliance ?? [];
+  return <Card className="mt-4 border-brand-200"><h2 className="mb-2 text-lg font-semibold">CNC Setup Checklist</h2><div className="mb-3 text-sm text-slate-600">NC: {setup.data.operation.ncProgramId ? `rev ${setup.data.operation.ncProgramVersion} · ${setup.data.operation.ncProgramChecksum?.slice(0, 12)}…` : "PUBLISHED NC yok — doğrulanamaz"} · Makine: {setup.data.operation.machineId ?? "atanmamış"}</div><div className="grid gap-3 lg:grid-cols-2"><div>{setup.data.operation.toolRequirements.map((r) => <div key={r.id} className="mb-2 rounded border p-2"><div className="text-xs font-medium">Takım {r.isRequired ? "zorunlu" : "opsiyonel"} · min {r.quantity}{r.alternativeGroup ? ` · alternatif: ${r.alternativeGroup}` : ""}</div>{Array.from({ length: r.quantity }, (_, index) => <Select key={`${r.id}:${index}`} disabled={!canManage} value={toolValues[`${r.id}:${index}`] ?? ""} onChange={(e) => setToolValues({ ...toolValues, [`${r.id}:${index}`]: e.target.value })}><option value="">Fiziksel takım #{index + 1}</option>{tools.map((t: any) => <option key={t.id} value={t.id}>{t.serialNo} · {t.code} · kalan {t.remainingLife} · {t.status}</option>)}</Select>)}</div>)}</div><div>{setup.data.operation.fixtureRequirements.map((r) => <div key={r.id} className="mb-2 rounded border p-2"><div className="text-xs font-medium">Fikstür {r.isRequired ? "zorunlu" : "opsiyonel"} · min {r.quantity}{r.alternativeGroup ? ` · alternatif: ${r.alternativeGroup}` : ""}</div>{Array.from({ length: r.quantity }, (_, index) => <Select key={`${r.id}:${index}`} disabled={!canManage} value={fixtureValues[`${r.id}:${index}`] ?? ""} onChange={(e) => setFixtureValues({ ...fixtureValues, [`${r.id}:${index}`]: e.target.value })}><option value="">Fiziksel fikstür #{index + 1}</option>{fixtures.map((f: any) => <option key={f.id} value={f.id}>{f.serialNo} · {f.code} · {f.status}</option>)}</Select>)}</div>)}</div></div>{compliance.map((item) => <div key={item.fixtureId} className={item.evaluation.blockers.length ? "mt-2 rounded border border-red-300 p-2 text-sm text-red-700" : "mt-2 rounded border border-amber-300 p-2 text-sm text-amber-800"}>Fikstür {item.fixtureId}: {item.evaluation.blockers.join("; ") || item.evaluation.warnings.join("; ") || "Bakım/kalibrasyon uygun"}</div>)}<div className="mt-3 flex gap-2">{canManage && <Button disabled={assign.isPending} onClick={() => assign.mutate()}>Atamaları güncelle</Button>}{canVerify && <Button disabled={verify.isPending || !setup.data.operation.machineId} onClick={() => verify.mutate()}>Setup Doğrula</Button>}</div><div className="mt-3 rounded bg-slate-50 p-2 text-sm">Durum: <b>{verification?.status ?? "ATAMA/DOĞRULAMA BEKLİYOR"}</b>{verification?.invalidatedReason ? ` — yeniden doğrulama: ${verification.invalidatedReason}` : ""}{verification?.verifiedAt ? ` · ${new Date(verification.verifiedAt).toLocaleString("tr-TR")}` : ""}{verification?.snapshot && <details className="mt-2"><summary>Immutable as-built snapshot</summary><pre className="mt-2 max-h-44 overflow-auto text-xs">{JSON.stringify(verification.snapshot.payload, null, 2)}</pre></details>}</div></Card>;
 }
 
 type CardStatus = "not_started" | "running" | "paused" | "completed";
@@ -281,8 +315,11 @@ function OperationDetail({
     } else toast("İşlem başarısız.", "error");
   };
   const [machineId, setMachineId] = useState("");
+  const [operationId, setOperationId] = useState("");
   const [showDocs, setShowDocs] = useState(false);
   const style = STATUS_STYLE[status];
+  const hmiSetup = useQuery({ queryKey: ["/tooling/operations", operationId, "setup"], queryFn: () => apiGet<ToolingSetup>(`/tooling/operations/${operationId}/setup`), enabled: !!operationId });
+  const toolingBlocked = !!hmiSetup.data && (hmiSetup.data.operation.toolRequirements.some((r) => r.isRequired) || hmiSetup.data.operation.fixtureRequirements.some((r) => r.isRequired)) && hmiSetup.data.verification?.status !== "VERIFIED";
 
   // Duraklatılmış/bitmiş iş emrinde tüm koşuların (geçmiş oturumların) toplamını
   // görmek için — aktif koşu tek başına toplam üretimi yansıtmaz.
@@ -295,8 +332,12 @@ function OperationDetail({
   const totalScrap = (allRuns.data ?? []).reduce((s, r) => s + r.scrapCount, 0);
   const target = Number(wo.quantity);
 
+  const activeOperation = wo.operations?.find((operation) => operation.status === "IN_PROGRESS") ?? null;
   const start = useMutation({
-    mutationFn: () => apiPost(`/work-orders/${wo.id}/runs`, machineId ? { machineId } : {}),
+    mutationFn: () => apiPost(`/work-orders/${wo.id}/runs`, {
+      ...(machineId ? { machineId } : {}),
+      ...(wo.operations?.length ? { operationId } : {}),
+    }),
     onSuccess: onChanged,
     onError,
   });
@@ -305,6 +346,37 @@ function OperationDetail({
     onSuccess: onChanged,
     onError,
   });
+  const completeOperation = useMutation({
+    mutationFn: () => apiPost(`/work-orders/${wo.id}/operations/${activeOperation?.id}/complete`, {}),
+    onSuccess: onChanged,
+    onError,
+  });
+
+  const StartControls = ({ label }: { label: string }) => (
+    <div className="flex flex-wrap items-end gap-3">
+      {wo.operations?.length ? (
+        <div className="min-w-56">
+          <Label htmlFor="operation-picker">Rota operasyonu</Label>
+          <Select id="operation-picker" value={operationId} onChange={(e) => setOperationId(e.target.value)}>
+            <option value="">Seçin…</option>
+            {wo.operations.filter((operation) => (operation.status === "PENDING" || operation.status === "IN_PROGRESS") && (!operation.ncProgram || operation.ncProgram.status === "PUBLISHED")).map((operation) => (
+              <option key={operation.id} value={operation.id}>
+                {operation.seq}. {operation.name} — {operation.status === "IN_PROGRESS" ? "devam ediyor" : "bekliyor"}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
+      {wo.operations?.some((operation) => operation.ncProgram && operation.ncProgram.status !== "PUBLISHED") && (
+        <p className="text-sm font-medium text-red-700">Yayınlı olmayan veya üst revizyonla değişmiş NC programı olan operasyon başlatılamaz.</p>
+      )}
+      <MachinePicker machineId={machineId} onChange={setMachineId} />
+      {toolingBlocked && <p className="text-sm font-medium text-red-700">Tooling setup doğrulanmadı; operasyon başlatma backend tarafından da engellenir.</p>}
+      <Button className="h-14 px-8 text-base" disabled={start.isPending || (!!wo.operations?.length && !operationId) || toolingBlocked} onClick={() => start.mutate()}>
+        <Play className="h-5 w-5" /> {label}
+      </Button>
+    </div>
+  );
 
   return (
     <div>
@@ -336,12 +408,8 @@ function OperationDetail({
       {status === "not_started" && canRun && (
         <Card>
           <h2 className="mb-3 text-lg font-semibold">Operasyonu Başlat</h2>
-          <div className="flex flex-wrap items-end gap-3">
-            <MachinePicker machineId={machineId} onChange={setMachineId} />
-            <Button className="h-14 px-8 text-base" disabled={start.isPending} onClick={() => start.mutate()}>
-              <Play className="h-5 w-5" /> Operasyonu Başlat
-            </Button>
-          </div>
+          <StartControls label="Operasyonu Başlat" />
+          {operationId && <ToolingChecklist operationId={operationId} onChanged={onChanged} />}
         </Card>
       )}
 
@@ -360,10 +428,7 @@ function OperationDetail({
           </div>
           {canRun && (
             <div className="flex flex-wrap items-end gap-3">
-              <MachinePicker machineId={machineId} onChange={setMachineId} />
-              <Button className="h-14 px-8 text-base" disabled={start.isPending} onClick={() => start.mutate()}>
-                <Play className="h-5 w-5" /> Devam Et
-              </Button>
+              <StartControls label="Devam Et" />
               {canManage && (
                 <Button
                   className="h-14 px-8 text-base"
@@ -373,6 +438,18 @@ function OperationDetail({
                   }}
                 >
                   <CheckCircle2 className="h-5 w-5" /> Tamamla
+                </Button>
+              )}
+              {activeOperation && (
+                <Button
+                  variant="outline"
+                  className="h-14 px-8 text-base"
+                  disabled={completeOperation.isPending}
+                  onClick={async () => {
+                    if (await confirm(`${activeOperation.seq}. ${activeOperation.name} operasyonu tamamlanacak mı?`)) completeOperation.mutate();
+                  }}
+                >
+                  <CheckCircle2 className="h-5 w-5" /> Operasyonu Kapat
                 </Button>
               )}
             </div>

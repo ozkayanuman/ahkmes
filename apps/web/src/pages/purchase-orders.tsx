@@ -25,7 +25,14 @@ export interface PoLine {
   quantity: string;
   unitPrice: string;
   receivedQty: string;
-  material: { id: string; code: string; name: string; unit: string; stockQty: string };
+  material: {
+    id: string;
+    code: string;
+    name: string;
+    unit: string;
+    stockQty: string;
+    lotTrackingRequired?: boolean;
+  };
 }
 export interface PoRow {
   id: string;

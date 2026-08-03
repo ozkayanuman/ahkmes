@@ -105,10 +105,20 @@ services:
       M80_PORT: ${CONNECTOR_M80_PORT:-683}
       FANUC_HOST: ${CONNECTOR_FANUC_HOST:-}
       FANUC_PORT: ${CONNECTOR_FANUC_PORT:-8193}
+      DURABLE_QUEUE_PATH: ${CONNECTOR_DURABLE_QUEUE_PATH:-/var/lib/ahkmes/edge.queue.json}
+      HEALTH_PORT: ${CONNECTOR_HEALTH_PORT:-9464}
+    volumes:
+      - connector-data:/var/lib/ahkmes
     depends_on:
       backend:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:9464/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:
   miniodata:
+  connector-data:

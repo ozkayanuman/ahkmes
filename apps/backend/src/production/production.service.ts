@@ -1,9 +1,12 @@
 import { ConflictException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import type { StartProductionRunDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NonConformanceService } from "../non-conformance/non-conformance.service";
 import { AppException } from "../common/app-exception";
+import { PartsService } from "../parts/parts.service";
+import { ToolingService } from "../tooling/tooling.service";
 
 interface UpdateRunInput {
   goodCount?: number;
@@ -25,6 +28,7 @@ const RUN_INCLUDE = {
   },
   machine: { select: { id: true, name: true } },
   operator: { select: { id: true, name: true } },
+  operation: { select: { id: true, seq: true, name: true, status: true } },
 } as const;
 
 @Injectable()
@@ -33,6 +37,8 @@ export class ProductionService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
     private readonly nonConformance: NonConformanceService,
+    private readonly parts?: PartsService,
+    private readonly tooling?: ToolingService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string, active?: boolean) {
@@ -59,9 +65,47 @@ export class ProductionService {
         where: { tenantId, workOrderId, endedAt: null },
       });
       if (activeRun) throw new ConflictException("Bu iş emrinde zaten aktif bir koşu var");
-      if (dto.machineId) {
+      const routeOperations = await tx.workOrderOperation.findMany({
+        where: { tenantId, workOrderId },
+        orderBy: { seq: "asc" },
+      });
+      let operationId: string | undefined;
+      let assignedMachineId = dto.machineId ?? wo.machineId ?? undefined;
+      if (routeOperations.length > 0) {
+        if (!dto.operationId) throw new ConflictException("Rotalı iş emrinde başlatılacak operasyon seçilmelidir");
+        const operation = routeOperations.find((item) => item.id === dto.operationId);
+        if (!operation) throw new NotFoundException("İş emri operasyonu bulunamadı");
+        if (operation.status !== "PENDING" && operation.status !== "IN_PROGRESS") {
+          throw new ConflictException("Bu operasyon başlatılamaz; tamamlanmış veya engellenmiş durumda");
+        }
+        if (routeOperations.filter((item) => item.seq < operation.seq).some((item) => item.status !== "COMPLETED" && item.status !== "SKIPPED")) {
+          throw new ConflictException("Önceki rota operasyonları tamamlanmadan bu operasyon başlatılamaz");
+        }
+        if (operation.machineId && dto.machineId && operation.machineId !== dto.machineId) {
+          throw new ConflictException("Operasyon için atanan tezgah dışında koşu başlatılamaz");
+        }
+        operationId = operation.id;
+        assignedMachineId = operation.machineId ?? dto.machineId ?? wo.machineId ?? undefined;
+        if (operation.ncProgramId) {
+          if (!this.parts) throw new ConflictException("NC program policy service is unavailable");
+          await this.parts.assertNcProgramUsable(tenantId, operation.ncProgramId, wo.partId, assignedMachineId, operation.ncProgramChecksum, tx);
+        }
+        if (this.tooling) {
+          await this.tooling.assertStartReady(tx, tenantId, operation.id, wo.partId, assignedMachineId);
+          await this.tooling.markStarted(tx, tenantId, operation.id);
+        }
+        if (operation.status === "PENDING") {
+          await tx.workOrderOperation.update({
+            where: { id: operation.id },
+            data: { status: "IN_PROGRESS", startedAt: new Date() },
+          });
+        }
+      } else if (dto.operationId) {
+        throw new ConflictException("Bu iş emrinde rota operasyonu bulunmuyor");
+      }
+      if (assignedMachineId) {
         const machine = await tx.machine.findFirst({
-          where: { id: dto.machineId, tenantId, isActive: true },
+          where: { id: assignedMachineId, tenantId, isActive: true },
         });
         if (!machine) throw new NotFoundException("Tezgah bulunamadı veya pasif");
       }
@@ -70,7 +114,8 @@ export class ProductionService {
         data: {
           tenantId,
           workOrderId,
-          machineId: dto.machineId,
+          machineId: assignedMachineId,
+          operationId,
           operatorId,
           notes: dto.notes,
           source: "MANUAL", // Faz 0: her zaman manuel giriş
@@ -98,10 +143,14 @@ export class ProductionService {
         "Bu iş emrinde açık bir uygunsuzluk kaydı var — üretim adedi girişi engellendi",
       );
     }
-    const updated = await this.prisma.productionRun.update({
-      where: { id },
-      data: dto,
-      include: RUN_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.productionRun.update({
+        where: { id },
+        data: dto,
+        include: RUN_INCLUDE,
+      });
+      if (result.operationId) await this.refreshOperationWip(tx, result.operationId);
+      return result;
     });
     this.realtime.emitToTenant(tenantId, "productionrun.updated", { id });
     return updated;
@@ -127,7 +176,12 @@ export class ProductionService {
         data: { ...runData, endedAt },
         include: RUN_INCLUDE,
       });
+      if (result.operationId) await this.refreshOperationWip(tx, result.operationId);
       if (completeWorkOrder) {
+        const routeOperationCount = await tx.workOrderOperation.count({ where: { tenantId, workOrderId: run.workOrderId } });
+        if (routeOperationCount > 0) {
+          throw new ConflictException("Rotalı iş emri doğrudan koşudan tamamlanamaz; operasyonları sırayla kapatın");
+        }
         await tx.workOrder.update({ where: { id: run.workOrderId }, data: { status: "COMPLETED" } });
         await tx.machine.updateMany({
           where: { tenantId, activeWorkOrderId: run.workOrderId },
@@ -157,5 +211,19 @@ export class ProductionService {
     const run = await this.prisma.productionRun.findFirst({ where: { id, tenantId } });
     if (!run) throw new NotFoundException("Üretim koşusu bulunamadı");
     return run;
+  }
+
+  private async refreshOperationWip(tx: Prisma.TransactionClient, operationId: string) {
+    const totals = await tx.productionRun.aggregate({
+      where: { operationId },
+      _sum: { goodCount: true, scrapCount: true },
+    });
+    await tx.workOrderOperation.update({
+      where: { id: operationId },
+      data: {
+        completedQty: totals._sum.goodCount ?? 0,
+        scrapQty: totals._sum.scrapCount ?? 0,
+      },
+    });
   }
 }

@@ -70,19 +70,14 @@ export class CapaService {
   }
 
   async submitForApproval(tenantId: string, userId: string, id: string) {
-    const capa = await this.findOne(tenantId, id);
-    if (capa.status !== "DRAFT") {
-      throw new ConflictException("Sadece taslak (DRAFT) CAPA onaya gönderilebilir");
-    }
-    await this.approvals.request(tenantId, userId, {
-      entity: "capa",
-      entityId: id,
-      requiredRoles: ["ADMIN"],
-    });
-    const updated = await this.prisma.capa.update({
-      where: { id },
-      data: { status: "PENDING_APPROVAL" },
-      include: CAPA_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const capa = await tx.capa.findFirst({ where: { id, tenantId } });
+      if (!capa) throw new NotFoundException("CAPA kaydı bulunamadı");
+      if (capa.status !== "DRAFT") throw new ConflictException("Sadece taslak (DRAFT) CAPA onaya gönderilebilir");
+      await this.approvals.request(tenantId, userId, {
+        entity: "capa", entityId: id, requiredRoles: ["ADMIN"],
+      }, tx);
+      return tx.capa.update({ where: { id }, data: { status: "PENDING_APPROVAL" }, include: CAPA_INCLUDE });
     });
     this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: "PENDING_APPROVAL" });
     return updated;
@@ -96,35 +91,24 @@ export class CapaService {
     action: Decision,
     note?: string,
   ) {
-    const capa = await this.findOne(tenantId, id);
-    if (capa.status !== "PENDING_APPROVAL") {
-      throw new ConflictException("Sadece onay bekleyen CAPA karara bağlanabilir");
-    }
-    const approvalReq = await this.prisma.approvalRequest.findFirst({
-      where: { tenantId, entity: "capa", entityId: id, status: "PENDING" },
-      orderBy: { createdAt: "desc" },
-    });
-    if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
-
-    if (action === "reject") {
-      await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note);
-      const updated = await this.prisma.capa.update({
-        where: { id },
-        data: { status: "REJECTED" },
-        include: CAPA_INCLUDE,
+    const result = await this.prisma.$transaction(async (tx) => {
+      const capa = await tx.capa.findFirst({ where: { id, tenantId } });
+      if (!capa) throw new NotFoundException("CAPA kaydı bulunamadı");
+      if (capa.status !== "PENDING_APPROVAL") throw new ConflictException("Sadece onay bekleyen CAPA karara bağlanabilir");
+      const approvalReq = await tx.approvalRequest.findFirst({
+        where: { tenantId, entity: "capa", entityId: id, status: "PENDING" }, orderBy: { createdAt: "desc" },
       });
-      this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: "REJECTED" });
-      return updated;
-    }
-
-    await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note);
-    const updated = await this.prisma.capa.update({
-      where: { id },
-      data: { status: "APPROVED" },
-      include: CAPA_INCLUDE,
+      if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
+      const status: "REJECTED" | "APPROVED" = action === "reject" ? "REJECTED" : "APPROVED";
+      await (action === "reject"
+        ? this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false)
+        : this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false));
+      const updated = await tx.capa.update({ where: { id }, data: { status }, include: CAPA_INCLUDE });
+      return { updated, approvalReq, status };
     });
-    this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: "APPROVED" });
-    return updated;
+    await this.approvals.notifyDecision(tenantId, result.approvalReq, result.status, note);
+    this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: result.status });
+    return result.updated;
   }
 
   async close(tenantId: string, id: string) {

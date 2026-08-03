@@ -31,6 +31,25 @@ async function main() {
     },
   });
 
+  // MES-TOOL-001 action grants are persistent authorization data.  Seed runs
+  // after migrations in fresh environments, so it must provision the same
+  // explicit role grants that the forward migration backfills for old tenants.
+  const toolingRoleGrants: Array<[string, "ADMIN" | "PLANNER" | "FOREMAN" | "OPERATOR"]> = [
+    ["TOOL_READ", "ADMIN"], ["TOOL_READ", "PLANNER"], ["TOOL_READ", "FOREMAN"], ["TOOL_READ", "OPERATOR"],
+    ["FIXTURE_READ", "ADMIN"], ["FIXTURE_READ", "PLANNER"], ["FIXTURE_READ", "FOREMAN"], ["FIXTURE_READ", "OPERATOR"],
+    ["TOOL_MANAGE", "ADMIN"], ["TOOL_MANAGE", "PLANNER"], ["TOOL_ASSEMBLY_MANAGE", "ADMIN"], ["TOOL_ASSEMBLY_MANAGE", "PLANNER"],
+    ["TOOL_LIFE_ADJUST", "ADMIN"], ["FIXTURE_MANAGE", "ADMIN"], ["FIXTURE_MANAGE", "PLANNER"],
+    ["OPERATION_SETUP_MANAGE", "ADMIN"], ["OPERATION_SETUP_MANAGE", "PLANNER"], ["OPERATION_SETUP_MANAGE", "FOREMAN"],
+      ["OPERATION_SETUP_VERIFY", "ADMIN"], ["OPERATION_SETUP_VERIFY", "FOREMAN"],
+      ["FIXTURE_MAINT_MANAGE", "ADMIN"], ["FIXTURE_MAINT_MANAGE", "PLANNER"],
+      ["FIXTURE_CALIBRATION_RECORD", "ADMIN"], ["FIXTURE_CALIBRATION_RECORD", "PLANNER"], ["FIXTURE_CALIBRATION_RECORD", "FOREMAN"],
+      ["FIXTURE_MAINT_OVERRIDE", "ADMIN"],
+  ];
+  for (const [action, role] of toolingRoleGrants) {
+    const exists = await prisma.actionPermissionGrant.findFirst({ where: { tenantId: DEFAULT_TENANT_ID, action, role } });
+    if (!exists) await prisma.actionPermissionGrant.create({ data: { tenantId: DEFAULT_TENANT_ID, action, role } });
+  }
+
   // Makine kaynaklı (source=MACHINE) ProductionRun kayıtları için sistem hesabı —
   // normal login akışına kapalı (rastgele, bilinmeyen şifre).
   const connectorEmail = "machine-connector@ahkmes.local";

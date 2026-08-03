@@ -59,6 +59,12 @@ import { SpcModule } from "./spc/spc.module";
 import { AlarmsModule } from "./alarms/alarms.module";
 import { ApModule } from "./ap/ap.module";
 import { ArModule } from "./ar/ar.module";
+import { InventoryModule } from "./inventory/inventory.module";
+import { QualityPlansModule } from "./quality-plans/quality-plans.module";
+import { CopilotModule } from "./copilot/copilot.module";
+import { PlatformModulesModule } from "./platform-modules/platform-modules.module";
+import { ToolingModule } from "./tooling/tooling.module";
+import { ActionPermissionsModule } from "./action-permissions/action-permissions.module";
 
 @Module({
   imports: [
@@ -122,6 +128,12 @@ import { ArModule } from "./ar/ar.module";
     AlarmsModule,
     ApModule,
     ArModule,
+    InventoryModule,
+    QualityPlansModule,
+    CopilotModule,
+    PlatformModulesModule,
+    ToolingModule,
+    ActionPermissionsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

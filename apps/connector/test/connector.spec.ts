@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { createServer } from "node:http";
 import { Connector } from "../src/core/connector";
 import type { MachineAdapter, MachineEvent } from "../src/adapters/adapter.interface";
 
@@ -24,6 +25,18 @@ function makeEvent(type: MachineEvent["type"] = "CYCLE_START"): MachineEvent {
   return { type, timestamp: new Date().toISOString() };
 }
 
+async function getFreeLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") return reject(new Error("Loopback port atanamadı"));
+      server.close((error) => error ? reject(error) : resolve(address.port));
+    });
+  });
+}
+
 describe("Connector", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -46,6 +59,7 @@ describe("Connector", () => {
     expect(url).toBe("http://backend.test/machines/m1/telemetry");
     expect(init.headers["X-Machine-Key"]).toBe("k1");
     expect(JSON.parse(init.body).type).toBe("CYCLE_START");
+    expect(connector.getStatus()).toMatchObject({ connected: true, queueDepth: 0, acceptedEvents: 1, deliveredEvents: 1 });
   });
 
   it("backend hata döndürünce olayı kuyrukta tutup yeniden dener", async () => {
@@ -82,6 +96,24 @@ describe("Connector", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("sağlık ve metrik uçlarını yalnızca loopback üzerinde sunar", async () => {
+    const adapter = new FakeAdapter();
+    const port = await getFreeLoopbackPort();
+    const connector = new Connector(
+      adapter,
+      { backendUrl: "http://backend.test", machineId: "m1", machineKey: "k1", healthPort: port },
+      vi.fn().mockResolvedValue({ ok: true, status: 201 }) as unknown as typeof fetch,
+    );
+
+    await connector.start();
+    const health = await fetch(`http://127.0.0.1:${port}/health`);
+    const metrics = await fetch(`http://127.0.0.1:${port}/metrics`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toMatchObject({ connected: true, queueDepth: 0 });
+    expect(await metrics.text()).toContain("ahkmes_connector_queue_depth 0");
+    await connector.stop();
+  });
+
   it("kuyruk taşarsa en eski olay düşürülür", async () => {
     const adapter = new FakeAdapter();
     const pending: { resolve: ((value: unknown) => void) | null } = { resolve: null };
@@ -100,6 +132,7 @@ describe("Connector", () => {
     await connector.start();
     // İlk olay gönderilmeye çalışılırken (fetch pending) kuyruğa 3 olay daha eklenir → limit 2
     adapter.emit(makeEvent("CYCLE_START"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     adapter.emit(makeEvent("PART_COMPLETE"));
     adapter.emit(makeEvent("PART_COMPLETE"));
     adapter.emit(makeEvent("CYCLE_END"));

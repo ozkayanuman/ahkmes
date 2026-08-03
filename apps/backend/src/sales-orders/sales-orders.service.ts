@@ -4,6 +4,7 @@ import type { ReleaseSalesOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { nextDocNo } from "../common/numbering";
+import { WorkOrdersService } from "../work-orders/work-orders.service";
 
 // OPEN → CLOSED | CANCELLED; CLOSED/CANCELLED terminal
 const TRANSITIONS: Record<SalesOrderStatus, SalesOrderStatus[]> = {
@@ -38,6 +39,7 @@ export class SalesOrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly workOrders: WorkOrdersService,
   ) {}
 
   findAll(tenantId: string, status?: SalesOrderStatus, q?: string) {
@@ -138,18 +140,13 @@ export class SalesOrdersService {
       const created = [];
       for (const line of releasable) {
         const woNo = await nextDocNo(tx, "workOrder", "woNo", "IE");
-        created.push(
-          await tx.workOrder.create({
-            data: {
-              tenantId,
-              woNo,
-              salesOrderLineId: line.id,
-              partId: line.part.id,
-              quantity: line.quantity,
-              dueDate: line.dueDate,
-            },
-          }),
-        );
+        created.push(await this.workOrders.createWithRoute(tx, tenantId, {
+          woNo,
+          salesOrderLineId: line.id,
+          partId: line.part.id,
+          quantity: line.quantity,
+          dueDate: line.dueDate,
+        }));
       }
       return created;
     });

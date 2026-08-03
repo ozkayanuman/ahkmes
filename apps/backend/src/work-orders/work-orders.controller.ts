@@ -11,12 +11,16 @@ import {
 } from "@nestjs/common";
 import {
   createWorkOrderSchema,
+  completeWorkOrderOperationSchema,
   scheduleWorkOrderSchema,
+  updateWorkOrderOperationSchema,
   updateWorkOrderSchema,
   workOrderStatusUpdateSchema,
   type CreateWorkOrderDto,
+  type CompleteWorkOrderOperationDto,
   type ScheduleWorkOrderDto,
   type UpdateWorkOrderDto,
+  type UpdateWorkOrderOperationDto,
   type WorkOrderStatusUpdateDto,
 } from "@ahkmes/shared-types";
 import type { WorkOrderStatus } from "@prisma/client";
@@ -48,6 +52,33 @@ export class WorkOrdersController {
   @Get(":id")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);
+  }
+
+  @Get(":id/operations")
+  operations(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.findOperations(user.tenantId, id);
+  }
+
+  @Patch(":id/operations/:operationId")
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  updateOperation(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("operationId") operationId: string,
+    @Body(new ZodValidationPipe(updateWorkOrderOperationSchema)) dto: UpdateWorkOrderOperationDto,
+  ) {
+    return this.service.updateOperation(user.tenantId, id, operationId, dto);
+  }
+
+  @Post(":id/operations/:operationId/complete")
+  @Roles("ADMIN", "PLANNER", "FOREMAN", "OPERATOR")
+  completeOperation(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("operationId") operationId: string,
+    @Body(new ZodValidationPipe(completeWorkOrderOperationSchema)) dto: CompleteWorkOrderOperationDto,
+  ) {
+    return this.service.completeOperation(user.tenantId, id, operationId, dto, user.userId);
   }
 
   @Get(":id/oee")

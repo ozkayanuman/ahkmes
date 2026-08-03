@@ -18,6 +18,8 @@ export interface M80SimServerConfig {
 
 export interface M80SimServerHandle {
   port: number;
+  /** Açık istemci soketlerini kapatarak saha ağ kesintisini taklit eder. */
+  disconnectClients(): void;
   shutdown(): Promise<void>;
 }
 
@@ -38,6 +40,7 @@ export function startM80SimServer(config: M80SimServerConfig): Promise<M80SimSer
   let alarmMessage = "";
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  const clients = new Set<net.Socket>();
 
   const alarmProbability = config.alarmProbability ?? 0;
 
@@ -64,6 +67,8 @@ export function startM80SimServer(config: M80SimServerConfig): Promise<M80SimSer
   }
 
   const server = net.createServer((socket) => {
+    clients.add(socket);
+    socket.once("close", () => clients.delete(socket));
     let recvBuffer = Buffer.alloc(0);
 
     socket.on("data", (chunk) => {
@@ -99,9 +104,13 @@ export function startM80SimServer(config: M80SimServerConfig): Promise<M80SimSer
       scheduleCycle();
       resolve({
         port: config.port,
+        disconnectClients() {
+          for (const client of clients) client.destroy();
+        },
         async shutdown() {
           stopped = true;
           if (timer) clearTimeout(timer);
+          for (const client of clients) client.destroy();
           await new Promise<void>((res) => server.close(() => res()));
         },
       });

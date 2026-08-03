@@ -4,6 +4,7 @@ import type { CreateRecipeHeaderDto, UpdateRecipeHeaderDto } from "@ahkmes/share
 
 type RecipeStepInput = CreateRecipeHeaderDto["steps"][number];
 import { PrismaService } from "../prisma/prisma.service";
+import { PartsService } from "../parts/parts.service";
 
 const RECIPE_INCLUDE = {
   part: { select: { id: true, partNo: true, name: true } },
@@ -16,7 +17,7 @@ const RECIPE_INCLUDE = {
  */
 @Injectable()
 export class RecipesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly parts?: PartsService) {}
 
   findAll(tenantId: string, partId?: string) {
     return this.prisma.recipeHeader.findMany({
@@ -35,6 +36,9 @@ export class RecipesService {
   async create(tenantId: string, dto: CreateRecipeHeaderDto) {
     const part = await this.prisma.part.findFirst({ where: { id: dto.partId, tenantId } });
     if (!part) throw new NotFoundException("Parça bulunamadı");
+    for (const step of dto.steps) {
+      if (step.ncProgramId) await this.ncPrograms().assertNcProgramUsable(tenantId, step.ncProgramId, part.id);
+    }
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -56,6 +60,7 @@ export class RecipesService {
                 parameterName: s.parameterName,
                 parameterValue: s.parameterValue,
                 unit: s.unit,
+                ncProgramId: s.ncProgramId,
               })),
             },
           },
@@ -72,6 +77,11 @@ export class RecipesService {
 
   async update(tenantId: string, id: string, dto: UpdateRecipeHeaderDto) {
     const recipe = await this.findOne(tenantId, id);
+    if (dto.steps) {
+      for (const step of dto.steps) {
+        if (step.ncProgramId) await this.ncPrograms().assertNcProgramUsable(tenantId, step.ncProgramId, recipe.partId);
+      }
+    }
     return this.prisma.$transaction(async (tx) => {
       if (dto.steps) {
         await tx.recipeStep.deleteMany({ where: { recipeHeaderId: recipe.id } });
@@ -91,6 +101,7 @@ export class RecipesService {
                     parameterName: s.parameterName,
                     parameterValue: s.parameterValue,
                     unit: s.unit,
+                    ncProgramId: s.ncProgramId,
                   })),
                 },
               }
@@ -104,5 +115,10 @@ export class RecipesService {
   async remove(tenantId: string, id: string) {
     await this.findOne(tenantId, id);
     return this.prisma.recipeHeader.delete({ where: { id } });
+  }
+
+  private ncPrograms() {
+    if (!this.parts) throw new ConflictException("NC program policy service is unavailable");
+    return this.parts;
   }
 }

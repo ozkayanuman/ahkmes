@@ -3,6 +3,8 @@ import type { CreateTransferOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { nextDocNo } from "../common/numbering";
+import { InventoryService } from "../inventory/inventory.service";
+import { InventoryMovementType } from "@prisma/client";
 
 const TO_INCLUDE = {
   fromBin: { select: { id: true, code: true, warehouse: { select: { id: true, name: true } } } },
@@ -20,6 +22,7 @@ export class TransferOrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly inventory: InventoryService,
   ) {}
 
   findAll(tenantId: string, binId?: string) {
@@ -49,54 +52,8 @@ export class TransferOrdersService {
       if (!fromBin) throw new NotFoundException("Kaynak raf bulunamadı");
       if (!toBin) throw new NotFoundException("Hedef raf bulunamadı");
 
-      for (const line of dto.lines) {
-        const fromBalance = await tx.stockBalance.findFirst({
-          where: {
-            tenantId,
-            binId: dto.fromBinId,
-            itemType: line.itemType,
-            itemId: line.itemId,
-            lotId: line.lotId ?? null,
-          },
-        });
-        const currentQty = fromBalance ? Number(fromBalance.qty) : 0;
-        if (currentQty < line.qty - 1e-9) {
-          throw new ConflictException(
-            `Yetersiz bakiye: kaynak rafta ${currentQty} adet mevcut, ${line.qty} adet transfer isteniyor`,
-          );
-        }
-        await tx.stockBalance.update({
-          where: { id: fromBalance!.id },
-          data: { qty: { decrement: line.qty } },
-        });
-
-        const toBalance = await tx.stockBalance.findFirst({
-          where: {
-            tenantId,
-            binId: dto.toBinId,
-            itemType: line.itemType,
-            itemId: line.itemId,
-            lotId: line.lotId ?? null,
-          },
-        });
-        if (toBalance) {
-          await tx.stockBalance.update({ where: { id: toBalance.id }, data: { qty: { increment: line.qty } } });
-        } else {
-          await tx.stockBalance.create({
-            data: {
-              tenantId,
-              binId: dto.toBinId,
-              itemType: line.itemType,
-              itemId: line.itemId,
-              lotId: line.lotId,
-              qty: line.qty,
-            },
-          });
-        }
-      }
-
       const toNo = await nextDocNo(tx, "transferOrder", "toNo", "TRF");
-      return tx.transferOrder.create({
+      const transfer = await tx.transferOrder.create({
         data: {
           tenantId,
           toNo,
@@ -116,6 +73,35 @@ export class TransferOrdersService {
         },
         include: TO_INCLUDE,
       });
+      for (const line of transfer.lines) {
+        await this.inventory.record(tx, {
+          tenantId,
+          itemType: line.itemType,
+          itemId: line.itemId,
+          quantityDelta: -Number(line.qty),
+          movementType: InventoryMovementType.TRANSFER_OUT,
+          sourceType: "TRANSFER_ORDER",
+          sourceId: transfer.id,
+          sourceLineId: line.id,
+          binId: dto.fromBinId,
+          lotId: line.lotId ?? undefined,
+          createdById: userId,
+        });
+        await this.inventory.record(tx, {
+          tenantId,
+          itemType: line.itemType,
+          itemId: line.itemId,
+          quantityDelta: Number(line.qty),
+          movementType: InventoryMovementType.TRANSFER_IN,
+          sourceType: "TRANSFER_ORDER",
+          sourceId: transfer.id,
+          sourceLineId: line.id,
+          binId: dto.toBinId,
+          lotId: line.lotId ?? undefined,
+          createdById: userId,
+        });
+      }
+      return transfer;
     });
 
     this.realtime.emitToTenant(tenantId, "transferorder.created", { id: created.id });

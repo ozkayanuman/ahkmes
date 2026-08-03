@@ -1,7 +1,8 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma, StockItemType } from "@prisma/client";
-import type { CreateLotDto } from "@ahkmes/shared-types";
+import { LotAcceptanceStatus, Prisma, StockItemType } from "@prisma/client";
+import type { CreateLotDto, DecideLotAcceptanceDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
+import { writeTransactionalAudit } from "../common/transactional-audit";
 
 @Injectable()
 export class LotsService {
@@ -35,6 +36,37 @@ export class LotsService {
       }
       throw e;
     }
+  }
+
+  async decideAcceptance(tenantId: string, userId: string, id: string, dto: DecideLotAcceptanceDto) {
+    const lot = await this.findOne(tenantId, id);
+    if (dto.status === "PENDING") throw new ConflictException("Kabul kararı PENDING olamaz");
+    if (lot.acceptanceStatus === "ACCEPTED" || lot.acceptanceStatus === "REJECTED") {
+      throw new ConflictException("Nihai kabul/red kararı değiştirilmez; düzeltme için yeni lot açın");
+    }
+    if (dto.status === "ACCEPTED" && lot.itemType === "MATERIAL") {
+      const material = await this.prisma.material.findFirst({ where: { id: lot.itemId, tenantId } });
+      if (!material) throw new NotFoundException("Lot malzemesi bulunamadı");
+      if (material.certificateRequired && !lot.certificateNo) {
+        throw new ConflictException("Bu malzeme için sertifika numarası olmadan kabul verilemez");
+      }
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.lot.update({
+        where: { id: lot.id },
+        data: { acceptanceStatus: dto.status as LotAcceptanceStatus, acceptanceNote: dto.note, acceptedById: userId, acceptedAt: new Date() },
+      });
+      await writeTransactionalAudit(tx, {
+        tenantId,
+        userId,
+        entity: "lots",
+        entityId: lot.id,
+        action: "STATUS_CHANGE",
+        before: lot,
+        after: updated,
+      });
+      return updated;
+    });
   }
 
   /**

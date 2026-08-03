@@ -2,6 +2,8 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import type { CreateFinishedGoodsDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { InventoryService } from "../inventory/inventory.service";
+import { InventoryMovementType } from "@prisma/client";
 
 const INCLUDE = {
   part: { select: { id: true, partNo: true, revision: true, name: true } },
@@ -14,6 +16,7 @@ export class FinishedGoodsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly inventory: InventoryService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string) {
@@ -34,7 +37,8 @@ export class FinishedGoodsService {
   }
 
   /**
-   * Mamul girişi: PartStock aynı transaction'da artar.
+   * Mamul girişi: immutable hareket, bin bakiyesi ve PartStock projeksiyonu
+   * aynı transaction'da artar.
    * Toplam üretilen >= iş emri miktarı ise tamamlama önerilir (kullanıcı onaylar).
    */
   async create(tenantId: string, userId: string, dto: CreateFinishedGoodsDto) {
@@ -43,6 +47,11 @@ export class FinishedGoodsService {
       if (!wo) throw new NotFoundException("İş emri bulunamadı");
       if (wo.status === "COMPLETED" || wo.status === "CANCELLED") {
         throw new ConflictException("Tamamlanmış/iptal edilmiş iş emrine mamul girişi yapılamaz");
+      }
+      const part = await tx.part.findFirst({ where: { id: wo.partId, tenantId } });
+      if (!part) throw new NotFoundException("Parça bulunamadı");
+      if (part.lotTrackingRequired && !dto.lotId) {
+        throw new ConflictException("Bu mamul için lot seçimi zorunludur");
       }
       if (dto.lotId) {
         const lot = await tx.lot.findFirst({
@@ -64,10 +73,23 @@ export class FinishedGoodsService {
         include: INCLUDE,
       });
 
-      await tx.partStock.upsert({
-        where: { partId: wo.partId },
-        update: { qty: { increment: dto.quantity } },
-        create: { tenantId, partId: wo.partId, qty: dto.quantity },
+      const movement = await this.inventory.record(tx, {
+        tenantId,
+        itemType: "PART",
+        itemId: wo.partId,
+        quantityDelta: dto.quantity,
+        movementType: InventoryMovementType.FINISHED_GOODS_RECEIPT,
+        sourceType: "FINISHED_GOODS_ENTRY",
+        sourceId: entry.id,
+        binId: dto.binId,
+        lotId: dto.lotId,
+        createdById: userId,
+        occurredAt: dto.date ?? undefined,
+      });
+      const entryWithBin = await tx.finishedGoodsEntry.update({
+        where: { id: entry.id },
+        data: { binId: movement.binId },
+        include: INCLUDE,
       });
 
       const agg = await tx.finishedGoodsEntry.aggregate({
@@ -76,7 +98,7 @@ export class FinishedGoodsService {
       });
       const totalProduced = Number(agg._sum.quantity ?? 0);
       return {
-        entry,
+        entry: entryWithBin,
         totalProduced,
         // Öneri: kullanıcı iş emrini /work-orders/:id/status ile COMPLETED yapar
         completionSuggested: totalProduced >= Number(wo.quantity),

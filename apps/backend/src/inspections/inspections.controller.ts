@@ -6,6 +6,7 @@ import { RolesGuard } from "../common/guards/roles.guard";
 import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
 import { RequirePage } from "../common/decorators/require-page.decorator";
+import { SkipAudit } from "../common/decorators/skip-audit.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
@@ -27,6 +28,7 @@ export class InspectionsController {
   }
 
   @Post()
+  @SkipAudit()
   @Roles("ADMIN", "PLANNER", "FOREMAN", "OPERATOR")
   create(
     @CurrentUser() user: AuthUser,

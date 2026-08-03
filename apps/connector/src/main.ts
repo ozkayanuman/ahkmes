@@ -65,6 +65,8 @@ async function main() {
     machineId: config.machineId,
     machineKey: config.machineKey,
     tagPollIntervalMs: config.tagPollIntervalMs,
+    durableQueuePath: config.durableQueuePath,
+    healthPort: config.healthPort,
   });
 
   await connector.start();

@@ -4,6 +4,8 @@ import { MrpService } from "./mrp.service";
 function buildPrismaMock(overrides: any = {}) {
   return {
     workOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    machine: { findMany: jest.fn().mockResolvedValue([]) },
+    workOrderOperation: { findMany: jest.fn().mockResolvedValue([]) },
     material: { findMany: jest.fn().mockResolvedValue([]) },
     partStock: { findMany: jest.fn().mockResolvedValue([]) },
     bomHeader: { findMany: jest.fn().mockResolvedValue([]) },
@@ -38,15 +40,17 @@ function buildTxMock() {
 }
 
 function buildService(prisma: ReturnType<typeof buildPrismaMock>) {
+  if (!prisma.$transaction.getMockImplementation()) prisma.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) => cb(prisma));
   const realtime = { emitToTenant: jest.fn() };
   const notifications = { notifyRoles: jest.fn().mockResolvedValue(undefined) };
   const approvals = {
     request: jest.fn().mockResolvedValue({ id: "ar1" }),
     approve: jest.fn().mockResolvedValue({}),
     reject: jest.fn().mockResolvedValue({}),
+    notifyDecision: jest.fn().mockResolvedValue(undefined),
   };
-  const purchasing = { create: jest.fn().mockResolvedValue({ id: "po1" }) };
-  const workOrders = { create: jest.fn().mockResolvedValue({ id: "wo-new" }) };
+  const purchasing = { create: jest.fn().mockResolvedValue({ id: "po1" }), createInTransaction: jest.fn().mockResolvedValue({ id: "po1" }) };
+  const workOrders = { create: jest.fn().mockResolvedValue({ id: "wo-new" }), createInTransaction: jest.fn().mockResolvedValue({ id: "wo-new" }) };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = new MrpService(prisma as any, realtime as any, notifications as any, approvals as any, purchasing as any, workOrders as any);
@@ -171,8 +175,9 @@ describe("MrpService.decidePurchaseProposal", () => {
 
     const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, "sup1");
 
-    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", undefined);
-    expect(purchasing.create).toHaveBeenCalledWith(
+    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", undefined, prisma, false);
+    expect(purchasing.createInTransaction).toHaveBeenCalledWith(
+      prisma,
       "t1",
       "u1",
       expect.objectContaining({
@@ -195,7 +200,7 @@ describe("MrpService.decidePurchaseProposal", () => {
     const { service, purchasing } = buildService(prisma);
 
     await expect(service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve")).rejects.toThrow();
-    expect(purchasing.create).not.toHaveBeenCalled();
+    expect(purchasing.createInTransaction).not.toHaveBeenCalled();
   });
 
   it("reject: öneri reddedilir, PurchaseOrder oluşturulmaz", async () => {
@@ -210,8 +215,8 @@ describe("MrpService.decidePurchaseProposal", () => {
 
     const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "reject", "uygun değil");
 
-    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", "uygun değil");
-    expect(purchasing.create).not.toHaveBeenCalled();
+    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", "uygun değil", prisma, false);
+    expect(purchasing.createInTransaction).not.toHaveBeenCalled();
     expect(updated.status).toBe("REJECTED");
   });
 });
@@ -230,12 +235,35 @@ describe("MrpService.decideProductionProposal", () => {
 
     const updated = await service.decideProductionProposal("t1", "prp1", "u1", "PLANNER", "approve");
 
-    expect(workOrders.create).toHaveBeenCalledWith("t1", {
+    expect(workOrders.createInTransaction).toHaveBeenCalledWith(prisma, "t1", {
       partId: "p1",
       quantity: 10,
       dueDate: proposal.dueDate,
       priority: 5,
     });
     expect(updated.status).toBe("CONVERTED");
+  });
+});
+
+describe("MrpService.capacityReadiness", () => {
+  it("atanmamış ve bloke operasyonları finite schedule uydurmadan görünür kılar", async () => {
+    const dueDate = new Date("2026-08-15T00:00:00.000Z");
+    const prisma = buildPrismaMock({
+      machine: { findMany: jest.fn().mockResolvedValue([{ id: "m1", name: "MCV-5500" }]) },
+      workOrderOperation: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: "op1", name: "Kaba işleme", seq: 10, status: "PENDING", machineId: "m1", workOrder: { id: "wo1", woNo: "WO-1", dueDate, priority: 4 } },
+          { id: "op2", name: "Final kontrol", seq: 20, status: "BLOCKED", machineId: null, workOrder: { id: "wo1", woNo: "WO-1", dueDate, priority: 4 } },
+        ]),
+      },
+    });
+    const { service } = buildService(prisma);
+
+    const result = await service.capacityReadiness("t1");
+
+    expect(result.readyForFiniteScheduling).toBe(false);
+    expect(result.summary).toMatchObject({ activeOperationCount: 2, assignedOperationCount: 1, unassignedOperationCount: 1, blockedOperationCount: 1 });
+    expect(result.machines[0]).toMatchObject({ id: "m1", operationCount: 1, workOrderCount: 1 });
+    expect(result.unassignedOperations[0]).toMatchObject({ id: "op2", status: "BLOCKED" });
   });
 });

@@ -15,6 +15,15 @@ export const WorkOrderStatusSchema = z.enum([
 ]);
 export type WorkOrderStatus = z.infer<typeof WorkOrderStatusSchema>;
 
+export const WorkOrderOperationStatusSchema = z.enum([
+  "PENDING",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "BLOCKED",
+  "SKIPPED",
+]);
+export type WorkOrderOperationStatus = z.infer<typeof WorkOrderOperationStatusSchema>;
+
 export const PurchaseOrderStatusSchema = z.enum(["ORDERED", "IN_TRANSIT", "RECEIVED", "CANCELLED"]);
 export type PurchaseOrderStatus = z.infer<typeof PurchaseOrderStatusSchema>;
 
@@ -29,6 +38,9 @@ export type InvoiceStatus = z.infer<typeof InvoiceStatusSchema>;
 
 export const StockItemTypeSchema = z.enum(["MATERIAL", "PART"]);
 export type StockItemType = z.infer<typeof StockItemTypeSchema>;
+
+export const LotAcceptanceStatusSchema = z.enum(["PENDING", "ACCEPTED", "QUARANTINED", "REJECTED"]);
+export type LotAcceptanceStatus = z.infer<typeof LotAcceptanceStatusSchema>;
 
 export const ProjectStatusSchema = z.enum(["PLANNED", "ACTIVE", "ON_HOLD", "COMPLETED", "CANCELLED"]);
 export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
@@ -90,8 +102,11 @@ export type AuditAction = z.infer<typeof AuditActionSchema>;
 export const DocumentTypeSchema = z.enum(["STEP", "WORK_INSTRUCTION", "OTHER"]);
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
 
-export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration"]);
+export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration", "lot"]);
 export type DocumentEntityType = z.infer<typeof DocumentEntityTypeSchema>;
+
+export const NcProgramStatusSchema = z.enum(["DRAFT", "REVIEW", "APPROVED", "PUBLISHED", "SUPERSEDED", "ARCHIVED"]);
+export type NcProgramStatus = z.infer<typeof NcProgramStatusSchema>;
 
 export const MachineEventTypeSchema = z.enum([
   "CYCLE_START",
@@ -122,6 +137,22 @@ export type UserAuthSource = z.infer<typeof UserAuthSourceSchema>;
 // ---- Alarm Management (Faz F) ----
 export const AlarmSeveritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 export type AlarmSeverity = z.infer<typeof AlarmSeveritySchema>;
+
+/** Ticari paketleme sınırı; kullanıcı sayfa yetkisinden bağımsızdır. */
+export const PRODUCT_MODULES = [
+  "PLATFORM_DOCUMENTS", "PLATFORM_WORKFLOW", "PLATFORM_INTEGRATION", "PLATFORM_OPERATIONS", "PLATFORM_AI",
+  "ERP_MASTER_DATA", "ERP_CRM_SALES", "ERP_PROCUREMENT", "ERP_FINANCE", "ERP_PROJECT_SERVICE",
+  "WMS_INVENTORY_LEDGER", "WMS_TRACEABILITY",
+  "PLM_PRODUCT_STRUCTURE", "PLM_NC_PROGRAM",
+  "MES_EXECUTION", "MES_CNC_TOOLING", "MES_GENEALOGY", "MES_PERFORMANCE",
+  "QMS_INSPECTION", "QMS_NCR_CAPA", "QMS_SPC_CALIBRATION",
+  "EAM_MAINTENANCE",
+  "APS_MRP", "APS_SCHEDULING",
+  "IIOT_MACHINE_CONNECT",
+  "ANALYTICS_REPORTING",
+] as const;
+export const ProductModuleSchema = z.enum(PRODUCT_MODULES);
+export type ProductModule = z.infer<typeof ProductModuleSchema>;
 
 /// Rol gruplarının görünürlüğünü yönettiği NAV sayfaları — apps/web/src/components/layout.tsx
 /// NAV listesiyle birebir eşleşir ("dashboard" hariç, o her zaman herkese görünür).
@@ -166,8 +197,33 @@ export const PAGE_KEYS = [
   "labor",
   "users",
   "audit-log",
+  "platform-modules",
   "webhooks",
   "reports",
+  "copilot",
+  "tooling",
 ] as const;
 export const PageKeySchema = z.enum(PAGE_KEYS);
 export type PageKey = z.infer<typeof PageKeySchema>;
+
+/**
+ * A disabled product module must be enforced by the backend; this shared map
+ * lets the SPA provide the same clear navigation feedback without duplicating
+ * commercial-boundary decisions in each screen.
+ */
+export const PAGE_PRODUCT_MODULE: Record<PageKey, ProductModule | "PLATFORM_CORE"> = {
+  customers: "ERP_MASTER_DATA", leads: "ERP_CRM_SALES", "service-tickets": "ERP_PROJECT_SERVICE",
+  rfq: "ERP_PROCUREMENT", quotes: "ERP_CRM_SALES", "sales-orders": "ERP_CRM_SALES",
+  "purchase-orders": "ERP_PROCUREMENT", ar: "ERP_FINANCE", ap: "ERP_FINANCE",
+  projects: "ERP_PROJECT_SERVICE", labor: "MES_EXECUTION",
+  users: "PLATFORM_CORE", "audit-log": "PLATFORM_CORE", "platform-modules": "PLATFORM_CORE",
+  materials: "ERP_MASTER_DATA", parts: "ERP_MASTER_DATA", suppliers: "ERP_MASTER_DATA", hierarchy: "PLATFORM_CORE",
+  "work-orders": "MES_EXECUTION", production: "MES_EXECUTION", recipes: "PLM_PRODUCT_STRUCTURE", genealogy: "MES_GENEALOGY", "shift-report": "MES_EXECUTION",
+  warehouses: "WMS_INVENTORY_LEDGER", lots: "WMS_TRACEABILITY", "serial-numbers": "WMS_TRACEABILITY", "transfer-orders": "WMS_INVENTORY_LEDGER", "cycle-counts": "WMS_INVENTORY_LEDGER",
+  mrp: "APS_MRP", scheduling: "APS_SCHEDULING",
+  inspections: "QMS_INSPECTION", capa: "QMS_NCR_CAPA", calibrations: "QMS_SPC_CALIBRATION", spc: "QMS_SPC_CALIBRATION", alarms: "QMS_INSPECTION", "non-conformances": "QMS_NCR_CAPA",
+  "maintenance-orders": "EAM_MAINTENANCE", energy: "EAM_MAINTENANCE",
+  machines: "IIOT_MACHINE_CONNECT", "automation-gateway": "IIOT_MACHINE_CONNECT", "digital-twin": "IIOT_MACHINE_CONNECT",
+  webhooks: "PLATFORM_INTEGRATION", reports: "ANALYTICS_REPORTING", copilot: "PLATFORM_AI",
+  tooling: "MES_CNC_TOOLING",
+};

@@ -41,6 +41,27 @@ interface ProductionProposalRow {
   createdAt: string;
 }
 
+interface CapacityReadiness {
+  readyForFiniteScheduling: boolean;
+  reason: string;
+  summary: {
+    activeMachineCount: number;
+    activeOperationCount: number;
+    assignedOperationCount: number;
+    unassignedOperationCount: number;
+    blockedOperationCount: number;
+  };
+  machines: {
+    id: string;
+    name: string;
+    operationCount: number;
+    workOrderCount: number;
+    blockedOperationCount: number;
+    earliestDueDate: string | null;
+  }[];
+  missingInputs: string[];
+}
+
 const STATUS_LABEL: Record<ProposalStatus, string> = {
   DRAFT: "Taslak",
   PENDING_APPROVAL: "Onay Bekliyor",
@@ -137,6 +158,10 @@ export function MrpPage() {
     queryKey: ["/mrp/production-proposals"],
     queryFn: () => apiGet<ProductionProposalRow[]>("/mrp/production-proposals"),
   });
+  const capacityReadiness = useQuery({
+    queryKey: ["/mrp/capacity-readiness"],
+    queryFn: () => apiGet<CapacityReadiness>("/mrp/capacity-readiness"),
+  });
   const suppliers = useQuery({
     queryKey: ["/suppliers"],
     queryFn: () => apiGet<SupplierOption[]>("/suppliers"),
@@ -200,6 +225,22 @@ export function MrpPage() {
           </Button>
         )}
       </div>
+
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <h2 className="text-sm font-semibold text-amber-900">Kapasite planlama hazırlığı</h2>
+        {capacityReadiness.isLoading && <p className="mt-1 text-sm text-amber-800">Kapasite girdileri yükleniyor…</p>}
+        {capacityReadiness.data && (
+          <div className="mt-2 space-y-2 text-sm text-amber-900">
+            <p>{capacityReadiness.data.reason}</p>
+            <p>
+              {capacityReadiness.data.summary.activeMachineCount} aktif makine, {capacityReadiness.data.summary.activeOperationCount} açık operasyon, {capacityReadiness.data.summary.unassignedOperationCount} atanmamış ve {capacityReadiness.data.summary.blockedOperationCount} bloke operasyon.
+            </p>
+            <ul className="list-disc pl-5 text-xs">
+              {capacityReadiness.data.missingInputs.map((input) => <li key={input}>{input}</li>)}
+            </ul>
+          </div>
+        )}
+      </section>
 
       <div>
         <h2 className="mb-2 text-sm font-semibold text-slate-600">Satınalma Önerileri</h2>

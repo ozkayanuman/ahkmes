@@ -7,6 +7,10 @@ import {
   loginSchema,
   RoleSchema,
   RunSourceSchema,
+  createToolDefinitionSchema,
+  createToolCompatibilitySchema,
+  manualToolLifeAdjustmentSchema,
+  setupAssignmentSchema,
 } from "./index";
 
 describe("enum şemaları", () => {
@@ -96,5 +100,19 @@ describe("createQuoteSchema", () => {
         lines: [{ partId: uuid, quantity: 0, unitPrice: 1, dueDate: "2026-08-15" }],
       }),
     ).toThrow();
+  });
+});
+
+describe("MES-TOOL-001 tooling DTO guards", () => {
+  it("rejects invalid life policies and unsafe thresholds", () => {
+    expect(createToolDefinitionSchema.safeParse({ code: "T1", name: "Tool", toolType: "END_MILL", lifePolicy: "BAD", maximumLife: 5, warningThreshold: 1, lifeUnit: "cycle" }).success).toBe(false);
+    expect(createToolDefinitionSchema.safeParse({ code: "T1", name: "Tool", toolType: "END_MILL", lifePolicy: "CYCLE", maximumLife: 5, warningThreshold: 6, lifeUnit: "cycle" }).success).toBe(false);
+  });
+
+  it("requires one compatibility subject, unique assignments and an adjustment reason", () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    expect(createToolCompatibilitySchema.safeParse({ machineId: id }).success).toBe(false);
+    expect(setupAssignmentSchema.safeParse({ toolAssignments: [{ requirementId: id, physicalToolInstanceId: id }, { requirementId: "00000000-0000-4000-8000-000000000002", physicalToolInstanceId: id }] }).success).toBe(false);
+    expect(manualToolLifeAdjustmentSchema.safeParse({ consumedLife: 1, version: 1, reason: "" }).success).toBe(false);
   });
 });

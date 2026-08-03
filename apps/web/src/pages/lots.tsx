@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
-import { Plus, Printer, ScanLine } from "lucide-react";
+import { Check, FileText, Plus, Printer, ScanLine, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 import { ApiError, apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { fmtDate } from "../lib/format";
 import { Button, Input, Label, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
+import { DocumentsPanel } from "../components/documents-panel";
 
 interface MaterialOption {
   id: string;
@@ -25,6 +25,11 @@ interface LotRow {
   itemId: string;
   expiryDate: string | null;
   receivedDate: string;
+  heatNumber: string | null;
+  supplierLotNo: string | null;
+  certificateNo: string | null;
+  acceptanceStatus: "PENDING" | "ACCEPTED" | "QUARANTINED" | "REJECTED";
+  acceptanceNote: string | null;
 }
 
 interface TraceLotRef {
@@ -161,6 +166,10 @@ export function LotsPage() {
   const [itemType, setItemType] = useState<"MATERIAL" | "PART">("MATERIAL");
   const [itemId, setItemId] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
+  const [heatNumber, setHeatNumber] = useState("");
+  const [supplierLotNo, setSupplierLotNo] = useState("");
+  const [certificateNo, setCertificateNo] = useState("");
+  const [docsFor, setDocsFor] = useState<LotRow | null>(null);
 
   const lots = useQuery({ queryKey: ["/lots"], queryFn: () => apiGet<LotRow[]>("/lots") });
   const materials = useQuery({
@@ -228,17 +237,37 @@ export function LotsPage() {
 
   const create = useMutation({
     mutationFn: () =>
-      apiPost("/lots", { lotNo, itemType, itemId, ...(expiryDate ? { expiryDate } : {}) }),
+      apiPost("/lots", {
+        lotNo,
+        itemType,
+        itemId,
+        ...(expiryDate ? { expiryDate } : {}),
+        ...(heatNumber.trim() ? { heatNumber: heatNumber.trim() } : {}),
+        ...(supplierLotNo.trim() ? { supplierLotNo: supplierLotNo.trim() } : {}),
+        ...(certificateNo.trim() ? { certificateNo: certificateNo.trim() } : {}),
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/lots"] });
       setOpen(false);
       setLotNo("");
       setItemId("");
       setExpiryDate("");
+      setHeatNumber("");
+      setSupplierLotNo("");
+      setCertificateNo("");
     },
     onError: (e) => {
       const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
       toast(msg ?? "Lot oluşturulamadı", "error");
+    },
+  });
+  const decideAcceptance = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: LotRow["acceptanceStatus"] }) =>
+      apiPost(`/lots/${id}/acceptance`, { status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/lots"] }),
+    onError: (e) => {
+      const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+      toast(msg ?? "Kabul kararı kaydedilemedi", "error");
     },
   });
 
@@ -259,10 +288,10 @@ export function LotsPage() {
       </div>
 
       {lots.isLoading && <p className="text-slate-500">Yükleniyor…</p>}
-      <Table headers={["Lot No", "Tip", "Kalem", "Son Kullanma", "Alım Tarihi", "İşlem"]}>
+      <Table headers={["Lot No", "Tip", "Kalem", "Heat / Tedarikçi Lot", "Sertifika", "Kabul", "İşlem"]}>
         {(lots.data ?? []).length === 0 && (
           <tr>
-            <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+            <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
               Kayıt yok
             </td>
           </tr>
@@ -272,12 +301,25 @@ export function LotsPage() {
             <td className="px-4 py-3 font-medium">{row.lotNo}</td>
             <td className="px-4 py-3">{row.itemType === "MATERIAL" ? "Malzeme" : "Mamul"}</td>
             <td className="px-4 py-3">{itemLabel(row)}</td>
-            <td className="px-4 py-3">{row.expiryDate ? fmtDate(row.expiryDate) : "—"}</td>
-            <td className="px-4 py-3">{fmtDate(row.receivedDate)}</td>
+            <td className="px-4 py-3 text-sm">{row.heatNumber ?? "—"}<br /><span className="text-slate-500">{row.supplierLotNo ?? "—"}</span></td>
+            <td className="px-4 py-3">{row.certificateNo ?? "—"}</td>
             <td className="px-4 py-3">
-              <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => printLabel(row)}>
-                <Printer className="h-4 w-4" /> QR Etiket
-              </Button>
+              <span className={row.acceptanceStatus === "ACCEPTED" ? "text-emerald-700" : row.acceptanceStatus === "REJECTED" ? "text-red-700" : "text-amber-700"}>
+                {row.acceptanceStatus === "ACCEPTED" ? "Kabul" : row.acceptanceStatus === "REJECTED" ? "Red" : row.acceptanceStatus === "QUARANTINED" ? "Karantina" : "Bekliyor"}
+              </span>
+            </td>
+            <td className="px-4 py-3">
+              <div className="flex flex-wrap gap-1">
+                <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => printLabel(row)}><Printer className="h-4 w-4" /> QR</Button>
+                <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setDocsFor(row)}><FileText className="h-4 w-4" /> Belge</Button>
+                {canWrite && row.acceptanceStatus !== "ACCEPTED" && row.acceptanceStatus !== "REJECTED" && (
+                  <>
+                    <Button variant="ghost" className="px-2 py-1 text-xs text-emerald-700" onClick={() => decideAcceptance.mutate({ id: row.id, status: "ACCEPTED" })}><Check className="h-4 w-4" /> Kabul</Button>
+                    <Button variant="ghost" className="px-2 py-1 text-xs text-amber-700" onClick={() => decideAcceptance.mutate({ id: row.id, status: "QUARANTINED" })}><ShieldAlert className="h-4 w-4" /> Karantina</Button>
+                    <Button variant="ghost" className="px-2 py-1 text-xs text-red-700" onClick={() => decideAcceptance.mutate({ id: row.id, status: "REJECTED" })}><X className="h-4 w-4" /> Red</Button>
+                  </>
+                )}
+              </div>
             </td>
           </tr>
         ))}
@@ -335,6 +377,20 @@ export function LotsPage() {
               onChange={(e) => setExpiryDate(e.target.value)}
             />
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="heatNumber">Heat No</Label>
+              <Input id="heatNumber" value={heatNumber} onChange={(e) => setHeatNumber(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="supplierLotNo">Tedarikçi Lot No</Label>
+              <Input id="supplierLotNo" value={supplierLotNo} onChange={(e) => setSupplierLotNo(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="certificateNo">Malzeme sertifika no (CoC)</Label>
+            <Input id="certificateNo" value={certificateNo} onChange={(e) => setCertificateNo(e.target.value)} />
+          </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Vazgeç
@@ -344,6 +400,13 @@ export function LotsPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+      <Modal
+        open={docsFor !== null}
+        title={docsFor ? `${docsFor.lotNo} — Sertifikalar ve Belgeler` : "Belgeler"}
+        onClose={() => setDocsFor(null)}
+      >
+        {docsFor && <DocumentsPanel entityType="lot" entityId={docsFor.id} />}
       </Modal>
       {showScan && <ScanModal onClose={() => setShowScan(false)} />}
     </div>

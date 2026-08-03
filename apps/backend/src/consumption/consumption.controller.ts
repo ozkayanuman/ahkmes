@@ -33,6 +33,6 @@ export class ConsumptionController {
   @Delete(":id")
   @Roles("ADMIN", "PLANNER")
   remove(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.remove(user.tenantId, id);
+    return this.service.remove(user.tenantId, user.userId, id);
   }
 }

@@ -35,6 +35,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   "automation-gateway": "Automation Gateway",
   "non-conformances": "Kalite",
   inspections: "Muayene",
+  copilot: "AI Copilot",
   capa: "CAPA",
   calibrations: "Kalibrasyon",
   "maintenance-orders": "Bakım Emirleri",
@@ -52,6 +53,8 @@ const PAGE_LABELS: Record<PageKey, string> = {
   labor: "İşçilik Takibi",
   users: "Kullanıcılar",
   "audit-log": "Denetim İzi",
+  "platform-modules": "Ürün Modülleri",
+  tooling: "CNC Takım ve Fikstür",
 };
 
 interface GroupMember {

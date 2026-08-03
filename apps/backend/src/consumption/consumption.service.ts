@@ -2,6 +2,8 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import type { CreateConsumptionDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { InventoryService } from "../inventory/inventory.service";
+import { InventoryMovementType } from "@prisma/client";
 
 const INCLUDE = {
   material: { select: { id: true, code: true, name: true, unit: true, stockQty: true } },
@@ -14,6 +16,7 @@ export class ConsumptionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly inventory: InventoryService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string) {
@@ -26,7 +29,8 @@ export class ConsumptionService {
 
   /**
    * RESERVED: stok düşmez, sadece ayrılmış gösterilir.
-   * CONSUMED: aynı transaction'da stok düşer; yetersiz stok 409.
+   * CONSUMED: immutable hareket/bakiye/toplam projeksiyonu aynı transaction'da
+   * düşer; yetersiz stok 409.
    */
   async create(tenantId: string, userId: string, dto: CreateConsumptionDto) {
     const created = await this.prisma.$transaction(async (tx) => {
@@ -37,26 +41,20 @@ export class ConsumptionService {
       }
       const material = await tx.material.findFirst({ where: { id: dto.materialId, tenantId } });
       if (!material) throw new NotFoundException("Malzeme bulunamadı");
+      if (material.lotTrackingRequired && !dto.lotId) {
+        throw new ConflictException("Bu malzeme için lot seçimi zorunludur");
+      }
       if (dto.lotId) {
         const lot = await tx.lot.findFirst({
           where: { id: dto.lotId, tenantId, itemType: "MATERIAL", itemId: dto.materialId },
         });
         if (!lot) throw new NotFoundException("Lot bulunamadı veya bu malzemeye ait değil");
-      }
-
-      if (dto.type === "CONSUMED") {
-        if (Number(material.stockQty) < dto.quantity) {
-          throw new ConflictException(
-            `Yetersiz stok: mevcut ${Number(material.stockQty)}, istenen ${dto.quantity}`,
-          );
+        if (lot.acceptanceStatus !== "ACCEPTED") {
+          throw new ConflictException("Sadece kabul edilmiş malzeme lotu tüketilebilir");
         }
-        await tx.material.update({
-          where: { id: material.id },
-          data: { stockQty: { decrement: dto.quantity } },
-        });
       }
 
-      return tx.materialConsumption.create({
+      const entry = await tx.materialConsumption.create({
         data: {
           tenantId,
           workOrderId: dto.workOrderId,
@@ -69,6 +67,23 @@ export class ConsumptionService {
         },
         include: INCLUDE,
       });
+      if (dto.type === "CONSUMED") {
+        const movement = await this.inventory.record(tx, {
+          tenantId,
+          itemType: "MATERIAL",
+          itemId: material.id,
+          quantityDelta: -dto.quantity,
+          movementType: InventoryMovementType.CONSUMPTION,
+          sourceType: "MATERIAL_CONSUMPTION",
+          sourceId: entry.id,
+          binId: dto.binId,
+          lotId: dto.lotId,
+          createdById: userId,
+          occurredAt: dto.date ?? undefined,
+        });
+        return tx.materialConsumption.update({ where: { id: entry.id }, data: { binId: movement.binId }, include: INCLUDE });
+      }
+      return entry;
     });
 
     if (dto.type === "CONSUMED") {
@@ -79,14 +94,22 @@ export class ConsumptionService {
   }
 
   /** Silme tüketimi geri alır: CONSUMED kayıtta stok iade edilir. */
-  async remove(tenantId: string, id: string) {
+  async remove(tenantId: string, userId: string, id: string) {
     const deleted = await this.prisma.$transaction(async (tx) => {
       const entry = await tx.materialConsumption.findFirst({ where: { id, tenantId } });
       if (!entry) throw new NotFoundException("Tüketim kaydı bulunamadı");
       if (entry.type === "CONSUMED") {
-        await tx.material.update({
-          where: { id: entry.materialId },
-          data: { stockQty: { increment: entry.quantity } },
+        await this.inventory.record(tx, {
+          tenantId,
+          itemType: "MATERIAL",
+          itemId: entry.materialId,
+          quantityDelta: Number(entry.quantity),
+          movementType: InventoryMovementType.CONSUMPTION_REVERSAL,
+          sourceType: "MATERIAL_CONSUMPTION_REVERSAL",
+          sourceId: entry.id,
+          binId: entry.binId ?? undefined,
+          lotId: entry.lotId ?? undefined,
+          createdById: userId,
         });
       }
       return tx.materialConsumption.delete({ where: { id } });

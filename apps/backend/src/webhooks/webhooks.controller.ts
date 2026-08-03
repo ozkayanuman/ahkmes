@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
   createWebhookSubscriptionSchema,
   updateWebhookSubscriptionSchema,
@@ -14,6 +14,7 @@ import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import type { WebhookDeliveryStatus } from "@prisma/client";
 
 /** Sadece ADMIN — dış URL'lere sistem verisi gönderen bir yapılandırma, kapsamı
  * kasıtlı olarak diğer sayfa-bazlı rollerden daha dar tutuldu. */
@@ -27,6 +28,16 @@ export class WebhooksController {
   @Get()
   findAll(@CurrentUser() user: AuthUser) {
     return this.service.findAll(user.tenantId);
+  }
+
+  @Get("deliveries")
+  findDeliveries(@CurrentUser() user: AuthUser, @Query("status") status?: WebhookDeliveryStatus) {
+    return this.service.findDeliveries(user.tenantId, status);
+  }
+
+  @Post("deliveries/:id/replay")
+  replayDelivery(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.replayDelivery(user.tenantId, id);
   }
 
   @Post()

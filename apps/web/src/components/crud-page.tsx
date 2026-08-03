@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Inbox, Pencil, Plus, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { Role } from "@ahkmes/shared-types";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -21,6 +22,7 @@ export interface Field {
   options?: { value: string; label: string }[];
   required?: boolean;
   createOnly?: boolean;
+  defaultValue?: boolean;
 }
 
 type FormState = Record<string, string | boolean>;
@@ -29,7 +31,7 @@ function initialForm(fields: Field[], row?: Record<string, unknown>): FormState 
   const state: FormState = {};
   for (const f of fields) {
     if (f.type === "checkbox") {
-      state[f.name] = row ? Boolean(row[f.name]) : true;
+      state[f.name] = row ? Boolean(row[f.name]) : (f.defaultValue ?? true);
     } else if (f.type === "password") {
       state[f.name] = "";
     } else {
@@ -76,6 +78,7 @@ export function CrudPage<T extends { id: string }>({
    * CrudPage'i özelleştirmeden genişletmeyi sağlar. */
   headerActions?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canWrite = !!user && writeRoles.includes(user.role);
   const canDelete = !!user && deleteRoles.includes(user.role);
@@ -103,9 +106,9 @@ export function CrudPage<T extends { id: string }>({
       setModal(null);
     },
     onError: (e) => {
-      if (e instanceof ApiError && e.status === 409) setFormError("Kayıt çakışması: bu değer zaten kayıtlı");
-      else if (e instanceof ApiError && e.status === 400) setFormError("Doğrulama hatası: alanları kontrol edin");
-      else setFormError("Kaydedilemedi, tekrar deneyin");
+      if (e instanceof ApiError && e.status === 409) setFormError(t("Kayıt çakışması: bu değer zaten kayıtlı"));
+      else if (e instanceof ApiError && e.status === 400) setFormError(t("Doğrulama hatası: alanları kontrol edin"));
+      else setFormError(t("Kaydedilemedi, tekrar deneyin"));
     },
   });
 
@@ -114,8 +117,8 @@ export function CrudPage<T extends { id: string }>({
     onSuccess: () => qc.invalidateQueries({ queryKey: [endpoint] }),
     onError: (e) => {
       if (e instanceof ApiError && e.status === 409)
-        toast("Bu kayda bağlı başka kayıtlar var, silinemez.", "error");
-      else toast("Silinemedi.", "error");
+        toast(t("Bu kayda bağlı başka kayıtlar var, silinemez."), "error");
+      else toast(t("Silinemedi."), "error");
     },
   });
 
@@ -142,13 +145,13 @@ export function CrudPage<T extends { id: string }>({
               <Icon className="h-5 w-5" />
             </span>
           )}
-          <h1 className="text-2xl font-bold">{title}</h1>
+          <h1 className="text-2xl font-bold">{t(title)}</h1>
         </div>
         <div className="flex items-center gap-2">
           {headerActions}
           {canWrite && (
             <Button onClick={openCreate}>
-              <Plus className="h-4 w-4" /> Yeni
+              <Plus className="h-4 w-4" /> {t("Yeni")}
             </Button>
           )}
         </div>
@@ -157,19 +160,19 @@ export function CrudPage<T extends { id: string }>({
       {searchable && (
         <div className="relative mb-4 max-w-sm">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <Input placeholder="Ara…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
+          <Input placeholder={t("Ara…")} value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>
       )}
 
-      {query.isLoading && <p className="text-slate-500">Yükleniyor…</p>}
-      {query.error && <p className="text-red-600">Liste alınamadı.</p>}
+      {query.isLoading && <p className="text-slate-500">{t("Yükleniyor…")}</p>}
+      {query.error && <p className="text-red-600">{t("Liste alınamadı.")}</p>}
 
       {query.data && (
         <Table
           headers={[
-            ...columns.map((c) => c.label),
+            ...columns.map((c) => t(c.label)),
             ...(rowActions ? [""] : []),
-            ...(canWrite ? ["İşlem"] : []),
+            ...(canWrite ? [t("İşlem")] : []),
           ]}
         >
           {query.data.length === 0 && (
@@ -180,7 +183,7 @@ export function CrudPage<T extends { id: string }>({
               >
                 <div className="flex flex-col items-center gap-2">
                   <Inbox className="h-8 w-8 text-slate-300" />
-                  <span>Kayıt yok</span>
+                  <span>{t("Kayıt yok")}</span>
                 </div>
               </td>
             </tr>
@@ -189,23 +192,23 @@ export function CrudPage<T extends { id: string }>({
             <tr key={row.id} className="hover:bg-slate-50">
               {columns.map((c) => (
                 <td key={c.key} className="px-4 py-3">
-                  {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "—")}
+                  {c.render ? c.render(row) : t(String((row as Record<string, unknown>)[c.key] ?? "—"))}
                 </td>
               ))}
               {rowActions && <td className="px-4 py-3">{rowActions(row)}</td>}
               {canWrite && (
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
-                    <Button variant="ghost" className="px-2 py-1" onClick={() => openEdit(row)} title="Düzenle">
+                    <Button variant="ghost" className="px-2 py-1" onClick={() => openEdit(row)} title={t("Düzenle")}>
                       <Pencil className="h-4 w-4" />
                     </Button>
                     {canDelete && (
                       <Button
                         variant="ghost"
                         className="px-2 py-1 text-red-600"
-                        title="Sil"
+                        title={t("Sil")}
                         onClick={async () => {
-                          if (await confirm({ message: "Bu kaydı silmek istediğinize emin misiniz?", danger: true }))
+                          if (await confirm({ message: t("Bu kaydı silmek istediğinize emin misiniz?"), danger: true }))
                             remove.mutate(row.id);
                         }}
                       >
@@ -222,7 +225,7 @@ export function CrudPage<T extends { id: string }>({
 
       <Modal
         open={modal !== null}
-        title={modal?.mode === "edit" ? `${title} Düzenle` : `Yeni ${title}`}
+        title={modal?.mode === "edit" ? t("{{title}} Düzenle", { title: t(title) }) : t("Yeni {{title}}", { title: t(title) })}
         onClose={() => setModal(null)}
       >
         <form
@@ -241,28 +244,28 @@ export function CrudPage<T extends { id: string }>({
                     checked={Boolean(form[f.name])}
                     onChange={(e) => setForm({ ...form, [f.name]: e.target.checked })}
                   />
-                  {f.label}
+                  {t(f.label)}
                 </label>
               ) : f.type === "select" ? (
                 <>
-                  <Label htmlFor={f.name}>{f.label}</Label>
+                  <Label htmlFor={f.name}>{t(f.label)}</Label>
                   <Select
                     id={f.name}
                     value={String(form[f.name] ?? "")}
                     required={f.required}
                     onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
                   >
-                    <option value="">Seçin…</option>
+                    <option value="">{t("Seçin…")}</option>
                     {f.options?.map((o) => (
                       <option key={o.value} value={o.value}>
-                        {o.label}
+                        {t(o.label)}
                       </option>
                     ))}
                   </Select>
                 </>
               ) : (
                 <>
-                  <Label htmlFor={f.name}>{f.label}</Label>
+                  <Label htmlFor={f.name}>{t(f.label)}</Label>
                   <Input
                     id={f.name}
                     type={f.type ?? "text"}
@@ -277,10 +280,10 @@ export function CrudPage<T extends { id: string }>({
           {formError && <p className="text-sm text-red-600">{formError}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setModal(null)}>
-              Vazgeç
+              {t("Vazgeç")}
             </Button>
             <Button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Kaydediliyor…" : "Kaydet"}
+              {save.isPending ? t("Kaydediliyor…") : t("Kaydet")}
             </Button>
           </div>
         </form>

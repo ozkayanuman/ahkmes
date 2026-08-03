@@ -42,9 +42,13 @@ export class MaterialsService {
   }
 
   async update(tenantId: string, id: string, dto: UpdateMaterialDto) {
-    await this.findOne(tenantId, id);
     try {
-      return await this.prisma.material.update({ where: { id }, data: dto });
+      // Keep the tenant predicate on the write itself, not only on a prior read.
+      // This prevents a future caller from turning a scoped lookup into an
+      // unscoped cross-tenant mutation by changing the code between the calls.
+      const updated = await this.prisma.material.updateMany({ where: { id, tenantId }, data: dto });
+      if (updated.count === 0) throw new NotFoundException("Malzeme bulunamadı");
+      return this.findOne(tenantId, id);
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
         throw new ConflictException("Bu malzeme kodu zaten kayıtlı");
@@ -54,9 +58,11 @@ export class MaterialsService {
   }
 
   async remove(tenantId: string, id: string) {
-    await this.findOne(tenantId, id);
+    const material = await this.findOne(tenantId, id);
     try {
-      return await this.prisma.material.delete({ where: { id } });
+      const deleted = await this.prisma.material.deleteMany({ where: { id, tenantId } });
+      if (deleted.count === 0) throw new NotFoundException("Malzeme bulunamadı");
+      return material;
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2003") {
         throw new ConflictException("Malzemeye bağlı kayıtlar var (PO/tüketim), silinemez");

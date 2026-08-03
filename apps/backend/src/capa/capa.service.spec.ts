@@ -2,11 +2,11 @@ import { CapaService } from "./capa.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     capa: { findFirst: jest.fn(), update: jest.fn() },
     approvalRequest: { findFirst: jest.fn().mockResolvedValue({ id: "ar1" }) },
     nonConformance: { findFirst: jest.fn().mockResolvedValue({ id: "nc1" }) },
-    $transaction: jest.fn(),
+    $transaction: jest.fn((fn) => fn(prisma)),
     ...overrides,
   };
   const realtime = { emitToTenant: jest.fn() };
@@ -14,6 +14,7 @@ function buildService(overrides: any = {}) {
     request: jest.fn().mockResolvedValue({ id: "ar1" }),
     approve: jest.fn().mockResolvedValue({}),
     reject: jest.fn().mockResolvedValue({}),
+    notifyDecision: jest.fn().mockResolvedValue(undefined),
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const service = new CapaService(prisma as any, realtime as any, approvals as any);
@@ -39,7 +40,7 @@ describe("CapaService.submitForApproval", () => {
       entity: "capa",
       entityId: "c1",
       requiredRoles: ["ADMIN"],
-    });
+    }, prisma);
     expect(updated.status).toBe("PENDING_APPROVAL");
   });
 });
@@ -52,7 +53,7 @@ describe("CapaService.decide", () => {
 
     const updated = await service.decide("t1", "c1", "u1", "ADMIN", "approve");
 
-    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "ADMIN", undefined);
+    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "ADMIN", undefined, prisma, false);
     expect(updated.status).toBe("APPROVED");
   });
 
@@ -63,7 +64,7 @@ describe("CapaService.decide", () => {
 
     const updated = await service.decide("t1", "c1", "u1", "ADMIN", "reject", "yetersiz kanıt");
 
-    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "ADMIN", "yetersiz kanıt");
+    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "ADMIN", "yetersiz kanıt", prisma, false);
     expect(updated.status).toBe("REJECTED");
   });
 });

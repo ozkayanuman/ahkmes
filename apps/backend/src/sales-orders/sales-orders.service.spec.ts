@@ -8,9 +8,10 @@ function buildService(overrides: any = {}) {
     ...overrides,
   };
   const realtime = { emitToTenant: jest.fn() };
+  const workOrders = { createWithRoute: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new SalesOrdersService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const service = new SalesOrdersService(prisma as any, realtime as any, workOrders as any);
+  return { service, prisma, realtime, workOrders };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,22 +37,17 @@ describe("SalesOrdersService.release", () => {
   });
 
   it("henüz üretime alınmamış satırlardan WorkOrder üretir, alınmışları skipler", async () => {
-    const tx = {
-      workOrder: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: "wo-new", woNo: "IE-2026-0001" }),
-      },
-    };
-    const { service, prisma, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const tx = { workOrder: { findFirst: jest.fn().mockResolvedValue(null) } };
+    const { service, prisma, realtime, workOrders } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    workOrders.createWithRoute.mockResolvedValue({ id: "wo-new", woNo: "IE-2026-0001" });
     prisma.salesOrder.findFirst.mockResolvedValue(soFixture());
 
     const result = await service.release("t1", "so1", {});
 
-    expect(tx.workOrder.create).toHaveBeenCalledTimes(1);
-    expect(tx.workOrder.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ salesOrderLineId: "sol1", partId: "p1", quantity: "10" }),
-      }),
+    expect(workOrders.createWithRoute).toHaveBeenCalledWith(
+      tx,
+      "t1",
+      expect.objectContaining({ salesOrderLineId: "sol1", partId: "p1", quantity: "10" }),
     );
     expect(result.workOrders).toHaveLength(1);
     expect(result.skippedLineIds).toEqual(["sol2"]);

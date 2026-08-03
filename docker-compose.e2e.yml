@@ -50,6 +50,7 @@ services:
       MINIO_PUBLIC_PORT: "9000"
       LDAP_TEST_HOST: ldap
       LDAP_TEST_PORT: "389"
+      E2E_TEST_ARGS: ${E2E_TEST_ARGS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,4 +60,4 @@ services:
         condition: service_started
     command: >
       sh -c "node scripts/wait-for-tcp.mjs ldap 389 &&
-      pnpm exec prisma migrate deploy && pnpm exec prisma db seed && pnpm test:e2e"
+      pnpm exec prisma migrate deploy && pnpm exec prisma db seed && pnpm test:e2e -- $$E2E_TEST_ARGS"

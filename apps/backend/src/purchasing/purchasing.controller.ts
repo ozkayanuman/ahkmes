@@ -88,7 +88,7 @@ export class PurchasingController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(receivePurchaseOrderSchema)) dto: ReceivePurchaseOrderDto,
   ) {
-    return this.service.receive(user.tenantId, id, dto);
+    return this.service.receive(user.tenantId, user.userId, id, dto);
   }
 
   @Delete(":id")

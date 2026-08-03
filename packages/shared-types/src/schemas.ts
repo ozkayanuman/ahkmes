@@ -14,6 +14,7 @@ import {
   InspectionResultSchema,
   InvoiceStatusSchema,
   LeadStatusSchema,
+  LotAcceptanceStatusSchema,
   MaintenanceOrderTypeSchema,
   OpportunityStageSchema,
   ProjectStatusSchema,
@@ -26,6 +27,7 @@ import {
   ServiceTicketPrioritySchema,
   ServiceTicketStatusSchema,
   StockItemTypeSchema,
+  WorkOrderOperationStatusSchema,
   WorkOrderStatusSchema,
 } from "./enums";
 
@@ -34,6 +36,61 @@ export const idSchema = z.string().uuid();
 const decimalString = z.union([z.number(), z.string()]).pipe(z.coerce.number());
 export const positiveQty = decimalString.refine((n) => n > 0, "Miktar 0'dan büyük olmalı");
 const isoDate = z.coerce.date();
+
+// ---- MES-TOOL-001 CNC tooling / fixture ----
+const toolLifePolicySchema = z.enum(["TIME", "CYCLE", "PART_COUNT"]);
+const physicalToolStatusSchema = z.enum(["AVAILABLE", "RESERVED", "IN_USE", "EXPIRED", "BROKEN", "QUARANTINED", "RETIRED"]);
+const physicalFixtureStatusSchema = z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE", "QUARANTINED", "RETIRED"]);
+const nonNegative = decimalString.refine((n) => n >= 0, "Negative value is not allowed");
+
+const toolDefinitionFields = z.object({
+  code: z.string().trim().min(1).max(80), name: z.string().trim().min(1).max(200), toolType: z.string().trim().min(1).max(80),
+  manufacturerCode: z.string().trim().max(120).optional(), lifePolicy: toolLifePolicySchema,
+  maximumLife: positiveQty, warningThreshold: nonNegative, lifeUnit: z.string().trim().min(1).max(24), revision: z.string().trim().min(1).max(40).default("A"), isActive: z.boolean().default(true),
+});
+export const createToolDefinitionSchema = toolDefinitionFields.superRefine((v, ctx) => { if (v.warningThreshold > v.maximumLife) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Warning threshold cannot exceed maximum life", path: ["warningThreshold"] }); });
+export const updateToolDefinitionSchema = toolDefinitionFields.partial().superRefine((v, ctx) => { if (v.maximumLife !== undefined && v.warningThreshold !== undefined && v.warningThreshold > v.maximumLife) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Warning threshold cannot exceed maximum life", path: ["warningThreshold"] }); });
+export type CreateToolDefinitionDto = z.infer<typeof createToolDefinitionSchema>;
+export type UpdateToolDefinitionDto = z.infer<typeof updateToolDefinitionSchema>;
+
+export const createToolComponentSchema = z.object({ componentType: z.string().trim().min(1), code: z.string().trim().min(1), name: z.string().trim().min(1), manufacturerCode: z.string().trim().optional(), revision: z.string().trim().min(1).default("A"), isActive: z.boolean().default(true) });
+export const createToolAssemblySchema = z.object({ toolDefinitionId: idSchema, code: z.string().trim().min(1), name: z.string().trim().min(1), revision: z.string().trim().min(1).default("A"), isActive: z.boolean().default(true), componentIds: z.array(idSchema).min(1).refine((ids) => new Set(ids).size === ids.length, "Duplicate assembly component") });
+export const createPhysicalToolSchema = z.object({ toolDefinitionId: idSchema, toolAssemblyId: idSchema.optional(), serialNo: z.string().trim().min(1), barcode: z.string().trim().min(1).optional(), location: z.string().trim().optional(), consumedLife: nonNegative.default(0), remainingLife: nonNegative, status: physicalToolStatusSchema.default("AVAILABLE") });
+export const createFixtureDefinitionSchema = z.object({ code: z.string().trim().min(1), name: z.string().trim().min(1), fixtureType: z.string().trim().min(1), revision: z.string().trim().min(1).default("A"), isActive: z.boolean().default(true) });
+export const createPhysicalFixtureSchema = z.object({ fixtureDefinitionId: idSchema, serialNo: z.string().trim().min(1), barcode: z.string().trim().min(1).optional(), location: z.string().trim().optional(), status: physicalFixtureStatusSchema.default("AVAILABLE") });
+export const createToolCompatibilitySchema = z.object({ machineId: idSchema, toolDefinitionId: idSchema.optional(), toolAssemblyId: idSchema.optional() }).refine((v) => Boolean(v.toolDefinitionId) !== Boolean(v.toolAssemblyId), "Exactly one tool definition or assembly is required");
+export const createFixtureCompatibilitySchema = z.object({ machineId: idSchema, fixtureDefinitionId: idSchema });
+export const createOperationToolRequirementSchema = z.object({ toolDefinitionId: idSchema.optional(), toolAssemblyId: idSchema.optional(), isRequired: z.boolean().default(true), quantity: z.number().int().positive().default(1), alternativeGroup: z.string().trim().min(1).optional(), sequence: z.number().int().positive().default(1) }).refine((v) => Boolean(v.toolDefinitionId) !== Boolean(v.toolAssemblyId), "Exactly one tool definition or assembly is required");
+export const createOperationFixtureRequirementSchema = z.object({ fixtureDefinitionId: idSchema, isRequired: z.boolean().default(true), quantity: z.number().int().positive().default(1), alternativeGroup: z.string().trim().min(1).optional(), sequence: z.number().int().positive().default(1) });
+export const setupAssignmentSchema = z.object({ toolAssignments: z.array(z.object({ requirementId: idSchema, physicalToolInstanceId: idSchema })).default([]), fixtureAssignments: z.array(z.object({ requirementId: idSchema, physicalFixtureInstanceId: idSchema })).default([]) }).superRefine((v, ctx) => { const ids = [...v.toolAssignments.map((x) => x.physicalToolInstanceId), ...v.fixtureAssignments.map((x) => x.physicalFixtureInstanceId)]; if (new Set(ids).size !== ids.length) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A physical resource cannot be assigned twice" }); });
+export const invalidateSetupSchema = z.object({ reason: z.string().trim().min(1).max(500) });
+export const manualToolLifeAdjustmentSchema = z.object({ consumedLife: nonNegative, version: z.number().int().positive(), reason: z.string().trim().min(1).max(500) });
+export type CreateToolComponentDto = z.infer<typeof createToolComponentSchema>;
+export type CreateToolAssemblyDto = z.infer<typeof createToolAssemblySchema>;
+export type CreatePhysicalToolDto = z.infer<typeof createPhysicalToolSchema>;
+export type CreateFixtureDefinitionDto = z.infer<typeof createFixtureDefinitionSchema>;
+export type CreatePhysicalFixtureDto = z.infer<typeof createPhysicalFixtureSchema>;
+export type SetupAssignmentDto = z.infer<typeof setupAssignmentSchema>;
+
+// ---- MES-FIXTURE-MAINT-001 fixture maintenance / calibration ----
+const fixturePolicyTypeSchema = z.enum(["TIME", "CYCLE", "PART_COUNT"]);
+const fixtureEnforcementSchema = z.enum(["INFORMATIONAL", "WARNING", "BLOCKING"]);
+const fixtureMaintenanceResultSchema = z.enum(["PASS", "FAIL"]);
+const fixtureMaintenancePolicyFields = z.object({ fixtureDefinitionId: idSchema, policyType: fixturePolicyTypeSchema, interval: positiveQty, warningThreshold: nonNegative.optional(), enforcement: fixtureEnforcementSchema.default("INFORMATIONAL"), isActive: z.boolean().default(true) });
+export const fixtureMaintenancePolicySchema = fixtureMaintenancePolicyFields.superRefine((v, ctx) => { if (v.warningThreshold !== undefined && v.warningThreshold > v.interval) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["warningThreshold"], message: "Warning threshold cannot exceed interval" }); });
+export const updateFixtureMaintenancePolicySchema = fixtureMaintenancePolicyFields.omit({ fixtureDefinitionId: true }).partial().extend({ version: z.number().int().positive() });
+const fixtureCalibrationPolicyFields = z.object({ fixtureDefinitionId: idSchema, intervalDays: z.number().int().positive(), warningDays: z.number().int().nonnegative().optional(), enforcement: fixtureEnforcementSchema.default("INFORMATIONAL"), certificateRequired: z.boolean().default(false), isActive: z.boolean().default(true) });
+export const fixtureCalibrationPolicySchema = fixtureCalibrationPolicyFields.superRefine((v, ctx) => { if (v.warningDays !== undefined && v.warningDays > v.intervalDays) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["warningDays"], message: "Warning period cannot exceed calibration interval" }); });
+export const updateFixtureCalibrationPolicySchema = fixtureCalibrationPolicyFields.omit({ fixtureDefinitionId: true }).partial().extend({ version: z.number().int().positive() });
+export const scheduleFixtureMaintenanceSchema = z.object({ physicalFixtureInstanceId: idSchema, maintenanceType: z.string().trim().min(1).max(80), notes: z.string().trim().max(2000).optional(), documentId: idSchema.optional(), idempotencyKey: z.string().trim().min(8).max(160) });
+export const completeFixtureMaintenanceSchema = z.object({ result: fixtureMaintenanceResultSchema, notes: z.string().trim().max(2000).optional(), documentId: idSchema.optional(), counterBefore: nonNegative.optional(), counterAfter: nonNegative.optional(), version: z.number().int().positive(), idempotencyKey: z.string().trim().min(8).max(160) }).superRefine((v, ctx) => { if (v.counterBefore !== undefined && v.counterAfter !== undefined && v.counterAfter < v.counterBefore) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["counterAfter"], message: "Counter cannot move backwards" }); });
+export const fixtureCalibrationRecordSchema = z.object({ physicalFixtureInstanceId: idSchema, calibratedAt: isoDate, validUntil: isoDate, result: fixtureMaintenanceResultSchema, certificateDocumentId: idSchema.optional(), reference: z.string().trim().max(200).optional(), provider: z.string().trim().max(200).optional(), idempotencyKey: z.string().trim().min(8).max(160) }).superRefine((v, ctx) => { if (v.validUntil < v.calibratedAt) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["validUntil"], message: "validUntil cannot precede calibratedAt" }); });
+export const invalidateFixtureCalibrationSchema = z.object({ version: z.number().int().positive(), reason: z.string().trim().min(1).max(500) });
+export type FixtureMaintenancePolicyDto = z.infer<typeof fixtureMaintenancePolicySchema>;
+export type FixtureCalibrationPolicyDto = z.infer<typeof fixtureCalibrationPolicySchema>;
+export type ScheduleFixtureMaintenanceDto = z.infer<typeof scheduleFixtureMaintenanceSchema>;
+export type CompleteFixtureMaintenanceDto = z.infer<typeof completeFixtureMaintenanceSchema>;
+export type FixtureCalibrationRecordDto = z.infer<typeof fixtureCalibrationRecordSchema>;
 
 // ---- Auth ----
 export const loginSchema = z.object({
@@ -132,6 +189,7 @@ export const createPartSchema = z.object({
   drawingFileRef: z.string().optional(),
   stepFileRef: z.string().optional(),
   idealCycleTimeSec: decimalString.optional(),
+  lotTrackingRequired: z.boolean().optional(),
 });
 export const updatePartSchema = createPartSchema.partial();
 export type CreatePartDto = z.infer<typeof createPartSchema>;
@@ -143,8 +201,27 @@ export const createNcProgramSchema = z.object({
   fileName: z.string().min(1),
   fileRef: z.string().min(1),
   notes: z.string().optional(),
+  effectivityScope: z.string().min(1).max(120).default("GLOBAL"),
+  effectiveFrom: isoDate.optional(),
+  effectiveTo: isoDate.optional(),
 });
 export type CreateNcProgramDto = z.infer<typeof createNcProgramSchema>;
+
+export const createNcProgramRevisionSchema = z.object({
+  fileName: z.string().min(1),
+  fileRef: z.string().min(1),
+  notes: z.string().optional(),
+  effectivityScope: z.string().min(1).max(120).optional(),
+  effectiveFrom: isoDate.optional(),
+  effectiveTo: isoDate.optional(),
+});
+export type CreateNcProgramRevisionDto = z.infer<typeof createNcProgramRevisionSchema>;
+
+export const electronicSignatureSchema = z.object({
+  password: z.string().min(1),
+  note: z.string().max(1000).optional(),
+});
+export type ElectronicSignatureDto = z.infer<typeof electronicSignatureSchema>;
 
 // ---- Supplier ----
 export const createSupplierSchema = z.object({
@@ -170,6 +247,8 @@ export const createMaterialSchema = z.object({
   // Faz G Cost Accounting'de eklenmişti ama şemaya hiç girmemişti — WorkOrdersService.cost()
   // bu alanı okuyordu ama UI'dan girilemiyordu (bkz. Faz H/I asimetri notu).
   standardCost: decimalString.optional(),
+  lotTrackingRequired: z.boolean().optional(),
+  certificateRequired: z.boolean().optional(),
 });
 export const updateMaterialSchema = createMaterialSchema.partial();
 export type CreateMaterialDto = z.infer<typeof createMaterialSchema>;
@@ -287,6 +366,8 @@ export type ReleaseSalesOrderDto = z.infer<typeof releaseSalesOrderSchema>;
 export const deliveryLineInputSchema = z.object({
   salesOrderLineId: idSchema,
   qty: positiveQty,
+  binId: idSchema.optional(),
+  lotId: idSchema.optional(),
 });
 export const createDeliverySchema = z.object({
   salesOrderId: idSchema,
@@ -337,8 +418,16 @@ export const createLotSchema = z.object({
   itemType: StockItemTypeSchema,
   itemId: idSchema,
   expiryDate: isoDate.optional(),
+  heatNumber: z.string().min(1).optional(),
+  supplierLotNo: z.string().min(1).optional(),
+  certificateNo: z.string().min(1).optional(),
 });
 export type CreateLotDto = z.infer<typeof createLotSchema>;
+export const decideLotAcceptanceSchema = z.object({
+  status: LotAcceptanceStatusSchema,
+  note: z.string().min(1).optional(),
+});
+export type DecideLotAcceptanceDto = z.infer<typeof decideLotAcceptanceSchema>;
 
 // ---- SerialNumber (Faz K) — Lot'a paralel, tekil fiziksel ürün birimi takibi ----
 export const createSerialNumberSchema = z.object({
@@ -475,11 +564,53 @@ export type CreateCycleCountDto = z.infer<typeof createCycleCountSchema>;
 export const createInspectionSchema = z.object({
   workOrderId: idSchema,
   productionRunId: idSchema.optional(),
+  qualityPlanCheckId: idSchema.optional(),
   checkpointName: z.string().min(1),
   result: InspectionResultSchema,
+  measurementValue: decimalString.optional(),
+  measurementUnit: z.string().min(1).optional(),
   notes: z.string().optional(),
 });
 export type CreateInspectionDto = z.infer<typeof createInspectionSchema>;
+
+export const qualityPlanCheckSchema = z
+  .object({
+    seq: z.number().int().positive(),
+    checkpointName: z.string().min(1),
+    operationSeq: z.number().int().positive().optional(),
+    unit: z.string().min(1).optional(),
+    lowerLimit: decimalString.optional(),
+    upperLimit: decimalString.optional(),
+    requiresMeasurement: z.boolean().optional(),
+  })
+  .superRefine((check, ctx) => {
+    if (check.lowerLimit !== undefined && check.upperLimit !== undefined && check.lowerLimit > check.upperLimit) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["upperLimit"],
+        message: "Ust tolerans alt toleranstan kucuk olamaz",
+      });
+    }
+  });
+export const createQualityPlanSchema = z.object({
+  name: z.string().min(1),
+  revision: z.string().min(1).max(32).optional(),
+  partId: idSchema.optional(),
+  checks: z.array(qualityPlanCheckSchema).min(1),
+});
+export type CreateQualityPlanDto = z.infer<typeof createQualityPlanSchema>;
+
+/** Mevcut planın kontrol satırlarını değiştirmeden yeni kontrollü revizyon açar. */
+export const createQualityPlanRevisionSchema = z.object({
+  revision: z.string().min(1).max(32),
+});
+export type CreateQualityPlanRevisionDto = z.infer<typeof createQualityPlanRevisionSchema>;
+
+// This proposal schema does not authorize or execute a mutation.
+export const createCopilotDraftSchema = z.object({
+  prompt: z.string().trim().min(3).max(4_000),
+});
+export type CreateCopilotDraftDto = z.infer<typeof createCopilotDraftSchema>;
 
 // ---- Capa (Faz E) — onay akışı ApprovalsService üzerinden yürür ----
 export const createCapaSchema = z.object({
@@ -553,6 +684,19 @@ export type CreateWorkOrderDto = z.infer<typeof createWorkOrderSchema>;
 export type UpdateWorkOrderDto = z.infer<typeof updateWorkOrderSchema>;
 export type WorkOrderStatusUpdateDto = z.infer<typeof workOrderStatusUpdateSchema>;
 
+// ---- WorkOrder route operation (AHK-004) ----
+export const updateWorkOrderOperationSchema = z.object({
+  machineId: idSchema.nullable().optional(),
+  ncProgramId: idSchema.nullable().optional(),
+  status: WorkOrderOperationStatusSchema.optional(),
+  notes: z.string().optional(),
+});
+export const completeWorkOrderOperationSchema = z.object({
+  notes: z.string().optional(),
+});
+export type UpdateWorkOrderOperationDto = z.infer<typeof updateWorkOrderOperationSchema>;
+export type CompleteWorkOrderOperationDto = z.infer<typeof completeWorkOrderOperationSchema>;
+
 // ---- PurchaseOrder (Faz 0b) ----
 export const purchaseOrderLineInputSchema = z.object({
   materialId: idSchema,
@@ -568,7 +712,13 @@ export const createPurchaseOrderSchema = z.object({
   lines: z.array(purchaseOrderLineInputSchema).min(1),
 });
 export const receivePurchaseOrderSchema = z.object({
-  lines: z.array(z.object({ lineId: idSchema, receivedQty: positiveQty })).min(1),
+  lines: z.array(z.object({
+    lineId: idSchema,
+    receivedQty: positiveQty,
+    /// Raf verilmezse legacy quantities için otomatik UNASSIGNED raf kullanılır.
+    binId: idSchema.optional(),
+    lotId: idSchema.optional(),
+  })).min(1),
 });
 export const purchaseOrderStatusUpdateSchema = z.object({ status: PurchaseOrderStatusSchema });
 export const updatePurchaseOrderSchema = z.object({
@@ -589,12 +739,16 @@ export const createConsumptionSchema = z.object({
   date: isoDate.optional(),
   /// Faz F: tüketilen malzemenin geldiği lot — backward traceability için opsiyonel.
   lotId: idSchema.optional(),
+  /// Raf verilmezse legacy quantities için otomatik UNASSIGNED raf kullanılır.
+  binId: idSchema.optional(),
 });
 export type CreateConsumptionDto = z.infer<typeof createConsumptionSchema>;
 
 // ---- ProductionRun (Faz 0c) — source her zaman MANUAL, API girişinde alınmaz ----
 export const startProductionRunSchema = z.object({
   machineId: idSchema.optional(),
+  /** Rotası olan iş emirlerinde zorunludur; koşuyu sabitlenmiş operasyon/WIP'ye bağlar. */
+  operationId: idSchema.optional(),
   notes: z.string().optional(),
 });
 export const updateProductionRunSchema = z.object({
@@ -614,6 +768,8 @@ export const createFinishedGoodsSchema = z.object({
   date: isoDate.optional(),
   /// Faz F: üretilen mamulün atandığı lot — forward traceability için opsiyonel.
   lotId: idSchema.optional(),
+  /// Raf verilmezse legacy quantities için otomatik UNASSIGNED raf kullanılır.
+  binId: idSchema.optional(),
 });
 export type CreateFinishedGoodsDto = z.infer<typeof createFinishedGoodsSchema>;
 
@@ -726,6 +882,7 @@ export const recipeStepInputSchema = z.object({
   parameterName: z.string().optional(),
   parameterValue: z.string().optional(),
   unit: z.string().optional(),
+  ncProgramId: idSchema.optional(),
 });
 export const createRecipeHeaderSchema = z.object({
   partId: idSchema,

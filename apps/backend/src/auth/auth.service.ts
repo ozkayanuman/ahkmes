@@ -61,6 +61,25 @@ export class AuthService {
     return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
   }
 
+  /**
+   * AHK-006 focused reauthentication boundary for critical electronic signatures.
+   * It verifies the active user's primary identity without issuing a new session
+   * and returns only non-secret evidence that can be recorded with the signature.
+   */
+  async reauthenticate(tenantId: string, userId: string, password: string) {
+    const user = await this.prisma.user.findFirst({ where: { id: userId, tenantId, isActive: true } });
+    if (!user) throw new UnauthorizedException("Oturum kullanıcısı bulunamadı");
+    let valid = false;
+    if (user.authSource === "LOCAL") valid = await bcrypt.compare(password, user.passwordHash);
+    else if (user.authSource === "LDAP" && user.externalDn) {
+      valid = await this.ldap.verifyCredentials(tenantId, user.externalDn, password);
+    }
+    // OIDC assertion reauthentication needs the provider's prompt=login flow;
+    // accepting a local password here would weaken the policy, so it is denied.
+    if (!valid) throw new UnauthorizedException("Elektronik imza için yeniden kimlik doğrulama başarısız");
+    return { userId: user.id, authSource: user.authSource, verifiedAt: new Date() };
+  }
+
   /** Kendi kendine dil/saat dilimi güncelleme — ADMIN yetkisi gerekmez, herhangi
    * bir kullanıcı kendi tercihini değiştirebilir (Faz P i18n). */
   async updateProfile(userId: string, dto: { locale?: string; timezone?: string }) {

@@ -1,5 +1,6 @@
 import {
   Boxes,
+  Bot,
   Briefcase,
   CalendarClock,
   CalendarDays,
@@ -65,7 +66,10 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Genel Bakış",
     description: "Fabrika genelinde canlı özet: OEE, açık iş emirleri, uygunsuzluklar.",
     icon: LayoutDashboard,
-    items: [{ to: "/dashboard", label: "Panel", icon: LayoutDashboard, end: true }],
+    items: [
+      { to: "/dashboard", label: "Panel", icon: LayoutDashboard, end: true },
+      { to: "/copilot", label: "AI Copilot", icon: Bot, page: "copilot" },
+    ],
   },
   {
     key: "erp",
@@ -87,6 +91,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/labor", label: "İşçilik Takibi", icon: Clock, page: "labor" },
       { to: "/permission-groups", label: "Rol Grupları", icon: Users2, adminOnly: true },
       { to: "/audit-log", label: "Denetim İzi", icon: History, page: "audit-log", adminOnly: true },
+      { to: "/platform/modules", label: "Ürün Modülleri", icon: Boxes, page: "platform-modules", adminOnly: true },
       { to: "/reports", label: "Raporlar", icon: FileDown, page: "reports" },
       { to: "/webhooks", label: "Webhook'lar", icon: Webhook, page: "webhooks", adminOnly: true },
     ],
@@ -116,6 +121,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Factory,
     items: [
       { to: "/production", label: "Operasyon", icon: Gauge, page: "production" },
+      { to: "/tooling", label: "CNC Takım ve Fikstür", icon: Wrench, page: "tooling" },
       { to: "/machines", label: "Tezgahlar", icon: Factory, page: "machines" },
       { to: "/hierarchy", label: "Hiyerarşi", icon: GitBranch, page: "hierarchy" },
       { to: "/digital-twin", label: "Digital Twin", icon: Map, page: "digital-twin" },

@@ -22,6 +22,12 @@ export class MrpController {
     return this.service.run(user.tenantId, user.userId);
   }
 
+  @Get("capacity-readiness")
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  capacityReadiness(@CurrentUser() user: AuthUser) {
+    return this.service.capacityReadiness(user.tenantId);
+  }
+
   @Get("purchase-proposals")
   listPurchaseProposals(@CurrentUser() user: AuthUser, @Query("status") status?: string) {
     return this.service.listPurchaseProposals(user.tenantId, status);

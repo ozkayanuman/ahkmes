@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { useTranslation } from "react-i18next";
 
 type StatusInfo = { label: string; cls: string };
 
@@ -44,10 +45,11 @@ export function StatusBadge({
   map: Record<string, StatusInfo>;
   status: string;
 }) {
+  const { t } = useTranslation();
   const s = map[status] ?? { label: status, cls: "bg-slate-100 text-slate-700" };
   return (
     <span className={clsx("inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium", s.cls)}>
-      {s.label}
+      {t(s.label)}
     </span>
   );
 }

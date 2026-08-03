@@ -28,6 +28,8 @@ export interface M80AdapterConfig {
   port: number;
   systemNo?: number;
   pollIntervalMs?: number;
+  /** Okuma bağlantısı beklenmedik biçimde kapanırsa yeniden bağlanma gecikmesi. */
+  reconnectDelayMs?: number;
   /** Section/subSection numaraları placeholder'dır — gerçek M80 "Custom API Variables
    * List" dokümanı (BNP-C3072-xxx) netleşince buradan (veya config'den) güncellenmeli. */
   cycleStatusItem?: M80ItemAddress;
@@ -41,6 +43,7 @@ export interface M80AdapterConfig {
 const DEFAULTS = {
   systemNo: 1,
   pollIntervalMs: 500,
+  reconnectDelayMs: 2_000,
   cycleStatusItem: DEFAULT_ITEM_ADDRESSES.cycleStatus,
   partCountItem: DEFAULT_ITEM_ADDRESSES.partCount,
   alarmMessageItem: DEFAULT_ITEM_ADDRESSES.alarmMessage,
@@ -63,6 +66,8 @@ const ALARM = 2;
 export class M80Adapter implements MachineAdapter {
   private socket: net.Socket | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
   private listeners: ((event: MachineEvent) => void)[] = [];
   private recvBuffer = Buffer.alloc(0);
   private nextRequestId = 1;
@@ -74,6 +79,7 @@ export class M80Adapter implements MachineAdapter {
 
   private readonly systemNo: number;
   private readonly pollIntervalMs: number;
+  private readonly reconnectDelayMs: number;
   private readonly cycleStatusItem: M80ItemAddress;
   private readonly partCountItem: M80ItemAddress;
   private readonly alarmMessageItem: M80ItemAddress;
@@ -81,26 +87,44 @@ export class M80Adapter implements MachineAdapter {
   constructor(private readonly config: M80AdapterConfig) {
     this.systemNo = config.systemNo ?? DEFAULTS.systemNo;
     this.pollIntervalMs = config.pollIntervalMs ?? DEFAULTS.pollIntervalMs;
+    this.reconnectDelayMs = config.reconnectDelayMs ?? DEFAULTS.reconnectDelayMs;
     this.cycleStatusItem = config.cycleStatusItem ?? DEFAULTS.cycleStatusItem;
     this.partCountItem = config.partCountItem ?? DEFAULTS.partCountItem;
     this.alarmMessageItem = config.alarmMessageItem ?? DEFAULTS.alarmMessageItem;
   }
 
   async connect(): Promise<void> {
+    this.stopped = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    await this.openSocket();
+    this.startPolling();
+  }
+
+  private async openSocket(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const socket = net.createConnection({ host: this.config.host, port: this.config.port });
       socket.once("connect", () => resolve());
       socket.once("error", (err) => reject(err));
       socket.on("data", (chunk) => this.onData(chunk));
+      // İlk bağlantı hatası `once` dinleyicisiyle connect() çağrısına döner;
+      // sonraki socket hataları ise close olayıyla kontrollü reconnect'e gider.
+      socket.on("error", () => undefined);
+      socket.on("close", () => this.handleSocketClosed(socket));
       this.socket = socket;
     });
+  }
 
+  private startPolling() {
     this.pollTimer = setInterval(() => void this.poll(), this.pollIntervalMs);
   }
 
   async disconnect(): Promise<void> {
+    this.stopped = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     for (const { reject } of this.pending.values()) reject(new Error("Bağlantı kapatıldı"));
     this.pending.clear();
     await new Promise<void>((resolve) => {
@@ -108,6 +132,35 @@ export class M80Adapter implements MachineAdapter {
       this.socket.end(() => resolve());
     }).catch(() => undefined);
     this.socket = null;
+  }
+
+  private handleSocketClosed(socket: net.Socket) {
+    if (this.socket !== socket) return;
+    this.socket = null;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+    for (const { reject } of this.pending.values()) reject(new Error("M80 bağlantısı kesildi"));
+    this.pending.clear();
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect() {
+    if (this.stopped || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.reconnect();
+    }, this.reconnectDelayMs);
+  }
+
+  private async reconnect() {
+    if (this.stopped || this.socket) return;
+    try {
+      await this.openSocket();
+      this.startPolling();
+    } catch {
+      this.socket = null;
+      this.scheduleReconnect();
+    }
   }
 
   onEvent(cb: (event: MachineEvent) => void): void {

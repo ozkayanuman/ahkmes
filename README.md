@@ -51,6 +51,8 @@ pnpm typecheck
 
 ```bash
 pnpm test:e2e
+# yalnızca bir e2e dosyasını izole ortamda çalıştırmak için:
+pnpm test:e2e test/oee-trend.e2e-spec.ts
 ```
 
 Bu komut yalnızca geçici Docker Compose kaynaklarıyla PostgreSQL, MinIO ve LDAP

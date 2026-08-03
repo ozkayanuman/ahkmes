@@ -69,6 +69,8 @@ Geliştirici veritabanını koruyarak backend e2e paketini çalıştırmak için
 
 ```bash
 pnpm test:e2e
+# yalnızca bir e2e dosyası için:
+pnpm test:e2e test/oee-trend.e2e-spec.ts
 ```
 
 Komut geçici, host porta bağlı olmayan PostgreSQL, MinIO ve LDAP konteynerleri
@@ -80,5 +82,5 @@ kullanmaz.
 ## 9. Bilinen Kısıtlamalar (v0.9)
 
 - Tek-tenant mimari — birden fazla şirkete aynı kurulumdan hizmet vermek için ek geliştirme gerekir.
-- Machine Connector (OPC-UA/Mitsubishi M80) ayrı bir süreç olarak çalıştırılmalı, Docker Compose'a henüz opsiyonel servis olarak eklenmedi.
+- Machine Connector (OPC-UA/Mitsubishi M80) ayrı bir edge süreçtir; Compose'ta varsayılan olarak kapalı `connector` profilinde bulunur. Kalıcı kuyruk `connector-data` volume'undadır; sağlık ucu yalnızca connector container'ının loopback'ine bağlanır.
 - Otomatik SSL/TLS sonlandırma yok — üretimde bir reverse proxy (nginx/Caddy) arkasında çalıştırılması önerilir.

@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { PurchaseOrderStatus } from "@prisma/client";
+import { InventoryMovementType, Prisma, PurchaseOrderStatus } from "@prisma/client";
 import type {
   CreatePurchaseOrderDto,
   ReceivePurchaseOrderDto,
@@ -8,6 +8,7 @@ import type {
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { nextDocNo } from "../common/numbering";
+import { InventoryService } from "../inventory/inventory.service";
 
 // RECEIVED durumuna sadece receive endpoint'i geçirir
 const TRANSITIONS: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
@@ -21,7 +22,9 @@ const PO_INCLUDE = {
   supplier: { select: { id: true, name: true } },
   lines: {
     include: {
-      material: { select: { id: true, code: true, name: true, unit: true, stockQty: true } },
+      material: {
+        select: { id: true, code: true, name: true, unit: true, stockQty: true, lotTrackingRequired: true },
+      },
     },
     orderBy: { createdAt: "asc" as const },
   },
@@ -32,6 +35,7 @@ export class PurchasingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly inventory: InventoryService,
   ) {}
 
   findAll(tenantId: string, status?: PurchaseOrderStatus, q?: string) {
@@ -63,44 +67,35 @@ export class PurchasingService {
   }
 
   async create(tenantId: string, userId: string, dto: CreatePurchaseOrderDto) {
-    const supplier = await this.prisma.supplier.findFirst({
-      where: { id: dto.supplierId, tenantId },
-    });
+    const created = await this.prisma.$transaction((tx) => this.createInTransaction(tx, tenantId, userId, dto));
+    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id: created.id });
+    return created;
+  }
+
+  /** MRP gibi üst command'lerin PO ve karar kayıtlarını aynı transaction'a alması için. */
+  async createInTransaction(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    userId: string,
+    dto: CreatePurchaseOrderDto,
+  ) {
+    const supplier = await tx.supplier.findFirst({ where: { id: dto.supplierId, tenantId } });
     if (!supplier) throw new NotFoundException("Tedarikçi bulunamadı");
     const materialIds = dto.lines.map((l) => l.materialId);
-    const materials = await this.prisma.material.findMany({
-      where: { id: { in: materialIds }, tenantId },
-    });
+    const materials = await tx.material.findMany({ where: { id: { in: materialIds }, tenantId } });
     if (materials.length !== new Set(materialIds).size) {
       throw new NotFoundException("Malzeme bulunamadı");
     }
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const poNo = await nextDocNo(tx, "purchaseOrder", "poNo", "SAT");
-      return tx.purchaseOrder.create({
-        data: {
-          tenantId,
-          poNo,
-          supplierId: dto.supplierId,
-          currency: dto.currency,
-          orderDate: dto.orderDate,
-          expectedDate: dto.expectedDate,
-          notes: dto.notes,
-          createdById: userId,
-          lines: {
-            create: dto.lines.map((l) => ({
-              tenantId,
-              materialId: l.materialId,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-            })),
-          },
-        },
-        include: PO_INCLUDE,
-      });
+    const poNo = await nextDocNo(tx, "purchaseOrder", "poNo", "SAT");
+    return tx.purchaseOrder.create({
+      data: {
+        tenantId, poNo, supplierId: dto.supplierId, currency: dto.currency, orderDate: dto.orderDate,
+        expectedDate: dto.expectedDate, notes: dto.notes, createdById: userId,
+        lines: { create: dto.lines.map((l) => ({ tenantId, materialId: l.materialId, quantity: l.quantity, unitPrice: l.unitPrice })) },
+      },
+      include: PO_INCLUDE,
     });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id: created.id });
-    return created;
   }
 
   async update(tenantId: string, id: string, dto: UpdatePurchaseOrderDto) {
@@ -135,14 +130,20 @@ export class PurchasingService {
   }
 
   /**
-   * Satır bazlı teslim alma: receivedQty artar, Material.stockQty aynı
-   * transaction'da artar; tüm satırlar tamamsa PO RECEIVED olur.
+   * Satır bazlı teslim alma: immutable hareket, bin bakiyesi ve toplam stok
+   * projeksiyonu aynı transaction'da güncellenir; tüm satırlar tamamsa PO RECEIVED olur.
    */
-  async receive(tenantId: string, id: string, dto: ReceivePurchaseOrderDto) {
+  async receive(tenantId: string, userId: string, id: string, dto: ReceivePurchaseOrderDto) {
     const updated = await this.prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findFirst({
         where: { id, tenantId },
-        include: { lines: true },
+        include: {
+          lines: {
+            include: {
+              material: { select: { id: true, code: true, lotTrackingRequired: true } },
+            },
+          },
+        },
       });
       if (!po) throw new NotFoundException("Satınalma emri bulunamadı");
       if (po.status !== "ORDERED" && po.status !== "IN_TRANSIT") {
@@ -158,13 +159,34 @@ export class PurchasingService {
             `Fazla teslim reddedildi: sipariş ${Number(line.quantity)}, toplam teslim ${newReceived}`,
           );
         }
+        if (line.material.lotTrackingRequired && !item.lotId) {
+          throw new ConflictException(`Lot takibi zorunlu ${line.material.code} malzemesi için lot seçimi gerekir`);
+        }
+        if (item.lotId) {
+          const lot = await tx.lot.findFirst({
+            where: { id: item.lotId, tenantId, itemType: "MATERIAL", itemId: line.materialId },
+          });
+          if (!lot) throw new NotFoundException("Lot bulunamadı veya sipariş malzemesine ait değil");
+          if (lot.acceptanceStatus !== "ACCEPTED") {
+            throw new ConflictException("Satın alma tesliminde sadece kabul edilmiş malzeme lotu stoğa alınabilir");
+          }
+        }
         await tx.purchaseOrderLine.update({
           where: { id: line.id },
           data: { receivedQty: { increment: item.receivedQty } },
         });
-        await tx.material.update({
-          where: { id: line.materialId },
-          data: { stockQty: { increment: item.receivedQty } },
+        await this.inventory.record(tx, {
+          tenantId,
+          itemType: "MATERIAL",
+          itemId: line.materialId,
+          quantityDelta: item.receivedQty,
+          movementType: InventoryMovementType.PURCHASE_RECEIPT,
+          sourceType: "PURCHASE_ORDER",
+          sourceId: po.id,
+          sourceLineId: line.id,
+          binId: item.binId,
+          lotId: item.lotId,
+          createdById: userId,
         });
       }
 

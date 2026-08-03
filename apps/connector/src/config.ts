@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export interface ConnectorEnv {
   adapter: "simulator" | "opcua" | "m80" | "fanuc";
   backendUrl: string;
@@ -16,6 +18,9 @@ export interface ConnectorEnv {
   tagPollIntervalMs: number;
   fanucHost: string;
   fanucPort: number;
+  durableQueuePath?: string;
+  /** Yalnızca edge hostunun loopback arayüzünde açılan sağlık/metric portu. 0 kapalıdır. */
+  healthPort: number;
 }
 
 function parseM80Tags(raw: string | undefined): { name: string; address: string }[] {
@@ -38,6 +43,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConnectorEnv {
           ? "fanuc"
           : "simulator";
   const backendUrl = env.BACKEND_URL ?? "http://localhost:3000";
+  let parsedBackendUrl: URL;
+  try {
+    parsedBackendUrl = new URL(backendUrl);
+  } catch {
+    throw new Error("BACKEND_URL geçerli bir HTTP(S) URL olmalı");
+  }
+  if (!/^https?:$/.test(parsedBackendUrl.protocol) || parsedBackendUrl.username || parsedBackendUrl.password) {
+    throw new Error("BACKEND_URL yalnızca kimlik bilgisi içermeyen HTTP(S) URL olabilir");
+  }
   const machineId = env.MACHINE_ID;
   const machineKey = env.MACHINE_KEY;
   if (!machineId) throw new Error("MACHINE_ID env değişkeni tanımlı olmalı");
@@ -47,6 +61,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConnectorEnv {
   }
   if (adapter === "m80" && !env.M80_HOST) {
     throw new Error("ADAPTER=m80 için M80_HOST env değişkeni tanımlı olmalı");
+  }
+  const healthPort = Number(env.HEALTH_PORT ?? 0);
+  if (!Number.isInteger(healthPort) || healthPort < 0 || healthPort > 65535) {
+    throw new Error("HEALTH_PORT 0 ile 65535 arasında tam sayı olmalı");
   }
 
   return {
@@ -67,5 +85,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConnectorEnv {
     tagPollIntervalMs: Number(env.TAG_POLL_INTERVAL_MS ?? 0),
     fanucHost: env.FANUC_HOST ?? "",
     fanucPort: Number(env.FANUC_PORT ?? 8193),
+    durableQueuePath: env.DURABLE_QUEUE_PATH ?? path.resolve(`data/edge-${machineId}.queue.json`),
+    healthPort,
   };
 }
