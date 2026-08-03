@@ -243,7 +243,17 @@ export class ToolingService {
       if (!updated.count) throw new ConflictException("Takım ömrü eşzamanlı değişti; operasyon tamamlanamadı");
       await tx.toolLifeEvent.create({ data: { tenantId, physicalToolInstanceId: tool.id, workOrderOperationId: operationId, setupSnapshotId: verification.snapshot.id, eventType: "OPERATION_COMPLETE", quantity: amount, idempotencyKey: key, before, after: { consumedLife, remainingLife, version: tool.version + 1 }, createdById: userId } });
     }
-    await tx.physicalFixtureInstance.updateMany({ where: { tenantId, id: { in: verification.assignments.flatMap((a) => a.physicalFixtureInstanceId ? [a.physicalFixtureInstanceId] : []) }, status: "IN_USE" }, data: { status: "AVAILABLE", version: { increment: 1 } } });
+    const fixtureIds = [...new Set(verification.assignments.flatMap((a) => a.physicalFixtureInstanceId ? [a.physicalFixtureInstanceId] : []))];
+    if (fixtureIds.length) {
+      const completedParts = Math.max(1, Number(verification.workOrderOperation.completedQty));
+      const fixtures = await tx.physicalFixtureInstance.findMany({ where: { tenantId, id: { in: fixtureIds }, status: "IN_USE" } });
+      for (const fixture of fixtures) {
+        const before = { maintenanceCycleCount: Number(fixture.maintenanceCycleCount), maintenancePartCount: Number(fixture.maintenancePartCount), status: fixture.status, version: fixture.version };
+        const changed = await tx.physicalFixtureInstance.updateMany({ where: { id: fixture.id, tenantId, status: "IN_USE", version: fixture.version }, data: { status: "AVAILABLE", maintenanceCycleCount: { increment: 1 }, maintenancePartCount: { increment: completedParts }, version: { increment: 1 } } });
+        if (!changed.count) throw new ConflictException("Fikstür kullanım sayacı eşzamanlı değişti; operasyon tamamlanamadı");
+        if (userId) await this.audit(tx, tenantId, userId, "PhysicalFixtureInstance", fixture.id, "UPDATE", before, { maintenanceCycleCount: before.maintenanceCycleCount + 1, maintenancePartCount: before.maintenancePartCount + completedParts, status: "AVAILABLE", version: fixture.version + 1, reason: "OPERATION_COMPLETE", operationId });
+      }
+    }
     await tx.operationSetupAssignment.updateMany({ where: { tenantId, verificationId: verification.id, isActive: true }, data: { isActive: false, releasedAt: new Date() } });
     await tx.operationSetupVerification.update({ where: { id: verification.id }, data: { status: "RELEASED", version: { increment: 1 } } });
     if (userId) await this.audit(tx, tenantId, userId, "OperationSetupVerification", verification.id, "STATUS_CHANGE", { status: "VERIFIED" }, { status: "RELEASED", operationId });

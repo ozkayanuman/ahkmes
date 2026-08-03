@@ -9,7 +9,7 @@
 - Referans katalog 369 atomik yeteneğe normalize edilmiştir: Platform 138, ERP
   62, PLM 16, MES 55, CNC 35, IIoT 24, QMS 21 ve EAM 18.
 - Bunlar lisanslanabilir/planlanabilir 38 ürün-modülü altında gruplanır.
-- Atomik seviye özet: `VERIFIED_COMPLETE: 0`, `FUNCTIONAL_PARTIAL: 111`,
+- Atomik seviye özet: `VERIFIED_COMPLETE: 2`, `FUNCTIONAL_PARTIAL: 111`,
   `PROTOTYPE/PLACEHOLDER: 37`, `MISSING: 221`.
 - `VERIFIED_COMPLETE` için migration, domain servis, API, yetki, tenant sınırı,
   audit, kullanılabilir UI, validation ve test birlikte aranır. Bu ölçüte göre
@@ -56,7 +56,7 @@ olduğu anlamına gelmez.
 | WMS_ADVANCED | WMS | Advanced WMS/mobile | Hayır | Hayır | MISSING | — | — | bin strategy, RF/RFID, putaway, picking, packing, replenishment | P3 |
 | PLM_PRODUCT_STRUCTURE | PLM | BOM/routing/recipe revision | Hayır | Hayır | FUNCTIONAL_PARTIAL | `BomHeader`, `RecipeHeader`, route snapshot | parts/recipes pages; route E2E | EBOM/MBOM, alternatives/variants, effective dates/release | P1 |
 | PLM_CHANGE_CONTROL | PLM | ECR/ECO/change control | Hayır | Hayır | MISSING | — | — | ECR/ECO, as-designed/planned/built comparison | P1 |
-| PLM_NC_PROGRAM | PLM | NC program control | Hayır | Hayır | PROTOTYPE | `NcProgram` metadata | part detail attachment UI | checksum, approval, release, DNC link/old version prevention | P1 |
+| PLM_NC_PROGRAM | PLM | NC program control | Hayır | Hayır | VERIFIED_COMPLETE | `NcProgram` SHA-256, revision lifecycle/effectivity, single-published constraint, immutable WorkOrderOperation snapshot and `PartsService.assertNcProgramUsable` | part/detail NC panel and operation-start gate; PLM-001 PostgreSQL E2E, permission/entitlement, audit and reauth coverage | DNC distribution and generic controlled-document/ECR lifecycle are separately tracked; they are not claimed by this capability. | P1 |
 | MES_EXECUTION | MES | Work order/operation execution | Hayır | Evet* | FUNCTIONAL_PARTIAL | `WorkOrder`, `WorkOrderOperation`, `ProductionRun` | work-order/production pages; route E2E | operator HMI, setup, rework/co-product/backflush gates | P1 |
 | MES_GENEALOGY | MES | As-built genealogy | Hayır | Hayır | FUNCTIONAL_PARTIAL | work-order genealogy, consumption/finished entries | genealogy page/test | full serial parent-child, tool/NC/measurement chain | P1 |
 | MES_OPERATOR_HMI | MES | Operator terminal | Hayır | Hayır | MISSING | — | — | dispatch, barcode, instructions, calls, handover | P1 |

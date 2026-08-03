@@ -315,6 +315,11 @@ model PhysicalFixtureInstance {
   barcode             String?
   location            String?
   status              PhysicalFixtureStatus @default(AVAILABLE)
+  /// CYCLE/PART_COUNT maintenance policies use these canonical operational
+  /// counters. They are increased only by a completed, verified operation or
+  /// by the explicitly audited maintenance override flow.
+  maintenanceCycleCount Decimal @default(0) @db.Decimal(18, 3)
+  maintenancePartCount  Decimal @default(0) @db.Decimal(18, 3)
   version             Int                   @default(1)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
@@ -340,6 +345,7 @@ model FixtureMaintenancePolicy {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   fixtureDefinition FixtureDefinition @relation(fields:[fixtureDefinitionId], references:[id], onDelete: Restrict)
+  events FixtureMaintenanceEvent[]
   @@index([tenantId, fixtureDefinitionId, isActive])
 }
 
@@ -363,6 +369,7 @@ model FixtureMaintenanceEvent {
   id String @id @default(uuid())
   tenantId String
   physicalFixtureInstanceId String
+  fixtureMaintenancePolicyId String?
   status String @default("PLANNED")
   maintenanceType String
   startedAt DateTime?
@@ -373,13 +380,16 @@ model FixtureMaintenanceEvent {
   counterBefore Decimal? @db.Decimal(18,3)
   counterAfter Decimal? @db.Decimal(18,3)
   idempotencyKey String
+  completionIdempotencyKey String?
   version Int @default(1)
   createdById String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   fixture PhysicalFixtureInstance @relation(fields:[physicalFixtureInstanceId], references:[id], onDelete: Restrict)
+  maintenancePolicy FixtureMaintenancePolicy? @relation(fields:[fixtureMaintenancePolicyId], references:[id], onDelete: Restrict)
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, physicalFixtureInstanceId, createdAt])
+  @@index([tenantId, fixtureMaintenancePolicyId, completedAt])
 }
 
 model FixtureCalibrationRecord {

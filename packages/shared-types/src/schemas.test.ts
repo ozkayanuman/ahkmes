@@ -1,4 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCounterAdjustmentSchema, scheduleFixtureMaintenanceSchema } from "./schemas";
+
+describe("fixture maintenance schemas", () => {
+  it("requires a positive version and a non-empty reason for an audited counter override", () => {
+    expect(fixtureCounterAdjustmentSchema.safeParse({ maintenanceCycleCount: 2, maintenancePartCount: 3, version: 1, reason: "verified counter" }).success).toBe(true);
+    expect(fixtureCounterAdjustmentSchema.safeParse({ maintenanceCycleCount: -1, maintenancePartCount: 0, version: 1, reason: "verified counter" }).success).toBe(false);
+    expect(fixtureCounterAdjustmentSchema.safeParse({ maintenanceCycleCount: 0, maintenancePartCount: 0, version: 1, reason: "" }).success).toBe(false);
+  });
+
+  it("accepts optional policy evidence without allowing an invalid idempotency key", () => {
+    expect(scheduleFixtureMaintenanceSchema.safeParse({ physicalFixtureInstanceId: "123e4567-e89b-12d3-a456-426614174000", fixtureMaintenancePolicyId: "123e4567-e89b-12d3-a456-426614174001", maintenanceType: "PM", idempotencyKey: "fixture-maintenance-1" }).success).toBe(true);
+    expect(scheduleFixtureMaintenanceSchema.safeParse({ physicalFixtureInstanceId: "123e4567-e89b-12d3-a456-426614174000", maintenanceType: "PM", idempotencyKey: "short" }).success).toBe(false);
+  });
+});
 import {
   createCustomerSchema,
   createMaterialSchema,

@@ -1,7 +1,8 @@
 # AHKMES — Doğrulanmış Ürün ve Teknik Yol Haritası
 
-> **Plan durumu:** 2026-07-31 tarihinde kaynak kod, Prisma şeması/migration'lar,
-> Git geçmişi, Graphify ve yerel doğrulamalar karşılaştırılarak güncellendi.
+> **Plan durumu:** 2026-08-03 tarihinde `4fb7840` devralma teslimi üzerinde kaynak
+> kod, Prisma şeması/migration'lar, Graphify sorgusu, Git geçmişi ve seçili gerçek
+> PostgreSQL doğrulamaları tekrar karşılaştırıldı.
 > Bu bölüm normatif, güncel plandır. Aşağıdaki tarihsel plan/günlük korunmuştur;
 > ancak oradaki checkbox ve tarihsel iddialar tek başına güncel durum kanıtı değildir.
 
@@ -37,22 +38,22 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 ## 2. Mevcut sistemin doğrulanmış özeti
 
 - **Mimari:** `pnpm` monorepo içinde modüler NestJS monoliti, React SPA ve ayrı
-  edge connector paketi. `AppModule` yaklaşık 60 iş modülünü bir süreçte
+  edge connector paketi. `AppModule` 69 kaynak modülünü bir süreçte
   birleştirir; servisler Prisma'ya doğrudan erişir. Genel repository/port
   katmanı yoktur.
 - **Uygulama:** Tek tenant için satır bazlı `tenantId` filtreleri kullanan,
   JWT/LDAP/OIDC girişli, REST + Socket.IO uygulamasıdır. Gerçek çoklu tenant
   yönetimi veya PostgreSQL RLS yoktur.
-- **Veri:** Prisma 5 / PostgreSQL 16, 31 migration; MinIO doküman deposu;
+- **Veri:** Prisma 5 / PostgreSQL 16, 52 forward-only migration; MinIO doküman deposu;
   Docker Compose ile PostgreSQL + MinIO + backend + web, opsiyonel connector.
-- **Doğrulama:** `pnpm typecheck`, shared-types (12), connector (15), web (22),
-  backend birim (147) testleri ve `pnpm build` bu incelemede başarılıdır.
-  Backend e2e paketi mevcut üretim/geliştirme veritabanına dokunmamak için bu
-  incelemede çalıştırılmadı.
-- **Graphify:** 31 Temmuz raporu 3.372 düğüm/8.404 kenar ve Prisma, auth,
-  RealtimeGateway, `App.tsx`, ortak şemalar ile work-order ekranını merkez
-  düğümler olarak gösterir. Rapor üstverisi `7cba124` commit'inde kalmıştır;
-  güncel `HEAD` (`df1091e`, Faz O/OIDC) için grafik tek başına kanıt değildir.
+- **Doğrulama:** Bu devralmada shared DTO testleri (18), backend/web typecheck,
+  backend/web production build, Prisma validate ve gerçek PostgreSQL üzerinde
+  MES tooling E2E (9) geçti. Tüm monorepo/e2e paketi bu incelemede yeniden
+  koşturulmadığından geçmiş sayıların tamamı yeniden doğrulanmış sayılmaz.
+- **Graphify:** Mevcut graph üzerinde sorgu, `AppModule`, auth/page guard,
+  product entitlement, connector ve UI route'larını çapraz bağımlılık merkezleri
+  olarak doğruladı. Graph çıktısı mimari keşif aracıdır; kararlar gerçek
+  kaynak/test kanıtına dayanır.
 
 ## 3. Teknoloji yığını
 
@@ -71,7 +72,9 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 | Modül | Gerçek durum | Kanıt / kaynakla doğrulanan kapsam |
 |---|---|---|
 | Platform Core | `PARTIAL` | `apps/backend/src/auth/auth.service.ts`, `common/guards/pages.guard.ts`, `platform-modules/*`, `approvals/*`, `audit.interceptor.ts`, `prisma/schema.prisma`: JWT/RBAC, page permission, entitlement, audit, onay ve hiyerarşi var; tenant sınırı global zorlanmıyor. |
-| MES Core | `PARTIAL` | İş emri, revizyonu sabit rota operasyonları, operasyon bazlı makine atama/WIP, manuel üretim, OEE ve vardiya görünümü. Setup, kalite kapısı ve kapasite modeli eksik. |
+| MES Core | `PARTIAL` | İş emri, immutable rota operasyonları, makine atama/WIP, manuel üretim, OEE ve vardiya görünümü; PUBLISHED NC ve tooling setup start-gate'i vardır. Genel dispatch, operatör yetkinliği ve kalite kapısı eksik. |
+| PLM / CNC release | `PARTIAL` | `NcProgram` checksum, revizyon, Draft→Review→Approved→Published→Superseded/Archived, effectivity ve yayın kontrolü vardır. Genel controlled-document/ECO lifecycle ayrı eksiktir. |
+| CNC tooling / fixture | `PARTIAL` | Tool/component/assembly/physical instance, makine uyumluluğu, requirement, rezervasyon, immutable setup snapshot ve HMI start-gate doğrulandı. Fixture bakım/kalibrasyon politikası uygulama dilimi sürüyor; presetter, offset ve DNC yok. |
 | Machine Connect / AGW | `PARTIAL` | Makine anahtarı, telemetri, tag CRUD/değerleri, simulator, OPC-UA ve deneysel M80. |
 | Quality | `PARTIAL` | NCR, inspection, CAPA, SPC, alarm, kalibrasyon. Kontrollü doküman/deviation/e-imza eksik. |
 | Inventory / Warehouse | `PARTIAL` | Material, depo/bin, lot, serial, transfer ve sayım; immutable hareket defteri ile toplam/bakiye projeksiyonları transaction içinde tutulur. Heat/CoC/kabul ve zorunlu lot politikası vardır; karantina rafı/ölçümle bağ henüz yoktur. |
@@ -114,15 +117,17 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
   As-inspected ölçüm bağı ve fiziksel karantina rafı henüz yoktur.
 - `PARTIAL` — Aktif Recipe, iş emrine revizyonu ve adım parametreleriyle
   immutable operasyon snapshot'ı olarak kopyalanır. Operasyon makine ataması,
-  sıralı başlatma ve koşulardan türetilen WIP vardır; takım/program, setup,
-  yetkin operatör, kalite kapısı ve alternatif kaynak yoktur.
+  sıralı başlatma ve koşulardan türetilen WIP vardır; CNC operasyonunda
+  PUBLISHED NC ve tooling setup doğrulaması zorlanır. Yetkin operatör, genel
+  kalite kapısı ve alternatif kaynak yoktur.
 - `VERIFIED_DONE` — `InventoryMovement` immutable hareket defteri stok
   değişiminin kaynağıdır. `Material.stockQty`, `PartStock.qty` ve
   `StockBalance` transaction içi projeksiyonlardır; satın alma, tüketim/madde
   iadesi, mamul, sevkiyat, transfer ve sayım bu sınırdan geçer. Eski toplamlar
   kaybolmadan `UNASSIGNED` başlangıç bakiyesine taşınır.
-- `PARTIAL` — Webhook teslimi imzalı ve SSRF'e karşı korunmuş olsa da
-  fire-and-forget'tir; durable outbox, retry, teslim geçmişi ve dead-letter yoktur.
+- `PARTIAL` — Webhook teslimi imzalı ve SSRF'e karşı korunmuştur; subscription
+  delivery event'i, retry, DLQ ve replay vardır. Ancak tüm domain mutasyonları
+  için transaction-içi outbox ve harici consumer inbox dedup yoktur.
 - `PARTIAL` — OEE, enerji, bakım ve çizelgeleme gerçek iş verisini kullanır;
   ancak otomatik enerji, güvenilir duruş sınıflaması ve sonlu kapasite yoktur.
 
@@ -143,17 +148,17 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 - Çok tenant şirket/fabrika izolasyonu, tenant provisioning, RLS ve tenant
   yönetim yaşam döngüsü.
-- İş merkezi kapasitesi, takım/fixture/program bağlama, setup, operatör
-  yetkinliği, kalite kapısı ve dispatching.
+- İş merkezi kapasitesi, operatör yetkinliği, genel kalite kapısı ve dispatching.
 - Çok seviyeli/alt montaj BOM, alternate material/supplier, lead-time ve
   capacity-aware MRP II.
-- Transactional outbox/inbox, kalıcı queue/worker, dead-letter/replay ve
-  entegrasyon idempotency sözleşmeleri.
+- Tüm domain komutlarına transactionally bağlanan outbox/inbox ve entegrasyon
+  idempotency sözleşmeleri.
 - SAP/Logo/Netsis/Dynamics/Oracle adapterleri, canonical event modeli ve veri
   sahipliği kuralları.
 - AI Copilot command gateway, taslak/onay, tool izinleri, model sağlayıcı
   seçimi ve lokal model dağıtımı.
-- Feature flag, lisans, modül etkinleştirme, müşteri/kurulum paketleme.
+- Edition/limit lisanslama, müşteri/kurulum paketleme ve entitlement dışındaki
+  feature-flag kapsamı.
 - MSSQL ürünü, Oracle uygulama veritabanı desteği, Kubernetes/air-gap bundle,
   gözlemlenebilirlik ve felaket kurtarma orkestrasyonu.
 
@@ -337,7 +342,8 @@ belirlememeli; on-premise/offline grace, audit ve destek prosedürü iş kararı
 | CAT-002 | Canonical child entitlement migration | Platform | `VERIFIED_DONE` | P0 | Canonical child enum'u, legacy-to-child compatibility map'i ve PostgreSQL backfill migration'ı eklendi. Page guard/SPA her sayfayı child entitlement ile zorlar; Platform Core kalıcı tenant entitlement'ı değildir. | Temiz PostgreSQL migration+seed, canonical catalog/unit/guard testleri ve iki-tenant platform entitlement E2E geçer. | XL | 0 |
 | PLM-001 | Kontrollü teknik doküman ve NC revizyon yayını | PLM/CNC | `VERIFIED_DONE` | P1 | `NcProgram` SHA-256, revision-history, Draft→Review→Approved→Published→Superseded/Archived, effectivity ve tek yayınlı revizyon kontrolünü taşır. RecipeStep/WorkOrderOperation yalnızca yayınlı snapshot bağlar; HMI başlangıçta tekrar doğrular. | Prisma migration/backfill, canonical `PLM_NC_PROGRAM` entitlement, RBAC/SoD, AHK-006 focused reauth/e-imza, transaction audit ve isolated PostgreSQL E2E geçer. Genel controlled-document lifecycle PLM_CHANGE_CONTROL kapsamıdır. | Unit + integration + fresh PostgreSQL E2E | XL | 1 |
 | MES-TOOL-001 | CNC tooling ve fixture master data | MES/CNC | `VERIFIED_DONE` | P1 | **Canonical iş kodu:** `MES-TOOL-001`; `AHK-019` alias/dependency etiketidir, ayrı backlog değildir. Forward-only tooling migration, tenant-scoped DB reservation constraints, immutable as-built snapshot, PUBLISHED NC/start gate, idempotent life consumption, persistent action grants and HMI/setup/requirement UI tamamlandı. | Presetter/offset/DNC, predictive life ve fixture maintenance/calibration validity kapsam dışı bağımlılıklarda kalır. | Shared DTO unit + fresh PostgreSQL E2E (8/8), backend/web typecheck ve production build, Prisma validate, diff check | XL | 0 |
-| MES-FIXTURE-MAINT-001 | Fixture bakım ve kalibrasyon uygunluğu | MES/EAM/QMS | `IN_PROGRESS` | P2 | Forward-only policy/event/record modeli, tenant-scoped idempotency anahtarları, action grants, bakım/kalibrasyon API’ları ve setup/start policy değerlendirmesi eklendi. Policy olmayan fixture mevcut MES-TOOL-001 davranışını korur; BLOCKING policy gerçek bakım/kalibrasyon kanıtı olmadan geçmez. | Gerçek PostgreSQL negatif/concurrency matrisi, event/kalibrasyon yönetim UI aksiyonları ve tam regresyon kabulü tamamlanmadan doğrulanmış sayılmaz. | Fixture’ı bakım/kalibrasyon gerektiren tenant policy altında ancak geçerli plan/sertifika ile doğrulayan PostgreSQL E2E. MES-TOOL-001 için blocker değildir: mevcut güvenli status kapısı kullanılmayan fixture’ı reddeder, fakat ileri bakım doğrulamasını temsil etmez. | L | 3 |
+| MES-FIXTURE-MAINT-001 | Fixture bakım ve kalibrasyon uygunluğu | MES/EAM/QMS | `IN_PROGRESS` | P2 | Forward-only policy/event/record modeli, tenant-scoped idempotency anahtarları, action grants, bakım/kalibrasyon API’ları ve setup/start policy değerlendirmesi eklendi. CYCLE/PART_COUNT sayaçları yalnız doğrulanmış operasyon tamamlanmasında veya gerekçeli `FIXTURE_MAINT_OVERRIDE` ile değişir; bakım kanıtı policy revizyonuna bağlanır. Tooling UI policy seçimi, bakım/kalibrasyon geçmişi, evaluation, sertifika Document seçimi ve audit’li sayaç düzeltmesini sunar. Policy olmayan fixture mevcut MES-TOOL-001 davranışını korur; BLOCKING policy gerçek bakım/kalibrasyon kanıtı olmadan geçmez. | Kapanış kanıtları `RH-MES-FIXTURE-MAINT-001` release-hardening backlog’unda tutulur; bu checkpoint capability’yi `VERIFIED_DONE` yapmaz. | Seçili gerçek PostgreSQL E2E (11/11), backend/web typecheck ve production build, Prisma validate ve diff check geçer. MES-TOOL-001 için blocker değildir: mevcut güvenli status kapısı kullanılmayan fixture’ı reddeder, fakat ileri bakım doğrulamasını temsil etmez. | L | 3 |
+| RH-MES-FIXTURE-MAINT-001 | Fixture bakım/kalibrasyon release hardening | MES/EAM/QMS | `NOT_STARTED` | P2 | `MES-FIXTURE-MAINT-001` çalışan checkpoint’inin kapanış kanıtıdır; ayrı entitlement veya ürün modülü değildir. | 22 maddelik gerçek PostgreSQL negatif/concurrency matrisi; ham Prisma constraint hata sızıntısı denetimi; policy/override stale-version ve SoD kapsamı; belge sertifikası UI→API→tenant-boundary E2E; tam tooling regresyonu ve güvenlik/audit kapanışı. | Policy olmayan fixture, BLOCKING/WARNING/INFORMATIONAL politika, geçersiz/FAIL kalibrasyon, bakım vadesi, cross-tenant fixture/policy/event/record/Document, bakım–rezervasyon yarışı, duplicate event, revalidation ve immutable snapshot senaryolarının tamamı gerçek PostgreSQL’de kanıtlanır. | L | Release hardening |
 | AHK-015 | Air-gap/DR/observability paketi | Deployment | `PARTIAL` | P2 | PostgreSQL backup scripti var; offline bundle/SBOM, MinIO restore drill, metrics/logging/alerting eksik. İşletim sınırı `docs/airgap-operasyon.md` içinde | Offline bundle/SBOM, MinIO+Postgres restore drill, metrics/logging/alerting | Drill | L | 8 |
 | AHK-016 | MSSQL portability assessment | Data | `PARTIAL` | P3 | PostgreSQL-only kontratlar kaynakta envanterlendi; SQL Server provider/POC/CI yok | Karar kaydı, uyum matrisi ve POC CI; aksi halde resmî destek verilmez. Kaynak kanıtı ve POC kabul kriterleri `docs/mssql-portability-assessment.md` içindedir | Matrix/POC | L | 8 |
 
@@ -352,6 +358,22 @@ belirlememeli; on-premise/offline grace, audit ve destek prosedürü iş kararı
   dışındadır ve AHK-017'de izlenmeye devam eder.
 
 ### Önerilen ilk geliştirme işi
+
+**MES-OPERATOR-HMI-001 — Operatör dispatch ve yönlendirilmiş operasyon terminali**
+`NOT_STARTED` durumundadır. Mevcut `MES_EXECUTION`, PLM yayınlı NC sınırı ve
+MES-TOOL-001 setup checklist’ini tek operatör akışında birleştiren ayrı bir HMI
+route’u sağlar: kullanıcının atanmış/açık operasyonlarını göstermeli, doğru
+makine/operasyon seçimini yapmalı, yayınlı NC ve tooling/fixture doğrulama
+durumunu görünür kılmalı ve mevcut backend start/complete komutlarını
+değiştirmeden kullanmalıdır. İlk dilim; domain/migration gerekirse, gerçek
+backend dispatch API, tenant+temel permission, temel HMI ekranı, birkaç gerçek
+PostgreSQL E2E ve typecheck/build ile sınırlıdır. Barkod/offline, elektronik
+talimat editörü, Andon ve vardiya teslimi sonraki backlog’dur. Fixture bakım
+hardening’i `RH-MES-FIXTURE-MAINT-001` altında ertelenir; bu yeni dikey dilimin
+blocker’ı değildir.
+
+> Aşağıdaki AHK-005/AHK-002 notları tarihsel tamamlanma kanıtıdır; aktif ilk
+> geliştirme önerisi değildir.
 
 **AHK-005 — Traceability foundation** `VERIFIED_DONE` durumundadır.
 Material ve Part için lot zorunluluğu tanımlanabilir; material lotunda heat,

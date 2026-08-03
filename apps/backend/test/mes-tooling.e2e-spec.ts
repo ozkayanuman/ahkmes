@@ -77,6 +77,8 @@ describe("MES-TOOL-001 verified CNC setup (PostgreSQL e2e)", () => {
     await as(token, api().post(`/work-orders/${workOrderId}/operations/${operationId}/complete`).send({})).expect(201);
     const tool = await prisma.physicalToolInstance.findUniqueOrThrow({ where: { id: toolInstanceId } });
     expect(Number(tool.consumedLife)).toBe(1); expect(tool.status).toBe("AVAILABLE");
+    const fixture = await prisma.physicalFixtureInstance.findUniqueOrThrow({ where: { id: fixtureInstanceId } });
+    expect(Number(fixture.maintenanceCycleCount)).toBe(1); expect(Number(fixture.maintenancePartCount)).toBe(1);
     expect(await prisma.toolLifeEvent.count({ where: { physicalToolInstanceId: toolInstanceId, eventType: "OPERATION_COMPLETE" } })).toBe(1);
     await as(token, api().post(`/tooling/physical-tools/${toolInstanceId}/life-adjustments`).send({ consumedLife: 2, version: tool.version - 1, reason: "stale" })).expect(409);
     await as(token, api().post(`/tooling/physical-tools/${toolInstanceId}/life-adjustments`).send({ consumedLife: 2, version: tool.version, reason: "verified correction" })).expect(201);
@@ -233,12 +235,12 @@ describe("MES-TOOL-001 verified CNC setup (PostgreSQL e2e)", () => {
   it("evaluates fixture maintenance and calibration policies with real event idempotency", async () => {
     const definition = await as(token, api().post("/tooling/fixture-definitions").send({ code: `MAINT-${STAMP}`, name: "Maintained vise", fixtureType: "VISE" })).expect(201);
     const physical = await as(token, api().post("/tooling/physical-fixtures").send({ fixtureDefinitionId: definition.body.id, serialNo: `MAINT-F-${STAMP}` })).expect(201);
-    await as(token, api().post("/tooling/fixture-maintenance/maintenance-policies").send({ fixtureDefinitionId: definition.body.id, policyType: "TIME", interval: 30, warningThreshold: 7, enforcement: "BLOCKING" })).expect(201);
+    const maintenancePolicy = await as(token, api().post("/tooling/fixture-maintenance/maintenance-policies").send({ fixtureDefinitionId: definition.body.id, policyType: "TIME", interval: 30, warningThreshold: 7, enforcement: "BLOCKING" })).expect(201);
     await as(token, api().post("/tooling/fixture-maintenance/calibration-policies").send({ fixtureDefinitionId: definition.body.id, intervalDays: 365, warningDays: 30, enforcement: "BLOCKING", certificateRequired: false })).expect(201);
     const before = await as(token, api().get(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/evaluation`)).expect(200);
     expect(before.body.blockers.join(" ")).toMatch(/Bakım|kalibrasyon/);
-    const scheduled = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, maintenanceType: "PM", idempotencyKey: `fixture-maint-${STAMP}` })).expect(201);
-    const scheduledAgain = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, maintenanceType: "PM", idempotencyKey: `fixture-maint-${STAMP}` })).expect(201);
+    const scheduled = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, fixtureMaintenancePolicyId: maintenancePolicy.body.id, maintenanceType: "PM", idempotencyKey: `fixture-maint-${STAMP}` })).expect(201);
+    const scheduledAgain = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, fixtureMaintenancePolicyId: maintenancePolicy.body.id, maintenanceType: "PM", idempotencyKey: `fixture-maint-${STAMP}` })).expect(201);
     expect(scheduledAgain.body.id).toBe(scheduled.body.id);
     const started = await as(token, api().post(`/tooling/fixture-maintenance/events/${scheduled.body.id}/start`).send({ version: scheduled.body.version })).expect(201);
     await as(token, api().post(`/tooling/fixture-maintenance/events/${scheduled.body.id}/complete`).send({ result: "PASS", version: started.body.version, idempotencyKey: `fixture-maint-complete-${STAMP}` })).expect(201);
@@ -260,5 +262,53 @@ describe("MES-TOOL-001 verified CNC setup (PostgreSQL e2e)", () => {
     await assignAndVerify(policyOperation.operation.id, policyRequirements, freshToolInstance.id, physical.body.id);
     await as(token, api().post("/tooling/fixture-maintenance/calibration-records").send({ physicalFixtureInstanceId: physical.body.id, calibratedAt: new Date().toISOString(), validUntil: new Date(Date.now() + 86400000).toISOString(), result: "FAIL", idempotencyKey: `fixture-cal-fail-${STAMP}` })).expect(201);
     await as(token, api().post(`/work-orders/${policyOperation.wo.id}/runs`).send({ operationId: policyOperation.operation.id, machineId })).expect(409);
+  });
+
+  it("uses policy-scoped CYCLE evidence, audited counter overrides and idempotent maintenance completion", async () => {
+    const definition = await as(token, api().post("/tooling/fixture-definitions").send({ code: `CYCLE-${STAMP}`, name: "Cycle maintained fixture", fixtureType: "VISE" })).expect(201);
+    const physical = await as(token, api().post("/tooling/physical-fixtures").send({ fixtureDefinitionId: definition.body.id, serialNo: `CYCLE-F-${STAMP}` })).expect(201);
+    const policy = await as(token, api().post("/tooling/fixture-maintenance/maintenance-policies").send({ fixtureDefinitionId: definition.body.id, policyType: "CYCLE", interval: 2, warningThreshold: 1, enforcement: "BLOCKING" })).expect(201);
+    const missing = await as(token, api().get(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/evaluation`)).expect(200);
+    expect(missing.body.maintenance.state).toBe("UNKNOWN"); expect(missing.body.blockers.length).toBeGreaterThan(0);
+
+    const event = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, fixtureMaintenancePolicyId: policy.body.id, maintenanceType: "CYCLE_BASELINE", idempotencyKey: `cycle-schedule-${STAMP}` })).expect(201);
+    const started = await as(token, api().post(`/tooling/fixture-maintenance/events/${event.body.id}/start`).send({ version: event.body.version })).expect(201);
+    const completion = { result: "PASS", version: started.body.version, idempotencyKey: `cycle-complete-${STAMP}` };
+    const completed = await as(token, api().post(`/tooling/fixture-maintenance/events/${event.body.id}/complete`).send(completion)).expect(201);
+    const completedAgain = await as(token, api().post(`/tooling/fixture-maintenance/events/${event.body.id}/complete`).send(completion)).expect(201);
+    expect(completedAgain.body.id).toBe(completed.body.id);
+    const current = await as(token, api().get(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/evaluation`)).expect(200);
+    expect(current.body.maintenance.state).toBe("CURRENT");
+
+    await as(token, api().post(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/counter-adjustments`).send({ maintenanceCycleCount: 1, maintenancePartCount: 0, version: physical.body.version, reason: "stale" })).expect(409);
+    const fresh = await prisma.physicalFixtureInstance.findUniqueOrThrow({ where: { id: physical.body.id } });
+    await as(token, api().post(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/counter-adjustments`).send({ maintenanceCycleCount: 1, maintenancePartCount: 0, version: fresh.version, reason: "verified cycle reconciliation" })).expect(201);
+    const warning = await as(token, api().get(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/evaluation`)).expect(200);
+    expect(warning.body.maintenance.state).toBe("WARNING"); expect(warning.body.blockers).toEqual([]);
+    const afterWarning = await prisma.physicalFixtureInstance.findUniqueOrThrow({ where: { id: physical.body.id } });
+    await as(token, api().post(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/counter-adjustments`).send({ maintenanceCycleCount: 2, maintenancePartCount: 0, version: afterWarning.version, reason: "verified overdue counter" })).expect(201);
+    const overdue = await as(token, api().get(`/tooling/fixture-maintenance/fixtures/${physical.body.id}/evaluation`)).expect(200);
+    expect(overdue.body.maintenance.state).toBe("OVERDUE"); expect(overdue.body.blockers.length).toBeGreaterThan(0);
+    const audit = await prisma.auditLog.findFirst({ where: { tenantId, entity: "PhysicalFixtureInstance", entityId: physical.body.id, action: "UPDATE" }, orderBy: { createdAt: "desc" } });
+    expect((audit?.after as any)?.reason).toBe("verified overdue counter");
+
+    const policyAudit = await prisma.auditLog.findFirst({ where: { tenantId, entity: "FixtureMaintenancePolicy", entityId: policy.body.id, action: "CREATE" } });
+    expect(policyAudit?.after).toBeTruthy();
+    await as(token, api().patch(`/tooling/fixture-maintenance/maintenance-policies/${policy.body.id}`).send({ enforcement: "WARNING", version: policy.body.revision })).expect(200);
+    await as(token, api().patch(`/tooling/fixture-maintenance/maintenance-policies/${policy.body.id}`).send({ enforcement: "BLOCKING", version: policy.body.revision })).expect(409);
+  });
+
+  it("allows only one genuinely concurrent maintenance start to reserve a physical fixture", async () => {
+    const definition = await as(token, api().post("/tooling/fixture-definitions").send({ code: `RACE-${STAMP}`, name: "Maintenance race fixture", fixtureType: "VISE" })).expect(201);
+    const physical = await as(token, api().post("/tooling/physical-fixtures").send({ fixtureDefinitionId: definition.body.id, serialNo: `RACE-F-${STAMP}` })).expect(201);
+    const a = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, maintenanceType: "PM-A", idempotencyKey: `race-a-${STAMP}` })).expect(201);
+    const b = await as(token, api().post("/tooling/fixture-maintenance/events").send({ physicalFixtureInstanceId: physical.body.id, maintenanceType: "PM-B", idempotencyKey: `race-b-${STAMP}` })).expect(201);
+    const responses = await Promise.all([
+      as(token, api().post(`/tooling/fixture-maintenance/events/${a.body.id}/start`).send({ version: a.body.version })),
+      as(token, api().post(`/tooling/fixture-maintenance/events/${b.body.id}/start`).send({ version: b.body.version })),
+    ]);
+    expect(responses.filter((response) => response.status === 201)).toHaveLength(1);
+    expect(responses.filter((response) => response.status === 409)).toHaveLength(1);
+    expect(JSON.stringify(responses.find((response) => response.status === 409)?.body)).not.toMatch(/P2002|Prisma/i);
   });
 });
