@@ -12,11 +12,15 @@ export class MachineKeyGuard implements CanActivate {
     const key: string | undefined = req.headers["x-machine-key"];
     if (!machineId || !key) throw new UnauthorizedException("Makine anahtarı gerekli");
 
+    // Makine henüz kimliklendirilmediği için burada tenant context yok — tenant-scope
+    // extension'ı bu sorguyu (JWT login akışıyla aynı gerekçeyle) dokunmadan geçirir.
     const machine = await this.prisma.machine.findUnique({ where: { id: machineId } });
     if (!machine?.connectorKeyHash || !(await bcrypt.compare(key, machine.connectorKeyHash))) {
       throw new UnauthorizedException("Geçersiz makine anahtarı");
     }
 
+    // TenantContextInterceptor (guard'lardan SONRA çalışır) req.machine.tenantId'yi okuyup
+    // ALS context'i kuracak — bkz. common/interceptors/tenant-context.interceptor.ts.
     req.machine = machine;
     return true;
   }

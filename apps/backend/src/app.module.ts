@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { TenantContextInterceptor } from "./common/interceptors/tenant-context.interceptor";
 import { ConfigModule } from "@nestjs/config";
 import { APP_INTERCEPTOR } from "@nestjs/core";
 import { HealthController } from "./health/health.controller";
@@ -138,6 +139,11 @@ import { HmiModule } from "./hmi/hmi.module";
     HmiModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
+  providers: [
+    // Sıra önemli: TenantContextInterceptor EN DIŞTA olmalı ki AuditInterceptor'ın
+    // kendi Prisma yazımı da (auditLog.create) tenant context'i görsün.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+  ],
 })
 export class AppModule {}
