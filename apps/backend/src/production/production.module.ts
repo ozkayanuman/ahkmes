@@ -9,5 +9,6 @@ import { ToolingModule } from "../tooling/tooling.module";
   imports: [NonConformanceModule, PartsModule, ToolingModule],
   controllers: [ProductionController],
   providers: [ProductionService],
+  exports: [ProductionService],
 })
 export class ProductionModule {}

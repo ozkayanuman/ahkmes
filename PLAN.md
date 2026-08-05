@@ -344,6 +344,8 @@ belirlememeli; on-premise/offline grace, audit ve destek prosedürü iş kararı
 | MES-TOOL-001 | CNC tooling ve fixture master data | MES/CNC | `VERIFIED_DONE` | P1 | **Canonical iş kodu:** `MES-TOOL-001`; `AHK-019` alias/dependency etiketidir, ayrı backlog değildir. Forward-only tooling migration, tenant-scoped DB reservation constraints, immutable as-built snapshot, PUBLISHED NC/start gate, idempotent life consumption, persistent action grants and HMI/setup/requirement UI tamamlandı. | Presetter/offset/DNC, predictive life ve fixture maintenance/calibration validity kapsam dışı bağımlılıklarda kalır. | Shared DTO unit + fresh PostgreSQL E2E (8/8), backend/web typecheck ve production build, Prisma validate, diff check | XL | 0 |
 | MES-FIXTURE-MAINT-001 | Fixture bakım ve kalibrasyon uygunluğu | MES/EAM/QMS | `IN_PROGRESS` | P2 | Forward-only policy/event/record modeli, tenant-scoped idempotency anahtarları, action grants, bakım/kalibrasyon API’ları ve setup/start policy değerlendirmesi eklendi. CYCLE/PART_COUNT sayaçları yalnız doğrulanmış operasyon tamamlanmasında veya gerekçeli `FIXTURE_MAINT_OVERRIDE` ile değişir; bakım kanıtı policy revizyonuna bağlanır. Tooling UI policy seçimi, bakım/kalibrasyon geçmişi, evaluation, sertifika Document seçimi ve audit’li sayaç düzeltmesini sunar. Policy olmayan fixture mevcut MES-TOOL-001 davranışını korur; BLOCKING policy gerçek bakım/kalibrasyon kanıtı olmadan geçmez. | Kapanış kanıtları `RH-MES-FIXTURE-MAINT-001` release-hardening backlog’unda tutulur; bu checkpoint capability’yi `VERIFIED_DONE` yapmaz. | Seçili gerçek PostgreSQL E2E (11/11), backend/web typecheck ve production build, Prisma validate ve diff check geçer. MES-TOOL-001 için blocker değildir: mevcut güvenli status kapısı kullanılmayan fixture’ı reddeder, fakat ileri bakım doğrulamasını temsil etmez. | L | 3 |
 | RH-MES-FIXTURE-MAINT-001 | Fixture bakım/kalibrasyon release hardening | MES/EAM/QMS | `NOT_STARTED` | P2 | `MES-FIXTURE-MAINT-001` çalışan checkpoint’inin kapanış kanıtıdır; ayrı entitlement veya ürün modülü değildir. | 22 maddelik gerçek PostgreSQL negatif/concurrency matrisi; ham Prisma constraint hata sızıntısı denetimi; policy/override stale-version ve SoD kapsamı; belge sertifikası UI→API→tenant-boundary E2E; tam tooling regresyonu ve güvenlik/audit kapanışı. | Policy olmayan fixture, BLOCKING/WARNING/INFORMATIONAL politika, geçersiz/FAIL kalibrasyon, bakım vadesi, cross-tenant fixture/policy/event/record/Document, bakım–rezervasyon yarışı, duplicate event, revalidation ve immutable snapshot senaryolarının tamamı gerçek PostgreSQL’de kanıtlanır. | L | Release hardening |
+| MES-OPERATOR-HMI-001 | Operatör operasyon terminali | MES | `VERIFIED_DONE` | P1 | `/hmi/operations` tenant kapsamlı operasyon kuyruğu, canonical NC/setup checklist görünümü ve mevcut production/work-order start-complete komutlarını tek operatör akışında birleştirir. `HMI_READ`, `HMI_START`, `HMI_COMPLETE` persistent action grant’leri `MES_EXECUTION` sayfa entitlement’ından ayrıdır. | Bu ilk dilim yalnız yönlendirilmiş online operasyon yürütmeyi kapsar; backend gate’leri HMI’dan bağımsız canonical otorite olmaya devam eder. | Gerçek PostgreSQL HMI E2E (7/7): tenant liste/detail sınırı, doğrulanmış setup ile start+complete, blocker ve action grant reddi, machine/status filtreleri, aktif koşu olmadan tamamlama reddi, HMI_START-var-ama-HMI_READ-yok reddi, cross-tenant start/complete reddi; backend/web typecheck ve production build geçti | M | 1 |
+| MES-OPERATOR-HMI-002 | Operatör terminali genişletme backlog’u | MES | `NOT_STARTED` | P2 | `MES-OPERATOR-HMI-001` | Operatör atama/dispatch, barkod/QR, offline-first kuyruk ve senkronizasyon, Andon, vardiya devri, elektronik iş talimatı editörü, beceri matrisi, OEE/telemetri ve gelişmiş dispatch algoritması ilk dilim kapsamı dışındadır. | Her alt kabiliyet için tenant/action grant, canonical command kullanımı ve gerçek PostgreSQL E2E kabul kriteri ayrı tanımlanır. | L | 2-4 |
 | AHK-015 | Air-gap/DR/observability paketi | Deployment | `PARTIAL` | P2 | PostgreSQL backup scripti var; offline bundle/SBOM, MinIO restore drill, metrics/logging/alerting eksik. İşletim sınırı `docs/airgap-operasyon.md` içinde | Offline bundle/SBOM, MinIO+Postgres restore drill, metrics/logging/alerting | Drill | L | 8 |
 | AHK-016 | MSSQL portability assessment | Data | `PARTIAL` | P3 | PostgreSQL-only kontratlar kaynakta envanterlendi; SQL Server provider/POC/CI yok | Karar kaydı, uyum matrisi ve POC CI; aksi halde resmî destek verilmez. Kaynak kanıtı ve POC kabul kriterleri `docs/mssql-portability-assessment.md` içindedir | Matrix/POC | L | 8 |
 
@@ -360,17 +362,23 @@ belirlememeli; on-premise/offline grace, audit ve destek prosedürü iş kararı
 ### Önerilen ilk geliştirme işi
 
 **MES-OPERATOR-HMI-001 — Operatör dispatch ve yönlendirilmiş operasyon terminali**
-`NOT_STARTED` durumundadır. Mevcut `MES_EXECUTION`, PLM yayınlı NC sınırı ve
+`VERIFIED_DONE` durumundadır. İlk çalışan dikey dilim `/hmi/operations` route’u,
+tenant kapsamlı operasyon kuyruğu/detayı, canonical NC ve tooling/fixture checklist’i,
+ayrı persistent action grant’leri ve mevcut production/work-order start-complete
+komutlarını getirir. Mevcut `MES_EXECUTION`, PLM yayınlı NC sınırı ve
 MES-TOOL-001 setup checklist’ini tek operatör akışında birleştiren ayrı bir HMI
-route’u sağlar: kullanıcının atanmış/açık operasyonlarını göstermeli, doğru
-makine/operasyon seçimini yapmalı, yayınlı NC ve tooling/fixture doğrulama
-durumunu görünür kılmalı ve mevcut backend start/complete komutlarını
-değiştirmeden kullanmalıdır. İlk dilim; domain/migration gerekirse, gerçek
-backend dispatch API, tenant+temel permission, temel HMI ekranı, birkaç gerçek
-PostgreSQL E2E ve typecheck/build ile sınırlıdır. Barkod/offline, elektronik
-talimat editörü, Andon ve vardiya teslimi sonraki backlog’dur. Fixture bakım
-hardening’i `RH-MES-FIXTURE-MAINT-001` altında ertelenir; bu yeni dikey dilimin
-blocker’ı değildir.
+route’u sağlar: kullanıcının atanmış/açık operasyonlarını gösterir, doğru
+makine/operasyon seçimini yapar, yayınlı NC ve tooling/fixture doğrulama
+durumunu görünür kılar ve mevcut backend start/complete komutlarını
+değiştirmeden kullanır. İlk dilim; tenant+action-grant tabanlı permission, HMI
+ekranı, 7 gerçek PostgreSQL E2E senaryosu (tenant sınırı, canonical start/
+complete, blocking setup+action grant reddi, machine/status filtresi, aktif
+koşu olmadan tamamlama reddi, eksik HMI_READ reddi, cross-tenant mutation
+reddi) ve backend/web typecheck+production build ile sınırlıdır. Barkod/
+offline, elektronik talimat editörü, Andon ve vardiya teslimi
+`MES-OPERATOR-HMI-002` backlog’undadır. Fixture bakım hardening’i
+`RH-MES-FIXTURE-MAINT-001` altında ayrı izlenir; bu dikey dilimin blocker’ı
+değildir.
 
 > Aşağıdaki AHK-005/AHK-002 notları tarihsel tamamlanma kanıtıdır; aktif ilk
 > geliştirme önerisi değildir.

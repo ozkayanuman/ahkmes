@@ -202,6 +202,7 @@ export const PAGE_KEYS = [
   "reports",
   "copilot",
   "tooling",
+  "hmi-operations",
 ] as const;
 export const PageKeySchema = z.enum(PAGE_KEYS);
 export type PageKey = z.infer<typeof PageKeySchema>;
@@ -218,7 +219,7 @@ export const PAGE_PRODUCT_MODULE: Record<PageKey, ProductModule | "PLATFORM_CORE
   projects: "ERP_PROJECT_SERVICE", labor: "MES_EXECUTION",
   users: "PLATFORM_CORE", "audit-log": "PLATFORM_CORE", "platform-modules": "PLATFORM_CORE",
   materials: "ERP_MASTER_DATA", parts: "ERP_MASTER_DATA", suppliers: "ERP_MASTER_DATA", hierarchy: "PLATFORM_CORE",
-  "work-orders": "MES_EXECUTION", production: "MES_EXECUTION", recipes: "PLM_PRODUCT_STRUCTURE", genealogy: "MES_GENEALOGY", "shift-report": "MES_EXECUTION",
+  "work-orders": "MES_EXECUTION", production: "MES_EXECUTION", "hmi-operations": "MES_EXECUTION", recipes: "PLM_PRODUCT_STRUCTURE", genealogy: "MES_GENEALOGY", "shift-report": "MES_EXECUTION",
   warehouses: "WMS_INVENTORY_LEDGER", lots: "WMS_TRACEABILITY", "serial-numbers": "WMS_TRACEABILITY", "transfer-orders": "WMS_INVENTORY_LEDGER", "cycle-counts": "WMS_INVENTORY_LEDGER",
   mrp: "APS_MRP", scheduling: "APS_SCHEDULING",
   inspections: "QMS_INSPECTION", capa: "QMS_NCR_CAPA", calibrations: "QMS_SPC_CALIBRATION", spc: "QMS_SPC_CALIBRATION", alarms: "QMS_INSPECTION", "non-conformances": "QMS_NCR_CAPA",

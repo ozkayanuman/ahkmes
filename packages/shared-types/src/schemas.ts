@@ -762,6 +762,19 @@ export const updateProductionRunSchema = z.object({
 });
 export type StartProductionRunDto = z.infer<typeof startProductionRunSchema>;
 
+// ---- Operator HMI (MES-OPERATOR-HMI-001) ----
+export const hmiOperationQueueQuerySchema = z.object({
+  machineId: idSchema.optional(),
+  status: WorkOrderOperationStatusSchema.optional(),
+});
+export const hmiCompleteOperationSchema = z.object({
+  goodCount: z.number().int().min(0),
+  scrapCount: z.number().int().min(0).default(0),
+  notes: z.string().max(2000).optional(),
+});
+export type HmiOperationQueueQueryDto = z.infer<typeof hmiOperationQueueQuerySchema>;
+export type HmiCompleteOperationDto = z.infer<typeof hmiCompleteOperationSchema>;
+
 // ---- FinishedGoodsEntry (Faz 0c) ----
 export const createFinishedGoodsSchema = z.object({
   workOrderId: idSchema,

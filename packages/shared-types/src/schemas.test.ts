@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixtureCounterAdjustmentSchema, scheduleFixtureMaintenanceSchema } from "./schemas";
+import { fixtureCounterAdjustmentSchema, hmiCompleteOperationSchema, hmiOperationQueueQuerySchema, scheduleFixtureMaintenanceSchema } from "./schemas";
 
 describe("fixture maintenance schemas", () => {
   it("requires a positive version and a non-empty reason for an audited counter override", () => {
@@ -128,5 +128,20 @@ describe("MES-TOOL-001 tooling DTO guards", () => {
     expect(createToolCompatibilitySchema.safeParse({ machineId: id }).success).toBe(false);
     expect(setupAssignmentSchema.safeParse({ toolAssignments: [{ requirementId: id, physicalToolInstanceId: id }, { requirementId: "00000000-0000-4000-8000-000000000002", physicalToolInstanceId: id }] }).success).toBe(false);
     expect(manualToolLifeAdjustmentSchema.safeParse({ consumedLife: 1, version: 1, reason: "" }).success).toBe(false);
+  });
+});
+
+describe("MES-OPERATOR-HMI-001 DTO guards", () => {
+  it("accepts only valid operation queue filters", () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    expect(hmiOperationQueueQuerySchema.safeParse({ machineId: id, status: "PENDING" }).success).toBe(true);
+    expect(hmiOperationQueueQuerySchema.safeParse({ status: "UNKNOWN" }).success).toBe(false);
+    expect(hmiOperationQueueQuerySchema.safeParse({ machineId: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("requires non-negative HMI completion quantities", () => {
+    expect(hmiCompleteOperationSchema.safeParse({ goodCount: 3, scrapCount: 0, notes: "operator completion" }).success).toBe(true);
+    expect(hmiCompleteOperationSchema.safeParse({ goodCount: -1, scrapCount: 0 }).success).toBe(false);
+    expect(hmiCompleteOperationSchema.safeParse({ goodCount: 1.5, scrapCount: 0 }).success).toBe(false);
   });
 });

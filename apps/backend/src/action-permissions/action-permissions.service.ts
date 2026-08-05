@@ -3,7 +3,9 @@ import type { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
 export const TOOLING_ACTIONS = ["TOOL_READ", "TOOL_MANAGE", "TOOL_ASSEMBLY_MANAGE", "TOOL_LIFE_ADJUST", "FIXTURE_READ", "FIXTURE_MANAGE", "OPERATION_SETUP_MANAGE", "OPERATION_SETUP_VERIFY", "FIXTURE_MAINT_MANAGE", "FIXTURE_CALIBRATION_RECORD", "FIXTURE_MAINT_OVERRIDE"] as const;
-export type ToolingAction = (typeof TOOLING_ACTIONS)[number];
+export const HMI_ACTIONS = ["HMI_READ", "HMI_START", "HMI_COMPLETE"] as const;
+export const ACTION_PERMISSION_ACTIONS = [...TOOLING_ACTIONS, ...HMI_ACTIONS] as const;
+export type ActionPermissionAction = (typeof ACTION_PERMISSION_ACTIONS)[number];
 
 @Injectable()
 export class ActionPermissionsService {
@@ -18,7 +20,7 @@ export class ActionPermissionsService {
     return actions.every((action) => granted.has(action));
   }
   list(tenantId: string) { return this.prisma.actionPermissionGrant.findMany({ where: { tenantId }, include: { user: { select: { id: true, name: true, email: true, role: true } } }, orderBy: [{ action: "asc" }, { createdAt: "asc" }] }); }
-  async grant(tenantId: string, actorId: string, input: { action: ToolingAction; role?: Role; userId?: string }) {
+  async grant(tenantId: string, actorId: string, input: { action: ActionPermissionAction; role?: Role; userId?: string }) {
     if (Boolean(input.role) === Boolean(input.userId)) throw new ConflictException("Tam olarak bir rol veya kullanıcı seçilmelidir");
     if (input.userId) {
       const user = await this.prisma.user.findFirst({ where: { id: input.userId, tenantId } });

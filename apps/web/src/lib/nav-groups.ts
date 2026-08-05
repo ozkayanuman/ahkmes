@@ -121,6 +121,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Factory,
     items: [
       { to: "/production", label: "Operasyon", icon: Gauge, page: "production" },
+      { to: "/hmi/operations", label: "Operatör Terminali", icon: Gauge, page: "hmi-operations" },
       { to: "/tooling", label: "CNC Takım ve Fikstür", icon: Wrench, page: "tooling" },
       { to: "/machines", label: "Tezgahlar", icon: Factory, page: "machines" },
       { to: "/hierarchy", label: "Hiyerarşi", icon: GitBranch, page: "hierarchy" },

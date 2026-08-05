@@ -57,6 +57,7 @@ import { LaunchpadPage } from "./pages/launchpad";
 import { CopilotPage } from "./pages/copilot";
 import { PlatformModulesPage } from "./pages/platform-modules";
 import { ToolingPage } from "./pages/tooling";
+import { HmiOperationsPage } from "./pages/hmi-operations";
 
 export function App() {
   return (
@@ -109,6 +110,7 @@ export function App() {
           }
         />
         <Route path="/production" element={<PageGuard page="production"><ProductionPage /></PageGuard>} />
+        <Route path="/hmi/operations" element={<PageGuard page="hmi-operations"><HmiOperationsPage /></PageGuard>} />
         <Route path="/tooling" element={<PageGuard page="tooling"><ToolingPage /></PageGuard>} />
         <Route path="/parts" element={<PageGuard page="parts"><PartsPage /></PageGuard>} />
         <Route path="/suppliers" element={<PageGuard page="suppliers"><SuppliersPage /></PageGuard>} />

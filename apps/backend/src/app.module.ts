@@ -65,6 +65,7 @@ import { CopilotModule } from "./copilot/copilot.module";
 import { PlatformModulesModule } from "./platform-modules/platform-modules.module";
 import { ToolingModule } from "./tooling/tooling.module";
 import { ActionPermissionsModule } from "./action-permissions/action-permissions.module";
+import { HmiModule } from "./hmi/hmi.module";
 
 @Module({
   imports: [
@@ -134,6 +135,7 @@ import { ActionPermissionsModule } from "./action-permissions/action-permissions
     PlatformModulesModule,
     ToolingModule,
     ActionPermissionsModule,
+    HmiModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],

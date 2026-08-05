@@ -266,7 +266,7 @@ export class ToolingService {
   }
 
   private async operationWithRequirements(tx: Tx, tenantId: string, operationId: string) {
-    const operation = await tx.workOrderOperation.findFirst({ where: { id: operationId, tenantId }, include: { workOrder: { select: { partId: true } }, toolRequirements: true, fixtureRequirements: true } });
+    const operation = await tx.workOrderOperation.findFirst({ where: { id: operationId, tenantId }, include: { workOrder: { select: { partId: true } }, toolRequirements: { include: { toolDefinition: { select: { id: true, code: true, name: true } }, toolAssembly: { select: { id: true, code: true, name: true, revision: true } } } }, fixtureRequirements: { include: { fixtureDefinition: { select: { id: true, code: true, name: true, revision: true } } } } } });
     if (!operation) throw new NotFoundException("İş emri operasyonu bulunamadı"); return operation;
   }
   private async setupDetail(client: Pick<PrismaService, "operationSetupVerification"> | Tx, tenantId: string, operationId: string) { return client.operationSetupVerification.findFirst({ where: { tenantId, workOrderOperationId: operationId }, orderBy: { createdAt: "desc" }, include: { machine: { select: { id: true, name: true } }, assignments: { include: { toolRequirement: true, fixtureRequirement: true, physicalToolInstance: { include: { toolDefinition: true, toolAssembly: true } }, physicalFixtureInstance: { include: { fixtureDefinition: true } } } }, snapshot: true } }); }

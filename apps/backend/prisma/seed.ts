@@ -44,6 +44,9 @@ async function main() {
       ["FIXTURE_MAINT_MANAGE", "ADMIN"], ["FIXTURE_MAINT_MANAGE", "PLANNER"],
       ["FIXTURE_CALIBRATION_RECORD", "ADMIN"], ["FIXTURE_CALIBRATION_RECORD", "PLANNER"], ["FIXTURE_CALIBRATION_RECORD", "FOREMAN"],
       ["FIXTURE_MAINT_OVERRIDE", "ADMIN"],
+      ["HMI_READ", "ADMIN"], ["HMI_READ", "PLANNER"], ["HMI_READ", "FOREMAN"], ["HMI_READ", "OPERATOR"],
+      ["HMI_START", "ADMIN"], ["HMI_START", "PLANNER"], ["HMI_START", "FOREMAN"], ["HMI_START", "OPERATOR"],
+      ["HMI_COMPLETE", "ADMIN"], ["HMI_COMPLETE", "PLANNER"], ["HMI_COMPLETE", "FOREMAN"], ["HMI_COMPLETE", "OPERATOR"],
   ];
   for (const [action, role] of toolingRoleGrants) {
     const exists = await prisma.actionPermissionGrant.findFirst({ where: { tenantId: DEFAULT_TENANT_ID, action, role } });

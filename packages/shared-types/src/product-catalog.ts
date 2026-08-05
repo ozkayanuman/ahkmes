@@ -1,4 +1,4 @@
-import type { PageKey, ProductModule } from "./enums";
+import { PRODUCT_MODULES, type PageKey, type ProductModule } from "./enums";
 
 export const LEGACY_PRODUCT_MODULES = [
   "PLATFORM_CORE", "MES_CORE", "MACHINE_CONNECT", "QUALITY", "INVENTORY", "PLANNING_MRP",
@@ -72,7 +72,7 @@ export const PRODUCT_MODULE_CATALOG: readonly ProductModuleDefinition[] = [
 
   { code: "MES_EXECUTION", suite: "MES", name: "Production Execution", description: "Work order, operation execution, WIP, partial production and scrap.", type: "MODULE", implementationStatus: "AVAILABLE", dependencies: ["PLM_PRODUCT_STRUCTURE", "WMS_INVENTORY_LEDGER"], requiredCore: false, tenantToggleable: true, edition: "ESSENTIALS", pageCodes: ["work-orders", "production", "shift-report", "labor"], permissionCodes: ["mes.execute"], routes: ["/work-orders", "/production"], backendCapabilities: ["WorkOrderOperation", "ProductionRun"], frontendAvailability: "AVAILABLE", entitlementCode: "MES_CORE" },
   { code: "MES_GENEALOGY", suite: "MES", name: "Genealogy & As-Built", description: "Forward/backward traceability across material, run and finished output.", type: "MODULE", implementationStatus: "BETA", dependencies: ["MES_EXECUTION", "WMS_TRACEABILITY"], requiredCore: false, tenantToggleable: false, edition: "PROFESSIONAL", pageCodes: ["genealogy"], permissionCodes: ["genealogy.read"], routes: ["/work-orders/:id/genealogy"], backendCapabilities: ["work-order genealogy"], frontendAvailability: "AVAILABLE", entitlementCode: "MES_CORE" },
-  { code: "MES_OPERATOR_HMI", suite: "MES", name: "Operator HMI", description: "Machine-specific dispatch, guided execution, barcode and work instruction terminal.", type: "MODULE", implementationStatus: "MISSING", dependencies: ["MES_EXECUTION"], requiredCore: false, tenantToggleable: false, edition: "PROFESSIONAL", pageCodes: [], permissionCodes: ["hmi.execute"], routes: [], backendCapabilities: [], frontendAvailability: "NONE" },
+  { code: "MES_OPERATOR_HMI", suite: "MES", name: "Operator HMI", description: "Machine-specific dispatch and guided operation execution terminal.", type: "MODULE", implementationStatus: "BETA", dependencies: ["MES_EXECUTION", "PLM_NC_PROGRAM", "MES_CNC_TOOLING"], requiredCore: false, tenantToggleable: false, edition: "PROFESSIONAL", pageCodes: ["hmi-operations"], permissionCodes: ["HMI_READ", "HMI_START", "HMI_COMPLETE"], routes: ["/hmi/operations"], backendCapabilities: ["tenant operation queue", "canonical start/complete delegation", "NC/tooling checklist"], frontendAvailability: "AVAILABLE", entitlementCode: "MES_CORE" },
   { code: "MES_PERFORMANCE", suite: "MES", name: "OEE & Shop-floor Performance", description: "OEE, downtime, shift performance and production KPI.", type: "MODULE", implementationStatus: "BETA", dependencies: ["MES_EXECUTION", "IIOT_MACHINE_CONNECT"], requiredCore: false, tenantToggleable: false, edition: "PROFESSIONAL", pageCodes: ["production"], permissionCodes: ["oee.read"], routes: ["/work-orders/:id/oee"], backendCapabilities: ["OEE calculation"], frontendAvailability: "PARTIAL", entitlementCode: "MES_CORE" },
   { code: "MES_CNC_TOOLING", suite: "MES", name: "CNC Tooling & Fixture", description: "Tool, assembly, fixture, life, compatibility and verified operation setup.", type: "MODULE", implementationStatus: "BETA", dependencies: ["MES_EXECUTION", "ERP_MASTER_DATA", "PLM_NC_PROGRAM"], requiredCore: false, tenantToggleable: false, edition: "PROFESSIONAL", pageCodes: ["tooling"], permissionCodes: ["tooling.read", "tooling.manage", "tooling.assembly.manage", "tooling.life.adjust", "tooling.fixture.manage", "tooling.setup.manage", "tooling.setup.verify"], routes: ["/tooling"], backendCapabilities: ["tool definitions", "fixture definitions", "setup verification", "tool life"], frontendAvailability: "AVAILABLE" },
   { code: "MES_DNC", suite: "MES", name: "DNC & NC Distribution", description: "Approved NC distribution, collection and wrong-program prevention.", type: "MODULE", implementationStatus: "MISSING", dependencies: ["PLM_NC_PROGRAM", "IIOT_MACHINE_CONNECT"], requiredCore: false, tenantToggleable: false, edition: "ENTERPRISE", pageCodes: [], permissionCodes: ["dnc.deploy"], routes: [], backendCapabilities: [], frontendAvailability: "NONE" },
@@ -123,7 +123,9 @@ export interface EntitlementModuleDefinition {
 }
 
 export const ENTITLEMENT_MODULE_CATALOG: readonly EntitlementModuleDefinition[] = PRODUCT_MODULE_CATALOG
-  .filter((definition) => definition.type === "MODULE" && ["AVAILABLE", "BETA"].includes(definition.implementationStatus))
+  .filter((definition) => definition.type === "MODULE"
+    && ["AVAILABLE", "BETA"].includes(definition.implementationStatus)
+    && PRODUCT_MODULES.includes(definition.code as ProductModule))
   .map((definition) => ({
     code: definition.code as ProductModule,
     suite: definition.suite,

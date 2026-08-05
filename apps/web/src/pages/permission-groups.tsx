@@ -20,6 +20,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   mrp: "MRP Planlama",
   "purchase-orders": "Satınalma",
   production: "Operasyon",
+  "hmi-operations": "Operatör Terminali",
   parts: "Parçalar",
   suppliers: "Tedarikçiler",
   materials: "Malzemeler",

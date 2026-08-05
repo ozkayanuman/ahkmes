@@ -8,8 +8,8 @@ import { PagesGuard } from "../common/guards/pages.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import type { AuthUser } from "../common/types";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
-import { ActionPermissionsService, TOOLING_ACTIONS } from "./action-permissions.service";
-const grantSchema = z.object({ action: z.enum(TOOLING_ACTIONS), role: z.enum(["ADMIN", "SALES", "PLANNER", "FOREMAN", "OPERATOR"]).optional(), userId: z.string().uuid().optional() }).refine((v) => Boolean(v.role) !== Boolean(v.userId), "Tam olarak bir rol veya kullanıcı seçin");
+import { ActionPermissionsService, ACTION_PERMISSION_ACTIONS } from "./action-permissions.service";
+const grantSchema = z.object({ action: z.enum(ACTION_PERMISSION_ACTIONS), role: z.enum(["ADMIN", "SALES", "PLANNER", "FOREMAN", "OPERATOR"]).optional(), userId: z.string().uuid().optional() }).refine((v) => Boolean(v.role) !== Boolean(v.userId), "Tam olarak bir rol veya kullanıcı seçin");
 @Controller("action-permissions") @RequirePage("users") @UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class ActionPermissionsController {
   constructor(private readonly service: ActionPermissionsService) {}

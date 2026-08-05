@@ -1,6 +1,6 @@
 # Capability Coverage Matrix
 
-> Son doğrulama: 2026-08-02. Bu belge hedef ürün kataloğudur; bir katalog kaydı
+> Son doğrulama: 2026-08-03. Bu belge hedef ürün kataloğudur; bir katalog kaydı
 > veya enum, uygulamanın tamamlandığı anlamına gelmez. Kanıtlar gerçek Prisma
 > modeli, Nest service/controller, React route ve test dosyasına dayanır.
 
@@ -9,8 +9,8 @@
 - Referans katalog 369 atomik yeteneğe normalize edilmiştir: Platform 138, ERP
   62, PLM 16, MES 55, CNC 35, IIoT 24, QMS 21 ve EAM 18.
 - Bunlar lisanslanabilir/planlanabilir 38 ürün-modülü altında gruplanır.
-- Atomik seviye özet: `VERIFIED_COMPLETE: 2`, `FUNCTIONAL_PARTIAL: 111`,
-  `PROTOTYPE/PLACEHOLDER: 37`, `MISSING: 221`.
+- Atomik seviye özet: `VERIFIED_COMPLETE: 2`, `FUNCTIONAL_PARTIAL: 112`,
+  `PROTOTYPE/PLACEHOLDER: 37`, `MISSING: 220`.
 - `VERIFIED_COMPLETE` için migration, domain servis, API, yetki, tenant sınırı,
   audit, kullanılabilir UI, validation ve test birlikte aranır. Bu ölçüte göre
   mevcut projede hiçbir geniş ürün modülü henüz eksiksiz değildir.
@@ -57,9 +57,9 @@ olduğu anlamına gelmez.
 | PLM_PRODUCT_STRUCTURE | PLM | BOM/routing/recipe revision | Hayır | Hayır | FUNCTIONAL_PARTIAL | `BomHeader`, `RecipeHeader`, route snapshot | parts/recipes pages; route E2E | EBOM/MBOM, alternatives/variants, effective dates/release | P1 |
 | PLM_CHANGE_CONTROL | PLM | ECR/ECO/change control | Hayır | Hayır | MISSING | — | — | ECR/ECO, as-designed/planned/built comparison | P1 |
 | PLM_NC_PROGRAM | PLM | NC program control | Hayır | Hayır | VERIFIED_COMPLETE | `NcProgram` SHA-256, revision lifecycle/effectivity, single-published constraint, immutable WorkOrderOperation snapshot and `PartsService.assertNcProgramUsable` | part/detail NC panel and operation-start gate; PLM-001 PostgreSQL E2E, permission/entitlement, audit and reauth coverage | DNC distribution and generic controlled-document/ECR lifecycle are separately tracked; they are not claimed by this capability. | P1 |
-| MES_EXECUTION | MES | Work order/operation execution | Hayır | Evet* | FUNCTIONAL_PARTIAL | `WorkOrder`, `WorkOrderOperation`, `ProductionRun` | work-order/production pages; route E2E | operator HMI, setup, rework/co-product/backflush gates | P1 |
+| MES_EXECUTION | MES | Work order/operation execution | Hayır | Evet* | FUNCTIONAL_PARTIAL | `WorkOrder`, `WorkOrderOperation`, `ProductionRun` | work-order/production pages; route E2E | setup, rework/co-product/backflush gates; operator HMI is tracked separately as `MES_OPERATOR_HMI` | P1 |
 | MES_GENEALOGY | MES | As-built genealogy | Hayır | Hayır | FUNCTIONAL_PARTIAL | work-order genealogy, consumption/finished entries | genealogy page/test | full serial parent-child, tool/NC/measurement chain | P1 |
-| MES_OPERATOR_HMI | MES | Operator terminal | Hayır | Hayır | MISSING | — | — | dispatch, barcode, instructions, calls, handover | P1 |
+| MES_OPERATOR_HMI | MES | Operator terminal | Hayır | `MES_EXECUTION` | FUNCTIONAL_PARTIAL | `hmi.service.ts`, `hmi.controller.ts`, canonical `ProductionService.start/complete`, `WorkOrdersService.completeOperation`, `ToolingService.getSetup/assertStartReady` | `/hmi/operations`: tenant operation queue/detail, published-NC/setup compliance checklist, action-granted start/complete; real PostgreSQL HMI E2E | barcode/QR, offline sync, Andon, handover, electronic instructions, operator skills, OEE/telemetry and advanced dispatch remain separate backlog | P1 |
 | MES_PERFORMANCE | MES | OEE/downtime/Andon | Hayır | Hayır | PROTOTYPE | `WorkOrdersService.oee`, events | production/OEE charts | reason tree, microstop, Andon/escalation, trusted-data flags | P2 |
 | MES_CNC_TOOLING | MES | Tool/fixture lifecycle | Hayır | Hayır | VERIFIED_COMPLETE | `ToolDefinition`, `ToolAssembly`, physical instances, compatibility, setup verification/snapshot, `ToolLifeEvent`, persistent action grants | `/tooling`, embedded production HMI checklist, verified setup/start-gate and fresh PostgreSQL E2E | Fixture maintenance/calibration validity, presetter/offset and DNC are separately tracked dependencies; they are not claimed by this capability. | P1 |
 | MES_FIXTURE_MAINT_CALIBRATION | MES | Fixture maintenance/calibration dependent capability | Hayır | MES_CNC_TOOLING | FUNCTIONAL_PARTIAL | `FixtureMaintenancePolicy`, `FixtureCalibrationPolicy`, events/records, tenant idempotency and policy evaluation | `/tooling/fixture-maintenance`, tooling/HMI checklist evidence | PostgreSQL concurrency/E2E acceptance and full maintenance/calibration event UI remain in progress; not a separate entitlement. | P2 |
