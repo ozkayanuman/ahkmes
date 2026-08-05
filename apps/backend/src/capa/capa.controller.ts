@@ -65,7 +65,7 @@ export class CapaController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(decideCapaSchema)) dto: DecideCapaDto,
   ) {
-    return this.service.decide(user.tenantId, id, user.userId, user.role, "approve", dto.note);
+    return this.service.decide(user.tenantId, id, user.userId, user.role, "approve", dto.note, dto.password);
   }
 
   @Patch(":id/reject")
@@ -75,7 +75,7 @@ export class CapaController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(decideCapaSchema)) dto: DecideCapaDto,
   ) {
-    return this.service.decide(user.tenantId, id, user.userId, user.role, "reject", dto.note);
+    return this.service.decide(user.tenantId, id, user.userId, user.role, "reject", dto.note, dto.password);
   }
 
   @Patch(":id/close")

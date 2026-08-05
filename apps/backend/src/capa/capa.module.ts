@@ -2,9 +2,10 @@ import { Module } from "@nestjs/common";
 import { CapaController } from "./capa.controller";
 import { CapaService } from "./capa.service";
 import { ApprovalsModule } from "../approvals/approvals.module";
+import { AuthModule } from "../auth/auth.module";
 
 @Module({
-  imports: [ApprovalsModule],
+  imports: [ApprovalsModule, AuthModule],
   controllers: [CapaController],
   providers: [CapaService],
 })

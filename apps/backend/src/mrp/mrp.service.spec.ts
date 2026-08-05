@@ -51,10 +51,13 @@ function buildService(prisma: ReturnType<typeof buildPrismaMock>) {
   };
   const purchasing = { create: jest.fn().mockResolvedValue({ id: "po1" }), createInTransaction: jest.fn().mockResolvedValue({ id: "po1" }) };
   const workOrders = { create: jest.fn().mockResolvedValue({ id: "wo-new" }), createInTransaction: jest.fn().mockResolvedValue({ id: "wo-new" }) };
+  const auth = {
+    reauthenticate: jest.fn().mockResolvedValue({ userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") }),
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new MrpService(prisma as any, realtime as any, notifications as any, approvals as any, purchasing as any, workOrders as any);
-  return { service, prisma, realtime, notifications, approvals, purchasing, workOrders };
+  const service = new MrpService(prisma as any, realtime as any, notifications as any, approvals as any, purchasing as any, workOrders as any, auth as any);
+  return { service, prisma, realtime, notifications, approvals, purchasing, workOrders, auth };
 }
 
 describe("MrpService.run", () => {
@@ -173,9 +176,12 @@ describe("MrpService.decidePurchaseProposal", () => {
     });
     const { service, approvals, purchasing } = buildService(prisma);
 
-    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, "sup1");
+    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, "sup1", "Sifre123!");
 
-    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", undefined, prisma, false);
+    expect(approvals.approve).toHaveBeenCalledWith(
+      "t1", "ar1", "u1", "PLANNER", undefined, prisma, false,
+      { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
+    );
     expect(purchasing.createInTransaction).toHaveBeenCalledWith(
       prisma,
       "t1",
@@ -199,7 +205,7 @@ describe("MrpService.decidePurchaseProposal", () => {
     });
     const { service, purchasing } = buildService(prisma);
 
-    await expect(service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve")).rejects.toThrow();
+    await expect(service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, undefined, "Sifre123!")).rejects.toThrow();
     expect(purchasing.createInTransaction).not.toHaveBeenCalled();
   });
 
@@ -213,9 +219,12 @@ describe("MrpService.decidePurchaseProposal", () => {
     });
     const { service, approvals, purchasing } = buildService(prisma);
 
-    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "reject", "uygun değil");
+    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "reject", "uygun değil", undefined, "Sifre123!");
 
-    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", "uygun değil", prisma, false);
+    expect(approvals.reject).toHaveBeenCalledWith(
+      "t1", "ar1", "u1", "PLANNER", "uygun değil", prisma, false,
+      { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
+    );
     expect(purchasing.createInTransaction).not.toHaveBeenCalled();
     expect(updated.status).toBe("REJECTED");
   });
@@ -233,7 +242,7 @@ describe("MrpService.decideProductionProposal", () => {
     });
     const { service, workOrders } = buildService(prisma);
 
-    const updated = await service.decideProductionProposal("t1", "prp1", "u1", "PLANNER", "approve");
+    const updated = await service.decideProductionProposal("t1", "prp1", "u1", "PLANNER", "approve", undefined, "Sifre123!");
 
     expect(workOrders.createInTransaction).toHaveBeenCalledWith(prisma, "t1", {
       partId: "p1",

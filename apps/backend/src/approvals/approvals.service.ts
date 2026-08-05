@@ -11,6 +11,11 @@ const INCLUDE = {
 } as const;
 
 type ApprovalClient = Pick<PrismaService, "approvalRequest" | "auditLog">;
+/** AuthService.reauthenticate()'in döndürdüğü kanıtın bu motorun ihtiyaç duyduğu alt kümesi. */
+export interface ReauthEvidence {
+  authSource: string;
+  verifiedAt: Date;
+}
 
 /** Genel amaçlı onay motoru — belirli bir entity'ye gömülü değildir. Diğer
  * modüller (ör. ileriki fazlarda MRP proposal, CAPA) `request()`i çağırıp
@@ -70,6 +75,7 @@ export class ApprovalsService {
     status: "APPROVED" | "REJECTED",
     note: string | undefined,
     client: ApprovalClient,
+    reauth?: ReauthEvidence,
   ) {
     const req = await client.approvalRequest.findFirst({ where: { id, tenantId } });
     if (!req) throw new NotFoundException("Onay talebi bulunamadı");
@@ -94,7 +100,14 @@ export class ApprovalsService {
       entityId: req.id,
       action: "STATUS_CHANGE",
       before: { status: req.status, decisionNote: req.decisionNote, decidedById: req.decidedById },
-      after: { status: updated.status, decisionNote: updated.decisionNote, decidedById: decidedById },
+      after: {
+        status: updated.status,
+        decisionNote: updated.decisionNote,
+        decidedById: decidedById,
+        // AHK-006: kritik onay kararları için yeniden kimlik doğrulama kanıtı —
+        // parola/hash asla loglanmaz, sadece doğrulamanın kaynağı ve zamanı.
+        ...(reauth ? { reauthenticatedAt: reauth.verifiedAt, reauthSource: reauth.authSource } : {}),
+      },
     });
 
     return { updated, request: req };
@@ -115,16 +128,16 @@ export class ApprovalsService {
     });
   }
 
-  async approve(tenantId: string, id: string, decidedById: string, decidedRole: Role, note?: string, client?: ApprovalClient, notify = true) {
-    if (client) return (await this.decideInTransaction(tenantId, id, decidedById, decidedRole, "APPROVED", note, client)).updated;
-    const result = await this.prisma.$transaction((tx) => this.decideInTransaction(tenantId, id, decidedById, decidedRole, "APPROVED", note, tx));
+  async approve(tenantId: string, id: string, decidedById: string, decidedRole: Role, note?: string, client?: ApprovalClient, notify = true, reauth?: ReauthEvidence) {
+    if (client) return (await this.decideInTransaction(tenantId, id, decidedById, decidedRole, "APPROVED", note, client, reauth)).updated;
+    const result = await this.prisma.$transaction((tx) => this.decideInTransaction(tenantId, id, decidedById, decidedRole, "APPROVED", note, tx, reauth));
     if (notify) await this.notifyDecision(tenantId, result.request, "APPROVED", note);
     return result.updated;
   }
 
-  async reject(tenantId: string, id: string, decidedById: string, decidedRole: Role, note?: string, client?: ApprovalClient, notify = true) {
-    if (client) return (await this.decideInTransaction(tenantId, id, decidedById, decidedRole, "REJECTED", note, client)).updated;
-    const result = await this.prisma.$transaction((tx) => this.decideInTransaction(tenantId, id, decidedById, decidedRole, "REJECTED", note, tx));
+  async reject(tenantId: string, id: string, decidedById: string, decidedRole: Role, note?: string, client?: ApprovalClient, notify = true, reauth?: ReauthEvidence) {
+    if (client) return (await this.decideInTransaction(tenantId, id, decidedById, decidedRole, "REJECTED", note, client, reauth)).updated;
+    const result = await this.prisma.$transaction((tx) => this.decideInTransaction(tenantId, id, decidedById, decidedRole, "REJECTED", note, tx, reauth));
     if (notify) await this.notifyDecision(tenantId, result.request, "REJECTED", note);
     return result.updated;
   }

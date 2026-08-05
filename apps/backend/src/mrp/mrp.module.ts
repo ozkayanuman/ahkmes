@@ -7,9 +7,10 @@ import { NotificationsModule } from "../notifications/notifications.module";
 import { ApprovalsModule } from "../approvals/approvals.module";
 import { PurchasingModule } from "../purchasing/purchasing.module";
 import { WorkOrdersModule } from "../work-orders/work-orders.module";
+import { AuthModule } from "../auth/auth.module";
 
 @Module({
-  imports: [NotificationsModule, ApprovalsModule, PurchasingModule, WorkOrdersModule],
+  imports: [NotificationsModule, ApprovalsModule, PurchasingModule, WorkOrdersModule, AuthModule],
   controllers: [BomController, MrpController],
   providers: [BomService, MrpService],
 })

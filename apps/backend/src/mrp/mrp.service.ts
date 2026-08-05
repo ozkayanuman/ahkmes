@@ -6,6 +6,7 @@ import { NotificationsService } from "../notifications/notifications.service";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { PurchasingService } from "../purchasing/purchasing.service";
 import { WorkOrdersService } from "../work-orders/work-orders.service";
+import { AuthService } from "../auth/auth.service";
 import { nextDocNo } from "../common/numbering";
 
 const PP_INCLUDE = {
@@ -42,6 +43,7 @@ export class MrpService {
     private readonly approvals: ApprovalsService,
     private readonly purchasing: PurchasingService,
     private readonly workOrders: WorkOrdersService,
+    private readonly auth: AuthService,
   ) {}
 
   /** MRP II için kapasite girdilerinin gerçek durumunu gösterir. Mevcut modelde
@@ -382,9 +384,12 @@ export class MrpService {
     decidedById: string,
     decidedRole: Role,
     action: Decision,
-    note?: string,
-    supplierId?: string,
+    note: string | undefined,
+    supplierId: string | undefined,
+    password: string,
   ) {
+    // AHK-006: satın alma önerisi kararı (siparişe dönüşür) kritik — bağımsız reauth.
+    const reauth = await this.auth.reauthenticate(tenantId, decidedById, password);
     const result = await this.prisma.$transaction(async (tx) => {
       const proposal = await tx.purchaseProposal.findFirst({ where: { id, tenantId }, include: { lines: true } });
       if (!proposal) throw new NotFoundException("Satınalma önerisi bulunamadı");
@@ -392,7 +397,7 @@ export class MrpService {
       const approvalReq = await tx.approvalRequest.findFirst({ where: { tenantId, entity: "purchase-proposal", entityId: id, status: "PENDING" }, orderBy: { createdAt: "desc" } });
       if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
       if (action === "reject") {
-        await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false);
+        await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
         return { updated: await tx.purchaseProposal.update({ where: { id }, data: { status: "REJECTED" } }), approvalReq, status: "REJECTED" as const };
       }
       const chosenSupplierId = supplierId ?? proposal.supplierId;
@@ -401,7 +406,7 @@ export class MrpService {
         supplierId: chosenSupplierId, currency: "TRY", orderDate: new Date(), notes: `MRP önerisinden (${proposal.ppNo}) otomatik oluşturuldu`,
         lines: proposal.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.qty), unitPrice: 0 })),
       });
-      await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false);
+      await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
       return { updated: await tx.purchaseProposal.update({ where: { id }, data: { status: "CONVERTED", convertedToId: po.id, supplierId: chosenSupplierId } }), approvalReq, status: "APPROVED" as const };
     });
     await this.approvals.notifyDecision(tenantId, result.approvalReq, result.status, note);
@@ -415,8 +420,11 @@ export class MrpService {
     decidedById: string,
     decidedRole: Role,
     action: Decision,
-    note?: string,
+    note: string | undefined,
+    password: string,
   ) {
+    // AHK-006: üretim önerisi kararı (iş emrine dönüşür) kritik — bağımsız reauth.
+    const reauth = await this.auth.reauthenticate(tenantId, decidedById, password);
     const result = await this.prisma.$transaction(async (tx) => {
       const proposal = await tx.productionProposal.findFirst({ where: { id, tenantId } });
       if (!proposal) throw new NotFoundException("Üretim önerisi bulunamadı");
@@ -424,11 +432,11 @@ export class MrpService {
       const approvalReq = await tx.approvalRequest.findFirst({ where: { tenantId, entity: "production-proposal", entityId: id, status: "PENDING" }, orderBy: { createdAt: "desc" } });
       if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
       if (action === "reject") {
-        await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false);
+        await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
         return { updated: await tx.productionProposal.update({ where: { id }, data: { status: "REJECTED" } }), approvalReq, status: "REJECTED" as const };
       }
       const wo = await this.workOrders.createInTransaction(tx, tenantId, { partId: proposal.partId, quantity: Number(proposal.qty), dueDate: proposal.dueDate, priority: 5 });
-      await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false);
+      await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
       return { updated: await tx.productionProposal.update({ where: { id }, data: { status: "CONVERTED", convertedToId: wo.id } }), approvalReq, status: "APPROVED" as const };
     });
     await this.approvals.notifyDecision(tenantId, result.approvalReq, result.status, note);

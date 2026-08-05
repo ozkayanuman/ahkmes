@@ -16,9 +16,12 @@ function buildService(overrides: any = {}) {
     reject: jest.fn().mockResolvedValue({}),
     notifyDecision: jest.fn().mockResolvedValue(undefined),
   };
+  const auth = {
+    reauthenticate: jest.fn().mockResolvedValue({ userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") }),
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new CapaService(prisma as any, realtime as any, approvals as any);
-  return { service, prisma, realtime, approvals };
+  const service = new CapaService(prisma as any, realtime as any, approvals as any, auth as any);
+  return { service, prisma, realtime, approvals, auth };
 }
 
 describe("CapaService.submitForApproval", () => {
@@ -47,24 +50,31 @@ describe("CapaService.submitForApproval", () => {
 
 describe("CapaService.decide", () => {
   it("onaylanınca status APPROVED olur", async () => {
-    const { service, prisma, approvals } = buildService();
+    const { service, prisma, approvals, auth } = buildService();
     prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "PENDING_APPROVAL" });
     prisma.capa.update.mockResolvedValue({ id: "c1", status: "APPROVED" });
 
-    const updated = await service.decide("t1", "c1", "u1", "ADMIN", "approve");
+    const updated = await service.decide("t1", "c1", "u1", "ADMIN", "approve", undefined, "Sifre123!");
 
-    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "ADMIN", undefined, prisma, false);
+    expect(auth.reauthenticate).toHaveBeenCalledWith("t1", "u1", "Sifre123!");
+    expect(approvals.approve).toHaveBeenCalledWith(
+      "t1", "ar1", "u1", "ADMIN", undefined, prisma, false,
+      { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
+    );
     expect(updated.status).toBe("APPROVED");
   });
 
   it("reddedilince status REJECTED olur", async () => {
-    const { service, prisma, approvals } = buildService();
+    const { service, prisma, approvals, auth } = buildService();
     prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "PENDING_APPROVAL" });
     prisma.capa.update.mockResolvedValue({ id: "c1", status: "REJECTED" });
 
-    const updated = await service.decide("t1", "c1", "u1", "ADMIN", "reject", "yetersiz kanıt");
+    const updated = await service.decide("t1", "c1", "u1", "ADMIN", "reject", "yetersiz kanıt", "Sifre123!");
 
-    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "ADMIN", "yetersiz kanıt", prisma, false);
+    expect(approvals.reject).toHaveBeenCalledWith(
+      "t1", "ar1", "u1", "ADMIN", "yetersiz kanıt", prisma, false,
+      { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
+    );
     expect(updated.status).toBe("REJECTED");
   });
 });

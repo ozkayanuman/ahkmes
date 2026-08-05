@@ -4,6 +4,7 @@ import type { CreateCapaDto, UpdateCapaDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { ApprovalsService } from "../approvals/approvals.service";
+import { AuthService } from "../auth/auth.service";
 import { nextDocNo } from "../common/numbering";
 
 const CAPA_INCLUDE = {
@@ -24,6 +25,7 @@ export class CapaService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
     private readonly approvals: ApprovalsService,
+    private readonly auth: AuthService,
   ) {}
 
   findAll(tenantId: string, status?: string) {
@@ -89,8 +91,12 @@ export class CapaService {
     decidedById: string,
     decidedRole: Role,
     action: Decision,
-    note?: string,
+    note: string | undefined,
+    password: string,
   ) {
+    // AHK-006: kalite kararı (CAPA onay/red) kritik — transaction dışında (bağımsız
+    // bir DB kontrolü olduğu için) yeniden kimlik doğrulama zorunlu.
+    const reauth = await this.auth.reauthenticate(tenantId, decidedById, password);
     const result = await this.prisma.$transaction(async (tx) => {
       const capa = await tx.capa.findFirst({ where: { id, tenantId } });
       if (!capa) throw new NotFoundException("CAPA kaydı bulunamadı");
@@ -101,8 +107,8 @@ export class CapaService {
       if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
       const status: "REJECTED" | "APPROVED" = action === "reject" ? "REJECTED" : "APPROVED";
       await (action === "reject"
-        ? this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false)
-        : this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false));
+        ? this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth)
+        : this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth));
       const updated = await tx.capa.update({ where: { id }, data: { status }, include: CAPA_INCLUDE });
       return { updated, approvalReq, status };
     });

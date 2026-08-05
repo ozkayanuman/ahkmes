@@ -626,7 +626,9 @@ export const updateCapaSchema = z.object({
   actionPlan: z.string().optional(),
 });
 export type UpdateCapaDto = z.infer<typeof updateCapaSchema>;
-export const decideCapaSchema = z.object({ note: z.string().optional() });
+/// AHK-006: CAPA karar bir ApprovalRequest kararıdır — kritik kalite kararı için
+/// yeniden kimlik doğrulama (electronicSignatureSchema ile aynı `password` alanı) zorunlu.
+export const decideCapaSchema = z.object({ note: z.string().optional(), password: z.string().min(1) });
 export type DecideCapaDto = z.infer<typeof decideCapaSchema>;
 
 // ---- Calibration (Faz E) — takvim bazlı, Machine'e bağlı ----
@@ -978,8 +980,11 @@ export const createCustomerPaymentSchema = z.object({
 export type CreateCustomerPaymentDto = z.infer<typeof createCustomerPaymentSchema>;
 
 // ---- MRP (Faz B) — proposal onay/red, gerekirse tedarikçisiz öneriye tedarikçi atanır ----
+/// AHK-006: satın alma/üretim önerisi kararı da bir ApprovalRequest kararıdır —
+/// aynı reauth zorunluluğu (bkz. decideCapaSchema notu).
 export const mrpProposalDecisionSchema = z.object({
   note: z.string().optional(),
   supplierId: idSchema.optional(),
+  password: z.string().min(1),
 });
 export type MrpProposalDecisionDto = z.infer<typeof mrpProposalDecisionSchema>;

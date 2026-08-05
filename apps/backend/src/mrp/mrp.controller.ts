@@ -59,6 +59,7 @@ export class MrpController {
       "approve",
       dto.note,
       dto.supplierId,
+      dto.password,
     );
   }
 
@@ -69,7 +70,7 @@ export class MrpController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(mrpProposalDecisionSchema)) dto: MrpProposalDecisionDto,
   ) {
-    return this.service.decidePurchaseProposal(user.tenantId, id, user.userId, user.role, "reject", dto.note);
+    return this.service.decidePurchaseProposal(user.tenantId, id, user.userId, user.role, "reject", dto.note, undefined, dto.password);
   }
 
   @Get("production-proposals")
@@ -95,7 +96,7 @@ export class MrpController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(mrpProposalDecisionSchema)) dto: MrpProposalDecisionDto,
   ) {
-    return this.service.decideProductionProposal(user.tenantId, id, user.userId, user.role, "approve", dto.note);
+    return this.service.decideProductionProposal(user.tenantId, id, user.userId, user.role, "approve", dto.note, dto.password);
   }
 
   @Patch("production-proposals/:id/reject")
@@ -105,6 +106,6 @@ export class MrpController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(mrpProposalDecisionSchema)) dto: MrpProposalDecisionDto,
   ) {
-    return this.service.decideProductionProposal(user.tenantId, id, user.userId, user.role, "reject", dto.note);
+    return this.service.decideProductionProposal(user.tenantId, id, user.userId, user.role, "reject", dto.note, dto.password);
   }
 }
