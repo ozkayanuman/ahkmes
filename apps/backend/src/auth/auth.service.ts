@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
+import { jwtVerify } from "jose";
 import type { LoginDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { PermissionGroupsService } from "../permission-groups/permission-groups.service";
@@ -73,11 +74,25 @@ export class AuthService {
     if (user.authSource === "LOCAL") valid = await bcrypt.compare(password, user.passwordHash);
     else if (user.authSource === "LDAP" && user.externalDn) {
       valid = await this.ldap.verifyCredentials(tenantId, user.externalDn, password);
+    } else if (user.authSource === "OIDC") {
+      // AHK-006 kalanı: OIDC kullanıcıları için "şifre" alanı, IdP'nin
+      // `prompt=login` akışını (OidcAuthService.handleReauthCallback) tamamlayınca
+      // dönen kısa ömürlü (2dk) imzalı reauth kanıtını taşır — düz metin şifre
+      // DEĞİLDİR. `sub`/`purpose` eşleşmesi bu kullanıcı için, bu amaçla, yakın
+      // zamanda üretilmiş olduğunu garanti eder (bkz. oidc-auth.service.ts).
+      valid = await this.verifyOidcReauthEvidence(userId, password);
     }
-    // OIDC assertion reauthentication needs the provider's prompt=login flow;
-    // accepting a local password here would weaken the policy, so it is denied.
     if (!valid) throw new UnauthorizedException("Elektronik imza için yeniden kimlik doğrulama başarısız");
     return { userId: user.id, authSource: user.authSource, verifiedAt: new Date() };
+  }
+
+  private async verifyOidcReauthEvidence(userId: string, token: string): Promise<boolean> {
+    try {
+      const { payload } = await jwtVerify(token, new TextEncoder().encode(this.config.getOrThrow<string>("JWT_SECRET")));
+      return payload.purpose === "reauth" && payload.sub === userId && payload.authSource === "OIDC";
+    } catch {
+      return false;
+    }
   }
 
   /** Kendi kendine dil/saat dilimi güncelleme — ADMIN yetkisi gerekmez, herhangi
