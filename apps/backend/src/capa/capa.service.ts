@@ -6,6 +6,7 @@ import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { AuthService } from "../auth/auth.service";
 import { nextDocNo } from "../common/numbering";
+import { OutboxService } from "../outbox/outbox.service";
 
 const CAPA_INCLUDE = {
   sourceNonConformance: { select: { id: true, failureType: true } },
@@ -26,6 +27,7 @@ export class CapaService {
     private readonly realtime: RealtimeGateway,
     private readonly approvals: ApprovalsService,
     private readonly auth: AuthService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: string) {
@@ -110,10 +112,15 @@ export class CapaService {
         ? this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth)
         : this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth));
       const updated = await tx.capa.update({ where: { id }, data: { status }, include: CAPA_INCLUDE });
+      // AHK-009: emitToTenant burada DEĞİL — domain yazımıyla aynı transaction'da
+      // outbox'a yazılır, OutboxDispatcherService onu ayrı bir worker'da en-az-
+      // bir-kez tüketip emitToTenant'a çevirir. Process update'ten SONRA, socket
+      // yayınından ÖNCE çökerse (eski davranışta olay sessizce kaybolurdu) event
+      // satırı DB'de kalır ve dispatcher process yeniden başlayınca teslim eder.
+      await this.outbox.record(tx, tenantId, "capa", id, "capa.updated", { id, status });
       return { updated, approvalReq, status };
     });
     await this.approvals.notifyDecision(tenantId, result.approvalReq, result.status, note);
-    this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: result.status });
     return result.updated;
   }
 

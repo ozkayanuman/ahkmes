@@ -1,4 +1,5 @@
 import { CapaService } from "./capa.service";
+import { OutboxService } from "../outbox/outbox.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
@@ -6,6 +7,7 @@ function buildService(overrides: any = {}) {
     capa: { findFirst: jest.fn(), update: jest.fn() },
     approvalRequest: { findFirst: jest.fn().mockResolvedValue({ id: "ar1" }) },
     nonConformance: { findFirst: jest.fn().mockResolvedValue({ id: "nc1" }) },
+    outboxEvent: { create: jest.fn() },
     $transaction: jest.fn((fn) => fn(prisma)),
     ...overrides,
   };
@@ -19,9 +21,10 @@ function buildService(overrides: any = {}) {
   const auth = {
     reauthenticate: jest.fn().mockResolvedValue({ userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") }),
   };
+  const outbox = new OutboxService();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new CapaService(prisma as any, realtime as any, approvals as any, auth as any);
-  return { service, prisma, realtime, approvals, auth };
+  const service = new CapaService(prisma as any, realtime as any, approvals as any, auth as any, outbox);
+  return { service, prisma, realtime, approvals, auth, outbox };
 }
 
 describe("CapaService.submitForApproval", () => {
@@ -50,7 +53,7 @@ describe("CapaService.submitForApproval", () => {
 
 describe("CapaService.decide", () => {
   it("onaylanınca status APPROVED olur", async () => {
-    const { service, prisma, approvals, auth } = buildService();
+    const { service, prisma, approvals, auth, realtime } = buildService();
     prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "PENDING_APPROVAL" });
     prisma.capa.update.mockResolvedValue({ id: "c1", status: "APPROVED" });
 
@@ -62,6 +65,12 @@ describe("CapaService.decide", () => {
       { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
     );
     expect(updated.status).toBe("APPROVED");
+    // AHK-009: emitToTenant artık decide() içinde DEĞİL, aynı transaction'da
+    // yazılan OutboxEvent üzerinden OutboxDispatcherService tarafından tetiklenir.
+    expect(prisma.outboxEvent.create).toHaveBeenCalledWith({
+      data: { tenantId: "t1", aggregateType: "capa", aggregateId: "c1", eventType: "capa.updated", payload: { id: "c1", status: "APPROVED" } },
+    });
+    expect(realtime.emitToTenant).not.toHaveBeenCalled();
   });
 
   it("reddedilince status REJECTED olur", async () => {

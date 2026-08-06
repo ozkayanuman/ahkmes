@@ -30,6 +30,7 @@ import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { LaborModule } from "./labor/labor.module";
 import { EnergyModule } from "./energy/energy.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
+import { OutboxModule } from "./outbox/outbox.module";
 import { ReportsModule } from "./reports/reports.module";
 import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
 import { LdapModule } from "./ldap/ldap.module";
@@ -100,6 +101,7 @@ import { HmiModule } from "./hmi/hmi.module";
     LaborModule,
     EnergyModule,
     WebhooksModule,
+    OutboxModule,
     ReportsModule,
     PermissionGroupsModule,
     LdapModule,
