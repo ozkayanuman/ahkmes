@@ -15,6 +15,7 @@ import type {
 import { PrismaService } from "../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NotificationsService } from "../notifications/notifications.service";
+import { DowntimeService } from "../downtime/downtime.service";
 
 const CONNECTOR_USER_EMAIL = "machine-connector@ahkmes.local";
 
@@ -24,6 +25,7 @@ export class MachinesService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
+    private readonly downtime: DowntimeService,
   ) {}
 
   private static readonly PUBLIC_SELECT = {
@@ -246,6 +248,13 @@ export class MachinesService {
         entity: "machines",
         entityId: machine.id,
       });
+      // Downtime/Andon: yapılandırılmış (sınıflandırılabilir) duruş kaydını açar
+      // — mevcut downtimeNote/MachineStatusEvent akışına dokunmaz, paraleldir.
+      await this.downtime.start(tenantId, machine.id, { source: "ALARM", note: alarmMessage });
+    } else if (dto.type === "CYCLE_START" || dto.type === "PART_COMPLETE" || dto.type === "IDLE") {
+      // Makine üretime döndü sinyali — açık bir duruş kaydı varsa kapatır
+      // (reasonId sonradan classify() ile atanabilir).
+      await this.downtime.autoCloseOnResume(tenantId, machine.id);
     }
 
     // OEE trend/duruş (downtime) Pareto analizi bu geçmişten türetilir — her telemetri

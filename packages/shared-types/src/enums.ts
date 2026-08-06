@@ -138,6 +138,11 @@ export type UserAuthSource = z.infer<typeof UserAuthSourceSchema>;
 export const AlarmSeveritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
 export type AlarmSeverity = z.infer<typeof AlarmSeveritySchema>;
 
+export const DowntimeReasonCategorySchema = z.enum(["PLANNED", "UNPLANNED"]);
+export type DowntimeReasonCategory = z.infer<typeof DowntimeReasonCategorySchema>;
+export const DowntimeEventSourceSchema = z.enum(["ALARM", "MANUAL"]);
+export type DowntimeEventSource = z.infer<typeof DowntimeEventSourceSchema>;
+
 /** Ticari paketleme sınırı; kullanıcı sayfa yetkisinden bağımsızdır. */
 export const PRODUCT_MODULES = [
   "PLATFORM_DOCUMENTS", "PLATFORM_WORKFLOW", "PLATFORM_INTEGRATION", "PLATFORM_OPERATIONS", "PLATFORM_AI",

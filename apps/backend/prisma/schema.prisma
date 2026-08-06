@@ -705,6 +705,8 @@ model User {
   acceptedLots            Lot[] @relation("LotAcceptedBy")
   spcMeasurements         SpcMeasurement[]
   acknowledgedAlarms      MachineStatusEvent[]  @relation("AcknowledgedAlarms")
+  downtimeEventsTriggered DowntimeEvent[]       @relation("DowntimeTriggeredBy")
+  downtimeEventsClosed    DowntimeEvent[]       @relation("DowntimeClosedBy")
   supplierInvoicesCreated SupplierInvoice[]
   supplierPaymentsCreated SupplierPayment[]
   customerPaymentsCreated CustomerPayment[]
@@ -1007,6 +1009,7 @@ model Machine {
   connectionsFrom   MachineConnection[]  @relation("ConnectionFrom")
   connectionsTo     MachineConnection[]  @relation("ConnectionTo")
   statusEvents      MachineStatusEvent[]
+  downtimeEvents    DowntimeEvent[]
   calibrations      Calibration[]
   maintenanceOrders MaintenanceOrder[]
   alarmDefinitions  AlarmDefinition[]
@@ -1103,6 +1106,70 @@ enum MachineEventType {
   PART_COMPLETE
   ALARM
   IDLE
+}
+
+enum DowntimeReasonCategory {
+  PLANNED
+  UNPLANNED
+}
+
+/// Duruş (downtime)/Andon sınıflandırma kataloğu — Pareto raporunun serbest
+/// metin (bkz. OeeService.downtimePareto, MachineStatusEvent.message'tan
+/// türetilir) yerine tutarlı kod/kategori kullanmasını sağlar. AlarmDefinition
+/// ile aynı desen: tenant-scoped katalog, forward-only (geçmiş kayıtlara
+/// backfill edilmez).
+model DowntimeReason {
+  id        String                 @id @default(uuid())
+  tenantId  String
+  code      String
+  label     String
+  category  DowntimeReasonCategory @default(UNPLANNED)
+  isActive  Boolean                @default(true)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+
+  events DowntimeEvent[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+enum DowntimeEventSource {
+  ALARM
+  MANUAL
+}
+
+/// Yapılandırılmış duruş/Andon kaydı — MachineStatusEvent(type=ALARM)'ın
+/// aksine açık/kapalı yaşam döngüsü olan, sınıflandırılabilir bir kayıttır.
+/// ALARM telemetrisi otomatik açar (source=ALARM, reasonId başlangıçta null
+/// — sınıflandırma sonradan yapılır, bkz. DowntimeService.classify); operatör/
+/// ustabaşı POST /downtime/start ile elle de açabilir (source=MANUAL, Andon
+/// çağrısı). Sonraki bir telemetri olayı (CYCLE_START/PART_COMPLETE/IDLE) veya
+/// PATCH /downtime/:id/end açık kaydı kapatır. Mevcut MachineStatusEvent/OEE
+/// akışına DOKUNULMAZ — bu, forward-only, paralel bir yapılandırılmış kayıttır.
+model DowntimeEvent {
+  id            String              @id @default(uuid())
+  tenantId      String
+  machineId     String
+  workOrderId   String?
+  reasonId      String?
+  source        DowntimeEventSource
+  note          String?
+  startedAt     DateTime            @default(now())
+  endedAt       DateTime?
+  triggeredById String?
+  closedById    String?
+  closedAt      DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  machine     Machine         @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  reason      DowntimeReason? @relation(fields: [reasonId], references: [id])
+  triggeredBy User?           @relation("DowntimeTriggeredBy", fields: [triggeredById], references: [id])
+  closedBy    User?           @relation("DowntimeClosedBy", fields: [closedById], references: [id])
+
+  @@index([tenantId, machineId, endedAt])
+  @@index([tenantId, startedAt])
 }
 
 enum MachineTagDataType {

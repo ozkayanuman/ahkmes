@@ -68,6 +68,7 @@ import { PlatformModulesModule } from "./platform-modules/platform-modules.modul
 import { ToolingModule } from "./tooling/tooling.module";
 import { ActionPermissionsModule } from "./action-permissions/action-permissions.module";
 import { HmiModule } from "./hmi/hmi.module";
+import { DowntimeModule } from "./downtime/downtime.module";
 
 @Module({
   imports: [
@@ -139,6 +140,7 @@ import { HmiModule } from "./hmi/hmi.module";
     ToolingModule,
     ActionPermissionsModule,
     HmiModule,
+    DowntimeModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   AlarmSeveritySchema,
+  DowntimeReasonCategorySchema,
   ConsumptionTypeSchema,
   DocumentEntityTypeSchema,
   DocumentTypeSchema,
@@ -944,6 +945,31 @@ export const updateAlarmDefinitionSchema = createAlarmDefinitionSchema.partial()
 export type UpdateAlarmDefinitionDto = z.infer<typeof updateAlarmDefinitionSchema>;
 export const acknowledgeAlarmSchema = z.object({ note: z.string().optional() });
 export type AcknowledgeAlarmDto = z.infer<typeof acknowledgeAlarmSchema>;
+
+// ---- Downtime/Andon taxonomy ----
+export const createDowntimeReasonSchema = z.object({
+  code: z.string().min(1),
+  label: z.string().min(1),
+  category: DowntimeReasonCategorySchema.default("UNPLANNED"),
+});
+export type CreateDowntimeReasonDto = z.infer<typeof createDowntimeReasonSchema>;
+export const updateDowntimeReasonSchema = createDowntimeReasonSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+export type UpdateDowntimeReasonDto = z.infer<typeof updateDowntimeReasonSchema>;
+export const startDowntimeSchema = z.object({
+  machineId: idSchema,
+  reasonId: idSchema.optional(),
+  note: z.string().optional(),
+});
+export type StartDowntimeDto = z.infer<typeof startDowntimeSchema>;
+export const classifyDowntimeSchema = z.object({ reasonId: idSchema });
+export type ClassifyDowntimeDto = z.infer<typeof classifyDowntimeSchema>;
+export const endDowntimeSchema = z.object({
+  reasonId: idSchema.optional(),
+  note: z.string().optional(),
+});
+export type EndDowntimeDto = z.infer<typeof endDowntimeSchema>;
 
 // ---- Faz G AP (Accounts Payable) — SupplierInvoice, Invoice ile aynı desen ----
 export const supplierInvoiceLineInputSchema = z.object({
