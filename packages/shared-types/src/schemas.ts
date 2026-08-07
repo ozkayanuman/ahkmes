@@ -872,12 +872,14 @@ export const decideApprovalSchema = z.object({
 });
 export type DecideApprovalDto = z.infer<typeof decideApprovalSchema>;
 
-// ---- BOM (Faz B) ----
+// ---- BOM (Faz B, Faz K: çok seviyeli — itemType=PART alt montaj demektir) ----
 export const bomLineInputSchema = z.object({
-  materialId: idSchema,
+  itemType: StockItemTypeSchema,
+  itemId: idSchema,
   qtyPer: positiveQty,
   scrapPct: decimalString.optional(),
 });
+export type BomLineInputDto = z.infer<typeof bomLineInputSchema>;
 export const createBomHeaderSchema = z.object({
   partId: idSchema,
   revision: z.string().min(1).default("A"),

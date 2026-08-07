@@ -1372,7 +1372,6 @@ model Material {
 
   purchaseOrderLines    PurchaseOrderLine[]
   consumptions          MaterialConsumption[]
-  bomLines              BomLine[]
   purchaseProposalLines PurchaseProposalLine[]
 
   @@unique([tenantId, code])
@@ -1732,21 +1731,26 @@ model BomHeader {
 }
 
 model BomLine {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   tenantId    String
   bomHeaderId String
-  materialId  String
-  /// Bir birim Part başına gereken Material miktarı.
-  qtyPer      Decimal  @db.Decimal(18, 6)
+  /// Bu satırın neyi tükettiği: doğrudan Material (yapraklar) veya alt montaj
+  /// olarak başka bir Part (recursive BOM patlatma — bkz. MrpService). Diğer
+  /// itemType/itemId çiftlerinin kullandığı polimorfik desenle aynı (bkz.
+  /// StockBalance/InventoryMovement/Lot).
+  itemType    StockItemType
+  itemId      String
+  /// Bir birim Part başına gereken miktar.
+  qtyPer      Decimal       @db.Decimal(18, 6)
   /// Fire oranı (%) — opsiyonel, brüt ihtiyaç hesaplamasında qtyPer'e eklenir.
-  scrapPct    Decimal? @db.Decimal(5, 2)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  scrapPct    Decimal?      @db.Decimal(5, 2)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   bomHeader BomHeader @relation(fields: [bomHeaderId], references: [id], onDelete: Cascade)
-  material  Material  @relation(fields: [materialId], references: [id])
 
   @@index([tenantId, bomHeaderId])
+  @@index([tenantId, itemType, itemId])
 }
 
 /// Faz F: Süreç reçetesi (Recipe) versiyonlama — BomHeader ile aynı desen (bir Part

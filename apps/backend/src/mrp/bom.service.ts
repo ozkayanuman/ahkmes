@@ -1,14 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { CreateBomHeaderDto, UpdateBomHeaderDto } from "@ahkmes/shared-types";
+import type { BomLineInputDto, CreateBomHeaderDto, UpdateBomHeaderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
 const BOM_INCLUDE = {
   part: { select: { id: true, partNo: true, name: true } },
-  lines: {
-    include: { material: { select: { id: true, code: true, name: true, unit: true } } },
-    orderBy: { createdAt: "asc" as const },
-  },
+  lines: { orderBy: { createdAt: "asc" as const } },
 } as const;
 
 @Injectable()
@@ -30,19 +27,73 @@ export class BomService {
   }
 
   /**
+   * Satırların referans verdiği Material/Part'ların gerçekten var olduğunu
+   * doğrular, ardından her alt montaj (itemType=PART) satırı için döngü
+   * kontrolü yapar: `rootPartId`, kendi (doğrudan veya dolaylı) alt montajı
+   * olamaz — aksi halde MRP patlatma/genealogy trace sonsuz döngüye girer.
+   * Aktif BOM grafiğinde DFS ile kontrol edilir (bkz. PLAN.md Faz K notu).
+   */
+  private async validateLines(tenantId: string, rootPartId: string, lines: BomLineInputDto[]) {
+    const materialItemIds = lines.filter((l) => l.itemType === "MATERIAL").map((l) => l.itemId);
+    const partItemIds = lines.filter((l) => l.itemType === "PART").map((l) => l.itemId);
+
+    const [materials, parts] = await Promise.all([
+      materialItemIds.length
+        ? this.prisma.material.findMany({ where: { id: { in: materialItemIds }, tenantId } })
+        : Promise.resolve([]),
+      partItemIds.length
+        ? this.prisma.part.findMany({ where: { id: { in: partItemIds }, tenantId } })
+        : Promise.resolve([]),
+    ]);
+    if (materials.length !== new Set(materialItemIds).size) {
+      throw new NotFoundException("Malzeme bulunamadı");
+    }
+    if (parts.length !== new Set(partItemIds).size) {
+      throw new NotFoundException("Alt montaj parçası bulunamadı");
+    }
+
+    for (const childPartId of new Set(partItemIds)) {
+      if (childPartId === rootPartId) {
+        throw new ConflictException("Bir parça kendi ürün ağacında doğrudan alt montaj olamaz");
+      }
+      if (await this.subtreeContainsPart(tenantId, childPartId, rootPartId, new Set())) {
+        throw new ConflictException(
+          "Bu alt montaj döngü oluşturur: seçilen parça, kök parçanın (dolaylı) üst montajı",
+        );
+      }
+    }
+  }
+
+  private async subtreeContainsPart(
+    tenantId: string,
+    startPartId: string,
+    targetPartId: string,
+    visited: Set<string>,
+  ): Promise<boolean> {
+    if (startPartId === targetPartId) return true;
+    if (visited.has(startPartId)) return false;
+    visited.add(startPartId);
+
+    const activeBom = await this.prisma.bomHeader.findFirst({
+      where: { tenantId, partId: startPartId, isActive: true },
+      include: { lines: { where: { itemType: "PART" } } },
+    });
+    if (!activeBom) return false;
+
+    for (const line of activeBom.lines) {
+      if (await this.subtreeContainsPart(tenantId, line.itemId, targetPartId, visited)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Bir Part için aynı anda tek aktif BOM olabilir — yeni bir aktif BOM
    * oluşturulunca önceki aktif revizyon(lar) pasife çekilir.
    */
   async create(tenantId: string, dto: CreateBomHeaderDto) {
     const part = await this.prisma.part.findFirst({ where: { id: dto.partId, tenantId } });
     if (!part) throw new NotFoundException("Parça bulunamadı");
-    const materialIds = dto.lines.map((l) => l.materialId);
-    const materials = await this.prisma.material.findMany({
-      where: { id: { in: materialIds }, tenantId },
-    });
-    if (materials.length !== new Set(materialIds).size) {
-      throw new NotFoundException("Malzeme bulunamadı");
-    }
+    await this.validateLines(tenantId, dto.partId, dto.lines);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -59,7 +110,8 @@ export class BomService {
             lines: {
               create: dto.lines.map((l) => ({
                 tenantId,
-                materialId: l.materialId,
+                itemType: l.itemType,
+                itemId: l.itemId,
                 qtyPer: l.qtyPer,
                 scrapPct: l.scrapPct,
               })),
@@ -78,6 +130,9 @@ export class BomService {
 
   async update(tenantId: string, id: string, dto: UpdateBomHeaderDto) {
     const bom = await this.findOne(tenantId, id);
+    if (dto.lines) {
+      await this.validateLines(tenantId, bom.partId, dto.lines);
+    }
     return this.prisma.$transaction(async (tx) => {
       if (dto.lines) {
         await tx.bomLine.deleteMany({ where: { bomHeaderId: bom.id } });
@@ -92,7 +147,8 @@ export class BomService {
                 lines: {
                   create: dto.lines.map((l) => ({
                     tenantId,
-                    materialId: l.materialId,
+                    itemType: l.itemType,
+                    itemId: l.itemId,
                     qtyPer: l.qtyPer,
                     scrapPct: l.scrapPct,
                   })),

@@ -70,7 +70,7 @@ describe("MrpService.run", () => {
       material: { findMany: jest.fn().mockResolvedValue([{ id: "m1", stockQty: "5", minStock: null }]) },
       bomHeader: {
         findMany: jest.fn().mockResolvedValue([
-          { id: "bom1", partId: "p1", lines: [{ materialId: "m1", qtyPer: "2", scrapPct: null }] },
+          { id: "bom1", partId: "p1", lines: [{ itemType: "MATERIAL", itemId: "m1", qtyPer: "2", scrapPct: null }] },
         ]),
       },
       $transaction: jest.fn((cb) => cb(tx)),

@@ -166,16 +166,21 @@ export class MrpService {
         continue;
       }
       for (const line of bom.lines) {
+        // Faz K (çok seviyeli BOM) henüz burada değil: itemType=PART (alt montaj)
+        // satırları şimdilik atlanır — recursive patlatma ayrı bir iş (bkz. PLAN.md).
+        // Böylece sadece Material satırlarından oluşan mevcut BOM'ların davranışı
+        // değişmez; karışık BOM'larda alt montaj ihtiyacı henüz planlanmıyor.
+        if (line.itemType !== "MATERIAL") continue;
         const scrapFactor = 1 + (line.scrapPct ? Number(line.scrapPct) / 100 : 0);
         const need = demand.qty * Number(line.qtyPer) * scrapFactor;
-        const existing = grossByMaterial.get(line.materialId);
+        const existing = grossByMaterial.get(line.itemId);
         if (existing) {
           existing.qty += need;
           if (!existing.neededByDate || demand.dueDate < existing.neededByDate) {
             existing.neededByDate = demand.dueDate;
           }
         } else {
-          grossByMaterial.set(line.materialId, { qty: need, neededByDate: demand.dueDate });
+          grossByMaterial.set(line.itemId, { qty: need, neededByDate: demand.dueDate });
         }
       }
     }
