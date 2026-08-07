@@ -1,4 +1,4 @@
-import type { Role } from "@ahkmes/shared-types";
+import type { Role, UserAuthSource } from "@ahkmes/shared-types";
 
 /** Kullanıcının hangi sayfaları görebildiği — rol gruplarının (PermissionGroup)
  * birleşimi. Hiçbir gruba üye değilse "*" (kısıtlamasız, geriye dönük uyumlu). */
@@ -13,6 +13,8 @@ export interface JwtPayload {
   pages: UserPages;
   locale: string;
   timezone: string;
+  authSource: UserAuthSource;
+  oidcProviderId: string | null;
 }
 
 export interface AuthUser {
@@ -24,4 +26,6 @@ export interface AuthUser {
   pages: UserPages;
   locale: string;
   timezone: string;
+  authSource: UserAuthSource;
+  oidcProviderId: string | null;
 }

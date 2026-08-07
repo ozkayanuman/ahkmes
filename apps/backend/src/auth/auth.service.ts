@@ -40,7 +40,17 @@ export class AuthService {
       throw new UnauthorizedException("E-posta veya şifre hatalı");
     }
 
-    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
+    return this.issueTokens(
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+      user.tenantId,
+      user.locale,
+      user.timezone,
+      user.authSource,
+      user.oidcProviderId,
+    );
   }
 
   async refresh(refreshToken: string) {
@@ -59,7 +69,17 @@ export class AuthService {
     ) {
       throw new UnauthorizedException("Geçersiz yenileme token'ı");
     }
-    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
+    return this.issueTokens(
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+      user.tenantId,
+      user.locale,
+      user.timezone,
+      user.authSource,
+      user.oidcProviderId,
+    );
   }
 
   /**
@@ -99,7 +119,17 @@ export class AuthService {
    * bir kullanıcı kendi tercihini değiştirebilir (Faz P i18n). */
   async updateProfile(userId: string, dto: { locale?: string; timezone?: string }) {
     const user = await this.prisma.user.update({ where: { id: userId }, data: dto });
-    return this.issueTokens(user.id, user.email, user.name, user.role, user.tenantId, user.locale, user.timezone);
+    return this.issueTokens(
+      user.id,
+      user.email,
+      user.name,
+      user.role,
+      user.tenantId,
+      user.locale,
+      user.timezone,
+      user.authSource,
+      user.oidcProviderId,
+    );
   }
 
   async issueTokens(
@@ -110,9 +140,11 @@ export class AuthService {
     tenantId: string,
     locale: string,
     timezone: string,
+    authSource: "LOCAL" | "LDAP" | "OIDC",
+    oidcProviderId: string | null,
   ) {
     const pages: UserPages = await this.permissionGroups.computeUserPages(sub);
-    const payload = { sub, email, name, role, tenantId, pages, locale, timezone };
+    const payload = { sub, email, name, role, tenantId, pages, locale, timezone, authSource, oidcProviderId };
     const accessToken = await this.jwt.signAsync(payload, {
       expiresIn: this.config.get("JWT_ACCESS_TTL") ?? "15m",
     });

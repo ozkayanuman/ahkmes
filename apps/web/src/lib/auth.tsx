@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { Role } from "@ahkmes/shared-types";
+import type { Role, UserAuthSource } from "@ahkmes/shared-types";
 import { api, apiPost, clearTokens, getTokens, setTokens } from "./api";
 import { setAppLocale } from "./i18n";
 
@@ -12,6 +12,8 @@ export interface AuthUser {
   pages: "*" | string[];
   locale: string;
   timezone: string;
+  authSource: UserAuthSource;
+  oidcProviderId: string | null;
 }
 
 function applyUserLocale(user: AuthUser) {

@@ -3,6 +3,7 @@ import { PlayCircle } from "lucide-react";
 import { useState } from "react";
 import { Button, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
+import { ReauthModal } from "../components/reauth-modal";
 import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
@@ -95,13 +96,16 @@ function ApprovePurchaseModal({
 }) {
   const toast = useToast();
   const [supplierId, setSupplierId] = useState(proposal.supplier?.id ?? "");
+  const [reauthOpen, setReauthOpen] = useState(false);
 
   const approve = useMutation({
-    mutationFn: () =>
+    mutationFn: (password: string) =>
       apiPatch(`/mrp/purchase-proposals/${proposal.id}/approve`, {
         supplierId: supplierId || undefined,
+        password,
       }),
     onSuccess: () => {
+      setReauthOpen(false);
       onDone();
       onClose();
     },
@@ -129,11 +133,17 @@ function ApprovePurchaseModal({
           <Button variant="outline" onClick={onClose}>
             Vazgeç
           </Button>
-          <Button disabled={!supplierId || approve.isPending} onClick={() => approve.mutate()}>
+          <Button disabled={!supplierId || approve.isPending} onClick={() => setReauthOpen(true)}>
             Onayla ve Siparişe Dönüştür
           </Button>
         </div>
       </div>
+      <ReauthModal
+        open={reauthOpen}
+        onClose={() => setReauthOpen(false)}
+        busy={approve.isPending}
+        onConfirm={(password) => approve.mutate(password)}
+      />
     </Modal>
   );
 }
@@ -144,6 +154,11 @@ export function MrpPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [approvingPp, setApprovingPp] = useState<PurchaseProposalRow | null>(null);
+  const [pendingDecision, setPendingDecision] = useState<{
+    kind: "purchase" | "production";
+    action: "approve" | "reject";
+    id: string;
+  } | null>(null);
 
   useInvalidateOn(
     ["mrp.proposal.created", "purchaseproposal.updated", "productionproposal.updated"],
@@ -190,8 +205,12 @@ export function MrpPage() {
     onError: () => toast("Onaya gönderilemedi", "error"),
   });
   const rejectPp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/purchase-proposals/${id}/reject`, {}),
-    onSuccess: invalidate,
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/mrp/purchase-proposals/${id}/reject`, { password }),
+    onSuccess: () => {
+      invalidate();
+      setPendingDecision(null);
+    },
     onError: () => toast("Reddedilemedi", "error"),
   });
   const submitPrp = useMutation({
@@ -200,13 +219,21 @@ export function MrpPage() {
     onError: () => toast("Onaya gönderilemedi", "error"),
   });
   const approvePrp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/production-proposals/${id}/approve`, {}),
-    onSuccess: invalidate,
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/mrp/production-proposals/${id}/approve`, { password }),
+    onSuccess: () => {
+      invalidate();
+      setPendingDecision(null);
+    },
     onError: () => toast("Onaylanamadı", "error"),
   });
   const rejectPrp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/production-proposals/${id}/reject`, {}),
-    onSuccess: invalidate,
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/mrp/production-proposals/${id}/reject`, { password }),
+    onSuccess: () => {
+      invalidate();
+      setPendingDecision(null);
+    },
     onError: () => toast("Reddedilemedi", "error"),
   });
 
@@ -265,7 +292,11 @@ export function MrpPage() {
                     <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setApprovingPp(pp)}>
                       Onayla
                     </Button>
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => rejectPp.mutate(pp.id)}>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() => setPendingDecision({ kind: "purchase", action: "reject", id: pp.id })}
+                    >
                       Reddet
                     </Button>
                   </div>
@@ -306,10 +337,18 @@ export function MrpPage() {
                 )}
                 {canManage && prp.status === "PENDING_APPROVAL" && (
                   <div className="flex gap-1">
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => approvePrp.mutate(prp.id)}>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() => setPendingDecision({ kind: "production", action: "approve", id: prp.id })}
+                    >
                       Onayla
                     </Button>
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => rejectPrp.mutate(prp.id)}>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() => setPendingDecision({ kind: "production", action: "reject", id: prp.id })}
+                    >
                       Reddet
                     </Button>
                   </div>
@@ -335,6 +374,23 @@ export function MrpPage() {
           onDone={invalidate}
         />
       )}
+
+      <ReauthModal
+        open={pendingDecision !== null}
+        onClose={() => setPendingDecision(null)}
+        busy={rejectPp.isPending || approvePrp.isPending || rejectPrp.isPending}
+        onConfirm={(password) => {
+          if (!pendingDecision) return;
+          const { kind, action, id } = pendingDecision;
+          if (kind === "purchase") {
+            rejectPp.mutate({ id, password });
+          } else if (action === "approve") {
+            approvePrp.mutate({ id, password });
+          } else {
+            rejectPrp.mutate({ id, password });
+          }
+        }}
+      />
     </div>
   );
 }

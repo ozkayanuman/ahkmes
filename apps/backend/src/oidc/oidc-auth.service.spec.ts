@@ -125,6 +125,8 @@ describe("OidcAuthService.handleCallback", () => {
       "t1",
       "tr",
       "Europe/Istanbul",
+      "OIDC",
+      "p1",
     );
     expect(result).toEqual({ accessToken: "app-access", refreshToken: "app-refresh" });
   });
