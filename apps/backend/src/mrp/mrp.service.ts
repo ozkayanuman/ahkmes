@@ -148,39 +148,117 @@ export class MrpService {
     }
 
     const partIds = [...demandByPart.keys()];
-    const boms = partIds.length
-      ? await this.prisma.bomHeader.findMany({
-          where: { tenantId, partId: { in: partIds }, isActive: true },
+    const partStockByPart = new Map(partStocks.map((p) => [p.partId, Number(p.qty)]));
+
+    // Faz K (çok seviyeli BOM): BOM grafiğini keşfet, her parçanın en derin
+    // (low-level code / LLC) göründüğü seviyeyi bul — bir parça, kendisine
+    // referans veren TÜM üst montajlar işlenmeden (ki bunlar her zaman daha
+    // düşük LLC'dedir, DAG olduğu için) işlenmez. Böylece aynı alt montaj
+    // birden fazla üst parçadan (diamond) talep ediliyorsa çifte sayım olmaz.
+    // Döngüler BOM kayıt anında reddedildiği için (bkz. BomService) burada
+    // sadece savunma amaçlı bir derinlik sınırı var.
+    const MAX_BOM_DEPTH = 10;
+    const bomByPart = new Map<string, Awaited<ReturnType<typeof this.prisma.bomHeader.findFirst>> & { lines: { itemType: string; itemId: string; qtyPer: unknown; scrapPct: unknown }[] } | null>();
+    const llcByPart = new Map<string, number>();
+    for (const id of partIds) llcByPart.set(id, 0);
+
+    let frontier = new Set(partIds);
+    for (let depth = 0; depth < MAX_BOM_DEPTH && frontier.size > 0; depth++) {
+      const toFetch = [...frontier].filter((id) => !bomByPart.has(id));
+      if (toFetch.length) {
+        const boms = await this.prisma.bomHeader.findMany({
+          where: { tenantId, partId: { in: toFetch }, isActive: true },
           include: { lines: true },
+        });
+        const found = new Set(boms.map((b) => b.partId));
+        for (const b of boms) bomByPart.set(b.partId, b as never);
+        for (const id of toFetch) if (!found.has(id)) bomByPart.set(id, null);
+      }
+      const next = new Set<string>();
+      for (const partId of frontier) {
+        const bom = bomByPart.get(partId);
+        if (!bom) continue;
+        for (const line of bom.lines) {
+          if (line.itemType !== "PART") continue;
+          const childDepth = depth + 1;
+          if ((llcByPart.get(line.itemId) ?? -1) < childDepth) llcByPart.set(line.itemId, childDepth);
+          next.add(line.itemId);
+        }
+      }
+      frontier = next;
+    }
+
+    const unresolvedPartIds = partIds.filter((id) => !bomByPart.get(id));
+
+    // Alt montaj (LLC>0) parçalarının zaten önerilmiş üretim miktarı — netleme için.
+    const subPartIds = [...llcByPart.entries()].filter(([, llc]) => llc > 0).map(([id]) => id);
+    const activeSubProposals = subPartIds.length
+      ? await this.prisma.productionProposal.findMany({
+          where: { tenantId, partId: { in: subPartIds }, status: { in: ["DRAFT", "PENDING_APPROVAL"] } },
+          select: { partId: true, qty: true },
         })
       : [];
-    const bomByPart = new Map(boms.map((b) => [b.partId, b]));
+    const proposedBySub = new Map<string, number>();
+    for (const p of activeSubProposals) {
+      proposedBySub.set(p.partId, (proposedBySub.get(p.partId) ?? 0) + Number(p.qty));
+    }
 
-    const unresolvedPartIds: string[] = [];
+    const peggedQty = new Map<string, { qty: number; neededByDate: Date | null }>();
+    for (const [partId, d] of demandByPart) peggedQty.set(partId, { qty: d.qty, neededByDate: d.dueDate });
+
     const grossByMaterial = new Map<string, { qty: number; neededByDate: Date | null }>();
+    const subAssemblyShortfalls: { partId: string; qty: number; dueDate: Date }[] = [];
+    const maxLlc = Math.max(0, ...llcByPart.values());
 
-    for (const [partId, demand] of demandByPart) {
-      const bom = bomByPart.get(partId);
-      if (!bom) {
-        unresolvedPartIds.push(partId);
-        continue;
-      }
-      for (const line of bom.lines) {
-        // Faz K (çok seviyeli BOM) henüz burada değil: itemType=PART (alt montaj)
-        // satırları şimdilik atlanır — recursive patlatma ayrı bir iş (bkz. PLAN.md).
-        // Böylece sadece Material satırlarından oluşan mevcut BOM'ların davranışı
-        // değişmez; karışık BOM'larda alt montaj ihtiyacı henüz planlanmıyor.
-        if (line.itemType !== "MATERIAL") continue;
-        const scrapFactor = 1 + (line.scrapPct ? Number(line.scrapPct) / 100 : 0);
-        const need = demand.qty * Number(line.qtyPer) * scrapFactor;
-        const existing = grossByMaterial.get(line.itemId);
-        if (existing) {
-          existing.qty += need;
-          if (!existing.neededByDate || demand.dueDate < existing.neededByDate) {
-            existing.neededByDate = demand.dueDate;
+    for (let llc = 0; llc <= maxLlc; llc++) {
+      const partsAtLevel = [...llcByPart.entries()].filter(([, l]) => l === llc).map(([id]) => id);
+      for (const partId of partsAtLevel) {
+        const pegged = peggedQty.get(partId);
+        if (!pegged) continue;
+
+        // Seviye 0 (doğrudan WorkOrder talebi): iş emri zaten planlanmış/taahhüt
+        // edilmiş olduğundan malzeme ihtiyacı brüt miktar üzerinden hesaplanır
+        // (üst parçanın kendi stoğuna bakılmaz — bu ayrı bir karar, aşağıdaki
+        // mevcut productionShortfalls kontrolü). Seviye 1+ (alt montaj): sadece
+        // kendi stoğu/zaten-önerilmiş üretimini karşılamayan NET eksik miktar
+        // aşağı patlatılır ve yeni bir üretim önerisi olarak kaydedilir.
+        let qtyToExplode = pegged.qty;
+        if (llc > 0) {
+          const onHand = partStockByPart.get(partId) ?? 0;
+          const alreadyProposed = proposedBySub.get(partId) ?? 0;
+          const shortfall = pegged.qty - onHand - alreadyProposed;
+          if (shortfall <= 1e-9) continue;
+          qtyToExplode = shortfall;
+          subAssemblyShortfalls.push({ partId, qty: shortfall, dueDate: pegged.neededByDate ?? new Date() });
+        }
+
+        const bom = bomByPart.get(partId);
+        if (!bom) continue;
+
+        for (const line of bom.lines) {
+          const scrapFactor = 1 + (line.scrapPct ? Number(line.scrapPct) / 100 : 0);
+          const need = qtyToExplode * Number(line.qtyPer) * scrapFactor;
+          if (line.itemType === "MATERIAL") {
+            const existing = grossByMaterial.get(line.itemId);
+            if (existing) {
+              existing.qty += need;
+              if (!existing.neededByDate || (pegged.neededByDate && pegged.neededByDate < existing.neededByDate)) {
+                existing.neededByDate = pegged.neededByDate;
+              }
+            } else {
+              grossByMaterial.set(line.itemId, { qty: need, neededByDate: pegged.neededByDate });
+            }
+          } else {
+            const existing = peggedQty.get(line.itemId);
+            if (existing) {
+              existing.qty += need;
+              if (pegged.neededByDate && (!existing.neededByDate || pegged.neededByDate < existing.neededByDate)) {
+                existing.neededByDate = pegged.neededByDate;
+              }
+            } else {
+              peggedQty.set(line.itemId, { qty: need, neededByDate: pegged.neededByDate });
+            }
           }
-        } else {
-          grossByMaterial.set(line.itemId, { qty: need, neededByDate: demand.dueDate });
         }
       }
     }
@@ -244,7 +322,6 @@ export class MrpService {
       }
     }
 
-    const partStockByPart = new Map(partStocks.map((p) => [p.partId, Number(p.qty)]));
     const activeProdProposals = partIds.length
       ? await this.prisma.productionProposal.findMany({
           where: { tenantId, partId: { in: partIds }, status: { in: ["DRAFT", "PENDING_APPROVAL"] } },
@@ -265,8 +342,12 @@ export class MrpService {
         productionShortfalls.push({ partId, qty: shortfall, dueDate: demand.dueDate });
       }
     }
+    // Faz K: alt montaj (LLC>0) shortfall'ları da aynı üretim önerisi mekanizmasını
+    // kullanır — onaylanınca aynı şekilde bir WorkOrder'a dönüşür (bkz.
+    // decideProductionProposal), üst/alt parça arasında model düzeyinde fark yok.
+    const allProductionShortfalls = [...productionShortfalls, ...subAssemblyShortfalls];
 
-    if (shortfallLines.length === 0 && productionShortfalls.length === 0) {
+    if (shortfallLines.length === 0 && allProductionShortfalls.length === 0) {
       return { purchaseProposal: null, productionProposals: [], unresolvedPartIds };
     }
 
@@ -292,7 +373,7 @@ export class MrpService {
       }
 
       const productionProposals = [];
-      for (const s of productionShortfalls) {
+      for (const s of allProductionShortfalls) {
         const prNo = await nextDocNo(tx, "productionProposal", "prNo", "PRP");
         productionProposals.push(
           await tx.productionProposal.create({

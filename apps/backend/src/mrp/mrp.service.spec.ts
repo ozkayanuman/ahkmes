@@ -152,6 +152,55 @@ describe("MrpService.run", () => {
     expect(result.productionProposals).toEqual([]);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it("Çok seviyeli BOM: alt montaj ihtiyacı kendi stoğuna karşı netlenir ve altındaki malzemeye kadar recursive patlar", async () => {
+    const tx = buildTxMock();
+    const prisma = buildPrismaMock({
+      workOrder: {
+        findMany: jest.fn().mockResolvedValue([{ id: "wo1", partId: "a", quantity: "5", dueDate: new Date("2026-08-01") }]),
+      },
+      material: { findMany: jest.fn().mockResolvedValue([{ id: "m1", stockQty: "1", minStock: null }]) },
+      partStock: { findMany: jest.fn().mockResolvedValue([{ partId: "sub1", qty: "3" }]) },
+      bomHeader: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        findMany: jest.fn().mockImplementation(({ where }: any) => {
+          const ids: string[] = where.partId.in;
+          const boms = [];
+          if (ids.includes("a")) {
+            boms.push({ id: "bom-a", partId: "a", lines: [{ itemType: "PART", itemId: "sub1", qtyPer: "2", scrapPct: null }] });
+          }
+          if (ids.includes("sub1")) {
+            boms.push({ id: "bom-sub1", partId: "sub1", lines: [{ itemType: "MATERIAL", itemId: "m1", qtyPer: "3", scrapPct: null }] });
+          }
+          return Promise.resolve(boms);
+        }),
+      },
+      $transaction: jest.fn((cb) => cb(tx)),
+    });
+    const { service } = buildService(prisma);
+
+    const result = await service.run("t1", "u1");
+
+    // Alt montaj (sub1) brüt ihtiyacı = 5(WO) * 2(qtyPer) = 10; kendi stoğu 3 → net shortfall 7
+    // → yeni bir üretim önerisi olarak kaydedilir (onaylanınca WorkOrder'a dönüşecek).
+    expect(tx.productionProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ partId: "sub1", qty: 7 }) }),
+    );
+    // sub1'in kendi BOM'u SADECE net shortfall (7) kadar patlatılır: 7*3(qtyPer)=21 m1 ihtiyacı;
+    // m1 stoğu 1 → net satınalma ihtiyacı 20.
+    expect(tx.purchaseProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lines: { create: [expect.objectContaining({ materialId: "m1", qty: 20 })] },
+        }),
+      }),
+    );
+    // Üst parça "a" için PartStock yok → mevcut (LLC=0) davranış: WO'nun tam miktarı üretim önerisi.
+    expect(tx.productionProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ partId: "a", qty: 5 }) }),
+    );
+    expect(result.productionProposals).toHaveLength(2);
+  });
 });
 
 describe("MrpService.decidePurchaseProposal", () => {
