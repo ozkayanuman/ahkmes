@@ -6,7 +6,7 @@ import type {
   UpdatePurchaseOrderDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { InventoryService } from "../inventory/inventory.service";
 
@@ -34,8 +34,8 @@ const PO_INCLUDE = {
 export class PurchasingService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: PurchaseOrderStatus, q?: string) {
@@ -67,8 +67,11 @@ export class PurchasingService {
   }
 
   async create(tenantId: string, userId: string, dto: CreatePurchaseOrderDto) {
-    const created = await this.prisma.$transaction((tx) => this.createInTransaction(tx, tenantId, userId, dto));
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id: created.id });
+    const created = await this.prisma.$transaction(async (tx) => {
+      const po = await this.createInTransaction(tx, tenantId, userId, dto);
+      await this.outbox.record(tx, tenantId, "purchaseorder", po.id, "purchaseorder.updated", { id: po.id });
+      return po;
+    });
     return created;
   }
 
@@ -103,12 +106,15 @@ export class PurchasingService {
     if (po.status === "RECEIVED" || po.status === "CANCELLED") {
       throw new ConflictException("Tamamlanmış/iptal edilmiş sipariş düzenlenemez");
     }
-    const updated = await this.prisma.purchaseOrder.update({
-      where: { id },
-      data: dto,
-      include: PO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.purchaseOrder.update({
+        where: { id },
+        data: dto,
+        include: PO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id });
     return updated;
   }
 
@@ -120,12 +126,15 @@ export class PurchasingService {
     if (status === "CANCELLED" && po.lines.some((l) => Number(l.receivedQty) > 0)) {
       throw new ConflictException("Kısmi teslim alınmış sipariş iptal edilemez");
     }
-    const updated = await this.prisma.purchaseOrder.update({
-      where: { id },
-      data: { status },
-      include: PO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.purchaseOrder.update({
+        where: { id },
+        data: { status },
+        include: PO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id, status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id, status });
     return updated;
   }
 
@@ -194,17 +203,18 @@ export class PurchasingService {
         where: { purchaseOrderId: id },
       });
       const allReceived = freshLines.every((l) => Number(l.receivedQty) >= Number(l.quantity));
-      return tx.purchaseOrder.update({
+      const result = await tx.purchaseOrder.update({
         where: { id },
         data: allReceived ? { status: "RECEIVED" } : {},
         include: PO_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "stock.updated", {
+        lineIds: dto.lines.map((l) => l.lineId),
+      });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id, status: result.status });
+      return result;
     });
 
-    this.realtime.emitToTenant(tenantId, "stock.updated", {
-      lineIds: dto.lines.map((l) => l.lineId),
-    });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id, status: updated.status });
     return updated;
   }
 
@@ -213,8 +223,11 @@ export class PurchasingService {
     if (po.status === "RECEIVED" || po.lines.some((l) => Number(l.receivedQty) > 0)) {
       throw new ConflictException("Teslim alınmış sipariş silinemez");
     }
-    const deleted = await this.prisma.purchaseOrder.delete({ where: { id } });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id, deleted: true });
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      const removed = await tx.purchaseOrder.delete({ where: { id } });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id, deleted: true });
+      return removed;
+    });
     return deleted;
   }
 }

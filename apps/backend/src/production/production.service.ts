@@ -2,7 +2,7 @@ import { ConflictException, HttpStatus, Injectable, NotFoundException } from "@n
 import { Prisma } from "@prisma/client";
 import type { StartProductionRunDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { NonConformanceService } from "../non-conformance/non-conformance.service";
 import { AppException } from "../common/app-exception";
 import { PartsService } from "../parts/parts.service";
@@ -35,8 +35,8 @@ const RUN_INCLUDE = {
 export class ProductionService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly nonConformance: NonConformanceService,
+    private readonly outbox: OutboxService,
     private readonly parts?: PartsService,
     private readonly tooling?: ToolingService,
   ) {}
@@ -125,11 +125,11 @@ export class ProductionService {
       if (wo.status !== "IN_PRODUCTION") {
         await tx.workOrder.update({ where: { id: workOrderId }, data: { status: "IN_PRODUCTION" } });
       }
+      await this.outbox.record(tx, tenantId, "productionrun", run.id, "productionrun.updated", { id: run.id });
+      await this.outbox.record(tx, tenantId, "workorder", workOrderId, "workorder.updated", { id: workOrderId });
       return run;
     });
 
-    this.realtime.emitToTenant(tenantId, "productionrun.updated", { id: created.id });
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id: workOrderId });
     return created;
   }
 
@@ -150,9 +150,9 @@ export class ProductionService {
         include: RUN_INCLUDE,
       });
       if (result.operationId) await this.refreshOperationWip(tx, result.operationId);
+      await this.outbox.record(tx, tenantId, "productionrun", id, "productionrun.updated", { id });
       return result;
     });
-    this.realtime.emitToTenant(tenantId, "productionrun.updated", { id });
     return updated;
   }
 
@@ -197,13 +197,13 @@ export class ProductionService {
           data: { runtimeHours: { increment: hours } },
         });
       }
+      await this.outbox.record(tx, tenantId, "productionrun", id, "productionrun.updated", { id });
+      if (completeWorkOrder) {
+        await this.outbox.record(tx, tenantId, "workorder", run.workOrderId, "workorder.updated", { id: run.workOrderId, status: "COMPLETED" });
+      }
       return result;
     });
 
-    this.realtime.emitToTenant(tenantId, "productionrun.updated", { id });
-    if (completeWorkOrder) {
-      this.realtime.emitToTenant(tenantId, "workorder.updated", { id: run.workOrderId, status: "COMPLETED" });
-    }
     return updated;
   }
 

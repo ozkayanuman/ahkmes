@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateNonConformanceDto, ResolveNonConformanceDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { AppException } from "../common/app-exception";
 import { NotificationsService } from "../notifications/notifications.service";
 
@@ -15,8 +15,8 @@ const INCLUDE = {
 export class NonConformanceService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string, status?: string) {
@@ -39,11 +39,14 @@ export class NonConformanceService {
     const wo = await this.prisma.workOrder.findFirst({ where: { id: dto.workOrderId, tenantId } });
     if (!wo) throw new NotFoundException("İş emri bulunamadı");
 
-    const created = await this.prisma.nonConformance.create({
-      data: { ...dto, tenantId, reportedById },
-      include: INCLUDE,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const nc = await tx.nonConformance.create({
+        data: { ...dto, tenantId, reportedById },
+        include: INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "nonconformance", nc.id, "nonconformance.updated", { id: nc.id, workOrderId: dto.workOrderId });
+      return nc;
     });
-    this.realtime.emitToTenant(tenantId, "nonconformance.updated", { id: created.id, workOrderId: dto.workOrderId });
     await this.notifications.notifyRoles(tenantId, ["ADMIN", "FOREMAN"], {
       type: "NON_CONFORMANCE_CREATED",
       title: "Yeni uygunsuzluk bildirimi",
@@ -65,17 +68,20 @@ export class NonConformanceService {
       );
     }
 
-    const updated = await this.prisma.nonConformance.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        resolvedAt: dto.status === "RESOLVED" ? new Date() : null,
-        resolutionNote: dto.status === "RESOLVED" ? dto.resolutionNote : null,
-        resolvedById: dto.status === "RESOLVED" ? resolvedById : null,
-      },
-      include: INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.nonConformance.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          resolvedAt: dto.status === "RESOLVED" ? new Date() : null,
+          resolutionNote: dto.status === "RESOLVED" ? dto.resolutionNote : null,
+          resolvedById: dto.status === "RESOLVED" ? resolvedById : null,
+        },
+        include: INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "nonconformance", id, "nonconformance.updated", { id, workOrderId: nc.workOrderId });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "nonconformance.updated", { id, workOrderId: nc.workOrderId });
     return updated;
   }
 }

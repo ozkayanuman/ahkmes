@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { Prisma, SalesOrderStatus } from "@prisma/client";
 import type { ReleaseSalesOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { WorkOrdersService } from "../work-orders/work-orders.service";
 
@@ -38,8 +38,8 @@ interface QuoteLineForConversion {
 export class SalesOrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly workOrders: WorkOrdersService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: SalesOrderStatus, q?: string) {
@@ -77,7 +77,7 @@ export class SalesOrdersService {
   ) {
     return this.prisma.$transaction(async (tx) => {
       const soNo = await nextDocNo(tx, "salesOrder", "soNo", "SIP");
-      return tx.salesOrder.create({
+      const salesOrder = await tx.salesOrder.create({
         data: {
           tenantId,
           soNo,
@@ -99,6 +99,8 @@ export class SalesOrdersService {
         },
         include: SO_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "salesorder", salesOrder.id, "salesorder.updated", { id: salesOrder.id });
+      return salesOrder;
     });
   }
 
@@ -110,12 +112,15 @@ export class SalesOrdersService {
     if (status === "CANCELLED" && so.lines.some((l) => Number(l.shippedQty) > 0)) {
       throw new ConflictException("Kısmen sevk edilmiş sipariş iptal edilemez");
     }
-    const updated = await this.prisma.salesOrder.update({
-      where: { id },
-      data: { status },
-      include: SO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.salesOrder.update({
+        where: { id },
+        data: { status },
+        include: SO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "salesorder", id, "salesorder.updated", { id, status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id, status });
     return updated;
   }
 
@@ -148,10 +153,10 @@ export class SalesOrdersService {
           dueDate: line.dueDate,
         }));
       }
+      await this.outbox.record(tx, tenantId, "salesorder", id, "workorder.updated", { ids: created.map((w) => w.id) });
       return created;
     });
 
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { ids: workOrders.map((w) => w.id) });
     return {
       workOrders,
       skippedLineIds: targetLines.filter((l) => l.workOrders.length > 0).map((l) => l.id),

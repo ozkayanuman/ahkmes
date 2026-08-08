@@ -19,9 +19,9 @@ function buildService(overrides: any = {}) {
     ...overrides,
   };
   prisma.$transaction = jest.fn((cb: any) => cb(prisma));
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const nonConformance = { hasOpenNonConformance: jest.fn().mockResolvedValue(false) };
-  const service = new ProductionService(prisma as any, realtime as any, nonConformance as any);
+  const service = new ProductionService(prisma as any, nonConformance as any, outbox as any);
   return { service, prisma };
 }
 
