@@ -9,8 +9,8 @@ function buildService(overrides: any = {}) {
     productionRun: { findMany: jest.fn().mockResolvedValue([]) },
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
-  const service = new WorkOrdersService(prisma as any, realtime as any);
+  const outbox = { record: jest.fn() };
+  const service = new WorkOrdersService(prisma as any, outbox as any);
   return { service, prisma };
 }
 

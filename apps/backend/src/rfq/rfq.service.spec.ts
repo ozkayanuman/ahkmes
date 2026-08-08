@@ -9,10 +9,10 @@ function buildService(overrides: any = {}) {
     $transaction: jest.fn(),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new RfqService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const service = new RfqService(prisma as any, outbox as any);
+  return { service, prisma, outbox };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +43,7 @@ describe("RfqService.convert", () => {
       },
       rFQ: { update: jest.fn().mockResolvedValue({}) },
     };
-    const { service, prisma, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const { service, prisma, outbox } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     prisma.rFQ.findFirst.mockResolvedValue(rfqFixture());
 
     const result = await service.convert("t1", "r1", "u1", {});
@@ -58,7 +58,7 @@ describe("RfqService.convert", () => {
     );
     expect(tx.rFQ.update).toHaveBeenCalledWith({ where: { id: "r1" }, data: { status: "CONVERTED" } });
     expect(result.quote.id).toBe("q1");
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "rfq.updated", { id: "r1", status: "CONVERTED" });
+    expect(outbox.record).toHaveBeenCalledWith(tx, "t1", "rfq", "r1", "rfq.updated", { id: "r1", status: "CONVERTED" });
   });
 
   it("dönüştürülecek satır seçilmezse (lineIds boş kesişim) hata fırlatır", async () => {

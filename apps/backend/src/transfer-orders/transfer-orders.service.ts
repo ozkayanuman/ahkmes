@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateTransferOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { InventoryService } from "../inventory/inventory.service";
 import { InventoryMovementType } from "@prisma/client";
@@ -21,8 +21,8 @@ const TO_INCLUDE = {
 export class TransferOrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, binId?: string) {
@@ -101,11 +101,12 @@ export class TransferOrdersService {
           createdById: userId,
         });
       }
+      await this.outbox.record(tx, tenantId, "transferorder", transfer.id, "transferorder.created", { id: transfer.id });
+      await this.outbox.record(tx, tenantId, "transferorder", transfer.id, "stock.updated", { reason: "transfer", transferOrderId: transfer.id });
+
       return transfer;
     });
 
-    this.realtime.emitToTenant(tenantId, "transferorder.created", { id: created.id });
-    this.realtime.emitToTenant(tenantId, "stock.updated", { reason: "transfer", transferOrderId: created.id });
     return created;
   }
 }

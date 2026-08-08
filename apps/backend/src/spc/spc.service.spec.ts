@@ -2,7 +2,7 @@ import { SpcService } from "./spc.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     part: { findFirst: jest.fn().mockResolvedValue({ id: "p1" }) },
     spcCharacteristic: {
       findFirst: jest.fn(),
@@ -14,11 +14,12 @@ function buildService(overrides: any = {}) {
     workOrder: { findFirst: jest.fn().mockResolvedValue({ id: "wo1" }) },
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  prisma.$transaction = jest.fn((cb: any) => cb(prisma));
+  const outbox = { record: jest.fn() };
   const nonConformance = { create: jest.fn().mockResolvedValue({ id: "nc1" }) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new SpcService(prisma as any, realtime as any, nonConformance as any);
-  return { service, prisma, realtime, nonConformance };
+  const service = new SpcService(prisma as any, nonConformance as any, outbox as any);
+  return { service, prisma, outbox, nonConformance };
 }
 
 describe("SpcService.recordMeasurement", () => {

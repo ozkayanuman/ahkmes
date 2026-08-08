@@ -3,10 +3,10 @@ import { TransferOrdersService } from "./transfer-orders.service";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma = { $transaction: jest.fn(), ...overrides };
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const inventory = { record: jest.fn().mockResolvedValue({ id: "im1" }) };
-  const service = new TransferOrdersService(prisma as any, realtime as any, inventory as any);
-  return { service, prisma, realtime, inventory };
+  const service = new TransferOrdersService(prisma as any, inventory as any, outbox as any);
+  return { service, prisma, outbox, inventory };
 }
 
 function buildTx() {
@@ -30,10 +30,10 @@ describe("TransferOrdersService.create", () => {
 
   it("transfer için kaynak ve hedef immutable hareketlerini üretir", async () => {
     const tx = buildTx();
-    const { service, inventory, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const { service, inventory, outbox } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     await service.create("t1", "u1", { fromBinId: "bin-from", toBinId: "bin-to", lines: [{ itemType: "MATERIAL", itemId: "m1", qty: 5 }] });
     expect(inventory.record).toHaveBeenNthCalledWith(1, tx, expect.objectContaining({ movementType: "TRANSFER_OUT", quantityDelta: -5, binId: "bin-from" }));
     expect(inventory.record).toHaveBeenNthCalledWith(2, tx, expect.objectContaining({ movementType: "TRANSFER_IN", quantityDelta: 5, binId: "bin-to" }));
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "transferorder.created", { id: "to1" });
+    expect(outbox.record).toHaveBeenCalledWith(tx, "t1", "transferorder", "to1", "transferorder.created", { id: "to1" });
   });
 });

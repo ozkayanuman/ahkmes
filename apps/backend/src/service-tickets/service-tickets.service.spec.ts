@@ -2,16 +2,17 @@ import { ServiceTicketsService } from "./service-tickets.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     serviceTicket: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     customer: { findFirst: jest.fn() },
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  prisma.$transaction = jest.fn((cb: any) => cb(prisma));
+  const outbox = { record: jest.fn() };
   const notifications = { notifyRoles: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new ServiceTicketsService(prisma as any, realtime as any, notifications as any);
-  return { service, prisma, realtime, notifications };
+  const service = new ServiceTicketsService(prisma as any, notifications as any, outbox as any);
+  return { service, prisma, outbox, notifications };
 }
 
 describe("ServiceTicketsService.create", () => {
@@ -23,14 +24,14 @@ describe("ServiceTicketsService.create", () => {
     expect(prisma.serviceTicket.create).not.toHaveBeenCalled();
   });
 
-  it("geçerli veriyle talep oluşturur, realtime yayınlar ve ADMIN/SALES'e bildirim gönderir", async () => {
-    const { service, prisma, realtime, notifications } = buildService();
+  it("geçerli veriyle talep oluşturur, outbox'a event yazar ve ADMIN/SALES'e bildirim gönderir", async () => {
+    const { service, prisma, outbox, notifications } = buildService();
     prisma.customer.findFirst.mockResolvedValue({ id: "c1", name: "Acme" });
     prisma.serviceTicket.create.mockResolvedValue({ id: "t1", subject: "Arıza", customerId: "c1" });
 
     await service.create("t1", "u1", { customerId: "c1", subject: "Arıza" });
 
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "serviceticket.updated", expect.any(Object));
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "t1", "serviceticket", "t1", "serviceticket.updated", expect.any(Object));
     expect(notifications.notifyRoles).toHaveBeenCalledWith(
       "t1",
       ["ADMIN", "SALES"],
@@ -56,7 +57,7 @@ describe("ServiceTicketsService.resolve", () => {
   });
 
   it("çözüm notuyla RESOLVED'a geçer ve resolvedAt damgalar", async () => {
-    const { service, prisma, realtime } = buildService();
+    const { service, prisma, outbox } = buildService();
     prisma.serviceTicket.findFirst.mockResolvedValue({
       id: "t1",
       tenantId: "t1",
@@ -74,7 +75,7 @@ describe("ServiceTicketsService.resolve", () => {
         data: expect.objectContaining({ status: "RESOLVED", resolutionNote: "Parça değiştirildi", resolvedAt: expect.any(Date) }),
       }),
     );
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "serviceticket.updated", expect.any(Object));
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "t1", "serviceticket", "t1", "serviceticket.updated", expect.any(Object));
   });
 
   it("zaten çözümlü bir talep RESOLVED→CLOSED geçişinde yeni not istemez", async () => {

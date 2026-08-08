@@ -8,7 +8,7 @@ import type {
   UpdateWorkOrderOperationDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { PartsService } from "../parts/parts.service";
 import { ToolingService } from "../tooling/tooling.service";
@@ -42,7 +42,7 @@ const WO_INCLUDE = {
 export class WorkOrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
     private readonly parts?: PartsService,
     private readonly tooling?: ToolingService,
   ) {}
@@ -266,12 +266,14 @@ export class WorkOrdersService {
   /** Basit Scheduling/Gantt: bir iş emrinin planlanan başlangıç/bitiş tarihini ayarlar. */
   async schedule(tenantId: string, id: string, dto: ScheduleWorkOrderDto) {
     await this.findOne(tenantId, id);
-    const updated = await this.prisma.workOrder.updateMany({
-      where: { id, tenantId },
-      data: dto,
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.workOrder.updateMany({
+        where: { id, tenantId },
+        data: dto,
+      });
+      if (updated.count === 0) throw new NotFoundException("İş emri bulunamadı");
+      await this.outbox.record(tx, tenantId, "workorder", id, "workorder.updated", { id });
     });
-    if (updated.count === 0) throw new NotFoundException("İş emri bulunamadı");
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id });
     return this.findOne(tenantId, id);
   }
 
@@ -305,8 +307,11 @@ export class WorkOrdersService {
   }
 
   async create(tenantId: string, dto: CreateWorkOrderDto) {
-    const created = await this.prisma.$transaction((tx) => this.createInTransaction(tx, tenantId, dto));
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id: created.id });
+    const created = await this.prisma.$transaction(async (tx) => {
+      const wo = await this.createInTransaction(tx, tenantId, dto);
+      await this.outbox.record(tx, tenantId, "workorder", wo.id, "workorder.updated", { id: wo.id });
+      return wo;
+    });
     return created;
   }
 
@@ -329,12 +334,14 @@ export class WorkOrdersService {
     }
     if (dto.machineId) await this.ensureMachine(tenantId, dto.machineId);
 
-    const updated = await this.prisma.workOrder.updateMany({
-      where: { id, tenantId },
-      data: dto,
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.workOrder.updateMany({
+        where: { id, tenantId },
+        data: dto,
+      });
+      if (updated.count === 0) throw new NotFoundException("İş emri bulunamadı");
+      await this.outbox.record(tx, tenantId, "workorder", id, "workorder.updated", { id });
     });
-    if (updated.count === 0) throw new NotFoundException("İş emri bulunamadı");
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id });
     return this.findOne(tenantId, id);
   }
 
@@ -346,12 +353,14 @@ export class WorkOrdersService {
     if (status === "COMPLETED" && wo.operations.some((operation) => operation.status !== "COMPLETED" && operation.status !== "SKIPPED")) {
       throw new ConflictException("Rotalı iş emri, tüm operasyonları tamamlanmadan kapatılamaz");
     }
-    const updated = await this.prisma.workOrder.updateMany({
-      where: { id, tenantId, status: wo.status },
-      data: { status },
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.workOrder.updateMany({
+        where: { id, tenantId, status: wo.status },
+        data: { status },
+      });
+      if (updated.count === 0) throw new ConflictException("İş emri durumu eşzamanlı değişti; tekrar deneyin");
+      await this.outbox.record(tx, tenantId, "workorder", id, "workorder.updated", { id, status });
     });
-    if (updated.count === 0) throw new ConflictException("İş emri durumu eşzamanlı değişti; tekrar deneyin");
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id, status });
     return this.findOne(tenantId, id);
   }
 
@@ -442,12 +451,14 @@ export class WorkOrdersService {
       const program = await this.ncPrograms().assertNcProgramUsable(tenantId, dto.ncProgramId, workOrder.partId, dto.machineId ?? operation.machineId);
       ncSnapshot = { ncProgramId: program.id, ncProgramVersion: program.version, ncProgramChecksum: program.checksum, ncProgramFileName: program.fileName, ncProgramStorageKey: program.storageKey };
     }
-    const updated = await this.prisma.workOrderOperation.updateMany({
-      where: { id: operation.id, tenantId, workOrderId },
-      data: { ...dto, ...ncSnapshot },
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.workOrderOperation.updateMany({
+        where: { id: operation.id, tenantId, workOrderId },
+        data: { ...dto, ...ncSnapshot },
+      });
+      if (updated.count === 0) throw new NotFoundException("İş emri operasyonu bulunamadı");
+      await this.outbox.record(tx, tenantId, "workorder", workOrderId, "workorder.updated", { id: workOrderId });
     });
-    if (updated.count === 0) throw new NotFoundException("İş emri operasyonu bulunamadı");
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id: workOrderId });
     return this.prisma.workOrderOperation.findFirstOrThrow({
       where: { id: operation.id, tenantId, workOrderId },
       include: { machine: { select: { id: true, name: true } }, ncProgram: { select: { id: true, version: true, status: true, fileName: true, checksum: true, effectivityScope: true } } },
@@ -483,8 +494,8 @@ export class WorkOrdersService {
       });
       if (!updated.count) throw new ConflictException("Operasyon durumu eşzamanlı değişti; tekrar deneyin");
       if (this.tooling) await this.tooling.completeOperation(tx, tenantId, userId, operation.id);
+      await this.outbox.record(tx, tenantId, "workorder", workOrderId, "workorder.updated", { id: workOrderId });
     });
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id: workOrderId });
     return this.prisma.workOrderOperation.findFirstOrThrow({
       where: { id: operation.id, tenantId, workOrderId },
       include: { machine: { select: { id: true, name: true } } },
@@ -496,9 +507,11 @@ export class WorkOrdersService {
     if (wo.status !== "PLANNED" && wo.status !== "CANCELLED") {
       throw new ConflictException("Sadece PLANNED veya CANCELLED iş emri silinebilir");
     }
-    const deleted = await this.prisma.workOrder.deleteMany({ where: { id, tenantId } });
-    if (deleted.count === 0) throw new NotFoundException("İş emri bulunamadı");
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id, deleted: true });
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.workOrder.deleteMany({ where: { id, tenantId } });
+      if (deleted.count === 0) throw new NotFoundException("İş emri bulunamadı");
+      await this.outbox.record(tx, tenantId, "workorder", id, "workorder.updated", { id, deleted: true });
+    });
     return wo;
   }
 
