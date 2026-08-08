@@ -13,9 +13,9 @@ function buildService(overrides: any = {}) {
     $transaction: jest.fn((fn) => fn(prisma)),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const nonConformance = { create: jest.fn().mockResolvedValue({ id: "nc1" }) };
-  return { service: new InspectionsService(prisma, realtime as any, nonConformance as any), prisma, realtime, nonConformance };
+  return { service: new InspectionsService(prisma, nonConformance as any, outbox as any), prisma, outbox, nonConformance };
 }
 
 describe("InspectionsService quality plan controls", () => {
@@ -38,7 +38,7 @@ describe("InspectionsService quality plan controls", () => {
   });
 
   it("forces FAIL, creates an NCR, and retains the plan checkpoint when a measurement is out of tolerance", async () => {
-    const { service, prisma, nonConformance, realtime } = buildService();
+    const { service, prisma, nonConformance, outbox } = buildService();
     prisma.qualityPlanCheck.findFirst.mockResolvedValue({
       checkpointName: "Diameter",
       unit: "mm",
@@ -71,6 +71,6 @@ describe("InspectionsService quality plan controls", () => {
     expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ entity: "inspections", entityId: "ins1", action: "CREATE" }),
     }));
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("tenant1", "inspection.created", expect.objectContaining({ result: "FAIL" }));
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "tenant1", "inspection", "ins1", "inspection.created", expect.objectContaining({ result: "FAIL" }));
   });
 });

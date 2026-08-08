@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { MaintenanceOrderStatus } from "@prisma/client";
 import type { CompleteMaintenanceOrderDto, CreateMaintenanceOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { nextDocNo } from "../common/numbering";
 
@@ -26,8 +26,8 @@ const MO_INCLUDE = {
 export class MaintenanceOrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, machineId?: string, status?: MaintenanceOrderStatus) {
@@ -50,12 +50,13 @@ export class MaintenanceOrdersService {
 
     const created = await this.prisma.$transaction(async (tx) => {
       const bakNo = await nextDocNo(tx, "maintenanceOrder", "bakNo", "BAK");
-      return tx.maintenanceOrder.create({
+      const mo = await tx.maintenanceOrder.create({
         data: { ...dto, tenantId, bakNo, createdById: userId },
         include: MO_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "maintenanceorder", mo.id, "maintenanceorder.updated", { id: mo.id });
+      return mo;
     });
-    this.realtime.emitToTenant(tenantId, "maintenanceorder.updated", { id: created.id });
     return created;
   }
 
@@ -64,12 +65,15 @@ export class MaintenanceOrdersService {
     if (!TRANSITIONS[mo.status].includes(status)) {
       throw new ConflictException(`Geçersiz durum geçişi: ${mo.status} → ${status}`);
     }
-    const updated = await this.prisma.maintenanceOrder.update({
-      where: { id },
-      data: { status },
-      include: MO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.maintenanceOrder.update({
+        where: { id },
+        data: { status },
+        include: MO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "maintenanceorder", id, "maintenanceorder.updated", { id, status });
+      return updated;
     });
-    this.realtime.emitToTenant(tenantId, "maintenanceorder.updated", { id, status });
     return updated;
   }
 
@@ -96,9 +100,9 @@ export class MaintenanceOrdersService {
           });
         }
       }
+      await this.outbox.record(tx, tenantId, "maintenanceorder", id, "maintenanceorder.updated", { id, status: "COMPLETED" });
       return result;
     });
-    this.realtime.emitToTenant(tenantId, "maintenanceorder.updated", { id, status: "COMPLETED" });
     return updated;
   }
 
@@ -129,7 +133,7 @@ export class MaintenanceOrdersService {
       const elapsed = Number(machine.runtimeHours) - Number(machine.lastPmRuntimeHours);
       const mo = await this.prisma.$transaction(async (tx) => {
         const bakNo = await nextDocNo(tx, "maintenanceOrder", "bakNo", "BAK");
-        return tx.maintenanceOrder.create({
+        const created = await tx.maintenanceOrder.create({
           data: {
             tenantId,
             bakNo,
@@ -141,8 +145,9 @@ export class MaintenanceOrdersService {
           },
           include: MO_INCLUDE,
         });
+        await this.outbox.record(tx, tenantId, "maintenanceorder", created.id, "maintenanceorder.updated", { id: created.id });
+        return created;
       });
-      this.realtime.emitToTenant(tenantId, "maintenanceorder.updated", { id: mo.id });
       await this.notifications.notifyRoles(tenantId, ["ADMIN", "FOREMAN"], {
         type: "PREDICTIVE_MAINTENANCE_DUE",
         title: "Öngörülü bakım gerekiyor",

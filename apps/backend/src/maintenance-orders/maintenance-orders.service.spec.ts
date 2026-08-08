@@ -17,10 +17,10 @@ function buildService(overrides: any = {}) {
     ...overrides,
   };
   prisma.$transaction = jest.fn((cb: any) => cb(prisma));
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const notifications = { notifyRoles: jest.fn() };
-  const service = new MaintenanceOrdersService(prisma as any, realtime as any, notifications as any);
-  return { service, prisma, realtime, notifications };
+  const service = new MaintenanceOrdersService(prisma as any, notifications as any, outbox as any);
+  return { service, prisma, outbox, notifications };
 }
 
 describe("MaintenanceOrdersService.setStatus", () => {
@@ -52,7 +52,7 @@ describe("MaintenanceOrdersService.complete", () => {
   });
 
   it("IN_PROGRESS durumdan tamamlanır, completedAt set edilir", async () => {
-    const { service, prisma, realtime } = buildService();
+    const { service, prisma, outbox } = buildService();
     prisma.maintenanceOrder.findFirst.mockResolvedValue({ id: "mo1", status: "IN_PROGRESS", notes: null });
     prisma.maintenanceOrder.update.mockResolvedValue({ id: "mo1", status: "COMPLETED" });
 
@@ -64,7 +64,7 @@ describe("MaintenanceOrdersService.complete", () => {
       }),
     );
     expect(updated.status).toBe("COMPLETED");
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "maintenanceorder.updated", {
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "t1", "maintenanceorder", "mo1", "maintenanceorder.updated", {
       id: "mo1",
       status: "COMPLETED",
     });

@@ -13,9 +13,9 @@ import type {
   UpdateMachineTagDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NotificationsService } from "../notifications/notifications.service";
 import { DowntimeService } from "../downtime/downtime.service";
+import { OutboxService } from "../outbox/outbox.service";
 
 const CONNECTOR_USER_EMAIL = "machine-connector@ahkmes.local";
 
@@ -23,9 +23,9 @@ const CONNECTOR_USER_EMAIL = "machine-connector@ahkmes.local";
 export class MachinesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
     private readonly downtime: DowntimeService,
+    private readonly outbox: OutboxService,
   ) {}
 
   private static readonly PUBLIC_SELECT = {
@@ -162,7 +162,7 @@ export class MachinesService {
         }
         const operator = await this.connectorUser(tenantId);
         await this.prisma.$transaction(async (tx) => {
-          await tx.productionRun.create({
+          const run = await tx.productionRun.create({
             data: {
               tenantId,
               workOrderId: machine.activeWorkOrderId!,
@@ -174,9 +174,9 @@ export class MachinesService {
           if (wo.status !== "IN_PRODUCTION") {
             await tx.workOrder.update({ where: { id: wo.id }, data: { status: "IN_PRODUCTION" } });
           }
+          await this.outbox.record(tx, tenantId, "productionrun", run.id, "productionrun.updated", { machineId: machine.id });
+          await this.outbox.record(tx, tenantId, "workorder", wo.id, "workorder.updated", { id: wo.id });
         });
-        this.realtime.emitToTenant(tenantId, "productionrun.updated", { machineId: machine.id });
-        this.realtime.emitToTenant(tenantId, "workorder.updated", { id: wo.id });
       }
     }
 
@@ -211,15 +211,14 @@ export class MachinesService {
             });
             await tx.machine.update({ where: { id: machine.id }, data: { activeWorkOrderId: null } });
           }
+          await this.outbox.record(tx, tenantId, "productionrun", activeRun.id, "productionrun.updated", { id: activeRun.id });
+          if (targetReached) {
+            await this.outbox.record(tx, tenantId, "workorder", machine.activeWorkOrderId!, "workorder.updated", {
+              id: machine.activeWorkOrderId,
+              status: "COMPLETED",
+            });
+          }
         });
-
-        this.realtime.emitToTenant(tenantId, "productionrun.updated", { id: activeRun.id });
-        if (targetReached) {
-          this.realtime.emitToTenant(tenantId, "workorder.updated", {
-            id: machine.activeWorkOrderId,
-            status: "COMPLETED",
-          });
-        }
       }
     }
 
@@ -234,13 +233,15 @@ export class MachinesService {
           source: "MACHINE",
         },
       });
-      if (activeRun) {
-        await this.prisma.productionRun.update({
-          where: { id: activeRun.id },
-          data: { downtimeNote: alarmMessage },
-        });
-      }
-      this.realtime.emitToTenant(tenantId, "machine.alarm", { machineId: machine.id, message: alarmMessage });
+      await this.prisma.$transaction(async (tx) => {
+        if (activeRun) {
+          await tx.productionRun.update({
+            where: { id: activeRun.id },
+            data: { downtimeNote: alarmMessage },
+          });
+        }
+        await this.outbox.record(tx, tenantId, "machine", machine.id, "machine.alarm", { machineId: machine.id, message: alarmMessage });
+      });
       await this.notifications.notifyRoles(tenantId, ["ADMIN", "FOREMAN"], {
         type: "MACHINE_ALARM",
         title: "Makine alarmı",
@@ -259,21 +260,23 @@ export class MachinesService {
 
     // OEE trend/duruş (downtime) Pareto analizi bu geçmişten türetilir — her telemetri
     // olayı zaman damgasıyla kalıcı olarak kaydedilir (bkz. oee/oee.service.ts).
-    await this.prisma.machineStatusEvent.create({
-      data: {
-        tenantId,
-        machineId: machine.id,
-        type: dto.type,
-        message: alarmMessage,
-        workOrderId: machine.activeWorkOrderId,
-      },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.machineStatusEvent.create({
+        data: {
+          tenantId,
+          machineId: machine.id,
+          type: dto.type,
+          message: alarmMessage,
+          workOrderId: machine.activeWorkOrderId,
+        },
+      });
 
-    await this.prisma.machine.update({
-      where: { id: machine.id },
-      data: { lastEventAt: new Date(), lastStatus: dto.type },
+      await tx.machine.update({
+        where: { id: machine.id },
+        data: { lastEventAt: new Date(), lastStatus: dto.type },
+      });
+      await this.outbox.record(tx, tenantId, "machine", machine.id, "machine.updated", { id: machine.id, status: dto.type });
     });
-    this.realtime.emitToTenant(tenantId, "machine.updated", { id: machine.id, status: dto.type });
     return { ok: true };
   }
 
@@ -282,22 +285,24 @@ export class MachinesService {
     const tenantId = machine.tenantId;
     const applied: { tagName: string; value: string; timestamp: string }[] = [];
 
-    for (const v of dto.values) {
-      const tag = await this.prisma.machineTag.findFirst({
-        where: { tenantId, machineId: machine.id, name: v.tagName },
-      });
-      if (!tag) continue; // Tanımsız tag adı sessizce atlanır — tag'ler ayrı CRUD ile tanımlanır.
-      const timestamp = (v.timestamp ?? new Date()).toISOString();
-      await this.prisma.machineTag.update({
-        where: { id: tag.id },
-        data: { lastValue: v.value, lastValueAt: timestamp },
-      });
-      applied.push({ tagName: v.tagName, value: v.value, timestamp });
-    }
+    await this.prisma.$transaction(async (tx) => {
+      for (const v of dto.values) {
+        const tag = await tx.machineTag.findFirst({
+          where: { tenantId, machineId: machine.id, name: v.tagName },
+        });
+        if (!tag) continue; // Tanımsız tag adı sessizce atlanır — tag'ler ayrı CRUD ile tanımlanır.
+        const timestamp = (v.timestamp ?? new Date()).toISOString();
+        await tx.machineTag.update({
+          where: { id: tag.id },
+          data: { lastValue: v.value, lastValueAt: timestamp },
+        });
+        applied.push({ tagName: v.tagName, value: v.value, timestamp });
+      }
 
-    if (applied.length > 0) {
-      this.realtime.emitToTenant(tenantId, "tag.value.updated", { machineId: machine.id, values: applied });
-    }
+      if (applied.length > 0) {
+        await this.outbox.record(tx, tenantId, "machine", machine.id, "tag.value.updated", { machineId: machine.id, values: applied });
+      }
+    });
     return { ok: true, applied: applied.length };
   }
 

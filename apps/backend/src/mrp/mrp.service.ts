@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { PurchasingService } from "../purchasing/purchasing.service";
@@ -38,12 +38,12 @@ type Decision = "approve" | "reject";
 export class MrpService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
     private readonly approvals: ApprovalsService,
     private readonly purchasing: PurchasingService,
     private readonly workOrders: WorkOrdersService,
     private readonly auth: AuthService,
+    private readonly outbox: OutboxService,
   ) {}
 
   /** MRP II için kapasite girdilerinin gerçek durumunu gösterir. Mevcut modelde
@@ -382,13 +382,14 @@ export class MrpService {
         );
       }
 
+      await this.outbox.record(tx, tenantId, "mrp", purchaseProposal?.id ?? tenantId, "mrp.proposal.created", {
+        purchaseProposalId: purchaseProposal?.id,
+        productionProposalCount: productionProposals.length,
+      });
+
       return { purchaseProposal, productionProposals };
     });
 
-    this.realtime.emitToTenant(tenantId, "mrp.proposal.created", {
-      purchaseProposalId: result.purchaseProposal?.id,
-      productionProposalCount: result.productionProposals.length,
-    });
     await this.notifications.notifyRoles(tenantId, ["PLANNER"], {
       type: "MRP_PROPOSAL_CREATED",
       title: "Yeni MRP önerisi oluşturuldu",
@@ -435,9 +436,10 @@ export class MrpService {
       await this.approvals.request(tenantId, userId, {
         entity: "purchase-proposal", entityId: id, requiredRoles: ["PLANNER"],
       }, tx);
-      return tx.purchaseProposal.update({ where: { id }, data: { status: "PENDING_APPROVAL" } });
+      const result = await tx.purchaseProposal.update({ where: { id }, data: { status: "PENDING_APPROVAL" } });
+      await this.outbox.record(tx, tenantId, "purchaseproposal", id, "purchaseproposal.updated", { id, status: result.status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "purchaseproposal.updated", { id, status: updated.status });
     return updated;
   }
 
@@ -449,9 +451,10 @@ export class MrpService {
       await this.approvals.request(tenantId, userId, {
         entity: "production-proposal", entityId: id, requiredRoles: ["PLANNER"],
       }, tx);
-      return tx.productionProposal.update({ where: { id }, data: { status: "PENDING_APPROVAL" } });
+      const result = await tx.productionProposal.update({ where: { id }, data: { status: "PENDING_APPROVAL" } });
+      await this.outbox.record(tx, tenantId, "productionproposal", id, "productionproposal.updated", { id, status: result.status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "productionproposal.updated", { id, status: updated.status });
     return updated;
   }
 
@@ -484,7 +487,9 @@ export class MrpService {
       if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
       if (action === "reject") {
         await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
-        return { updated: await tx.purchaseProposal.update({ where: { id }, data: { status: "REJECTED" } }), approvalReq, status: "REJECTED" as const };
+        const updated = await tx.purchaseProposal.update({ where: { id }, data: { status: "REJECTED" } });
+        await this.outbox.record(tx, tenantId, "purchaseproposal", id, "purchaseproposal.updated", { id, status: updated.status });
+        return { updated, approvalReq, status: "REJECTED" as const };
       }
       const chosenSupplierId = supplierId ?? proposal.supplierId;
       if (!chosenSupplierId) throw new ConflictException("Satınalma önerisini onaylamak için tedarikçi seçilmeli");
@@ -493,10 +498,11 @@ export class MrpService {
         lines: proposal.lines.map((l) => ({ materialId: l.materialId, quantity: Number(l.qty), unitPrice: 0 })),
       });
       await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
-      return { updated: await tx.purchaseProposal.update({ where: { id }, data: { status: "CONVERTED", convertedToId: po.id, supplierId: chosenSupplierId } }), approvalReq, status: "APPROVED" as const };
+      const updated = await tx.purchaseProposal.update({ where: { id }, data: { status: "CONVERTED", convertedToId: po.id, supplierId: chosenSupplierId } });
+      await this.outbox.record(tx, tenantId, "purchaseproposal", id, "purchaseproposal.updated", { id, status: updated.status });
+      return { updated, approvalReq, status: "APPROVED" as const };
     });
     await this.approvals.notifyDecision(tenantId, result.approvalReq, result.status, note);
-    this.realtime.emitToTenant(tenantId, "purchaseproposal.updated", { id, status: result.updated.status });
     return result.updated;
   }
 
@@ -519,14 +525,17 @@ export class MrpService {
       if (!approvalReq) throw new NotFoundException("Bekleyen onay talebi bulunamadı");
       if (action === "reject") {
         await this.approvals.reject(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
-        return { updated: await tx.productionProposal.update({ where: { id }, data: { status: "REJECTED" } }), approvalReq, status: "REJECTED" as const };
+        const updated = await tx.productionProposal.update({ where: { id }, data: { status: "REJECTED" } });
+        await this.outbox.record(tx, tenantId, "productionproposal", id, "productionproposal.updated", { id, status: updated.status });
+        return { updated, approvalReq, status: "REJECTED" as const };
       }
       const wo = await this.workOrders.createInTransaction(tx, tenantId, { partId: proposal.partId, quantity: Number(proposal.qty), dueDate: proposal.dueDate, priority: 5 });
       await this.approvals.approve(tenantId, approvalReq.id, decidedById, decidedRole, note, tx, false, reauth);
-      return { updated: await tx.productionProposal.update({ where: { id }, data: { status: "CONVERTED", convertedToId: wo.id } }), approvalReq, status: "APPROVED" as const };
+      const updated = await tx.productionProposal.update({ where: { id }, data: { status: "CONVERTED", convertedToId: wo.id } });
+      await this.outbox.record(tx, tenantId, "productionproposal", id, "productionproposal.updated", { id, status: updated.status });
+      return { updated, approvalReq, status: "APPROVED" as const };
     });
     await this.approvals.notifyDecision(tenantId, result.approvalReq, result.status, note);
-    this.realtime.emitToTenant(tenantId, "productionproposal.updated", { id, status: result.updated.status });
     return result.updated;
   }
 }

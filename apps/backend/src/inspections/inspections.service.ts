@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateInspectionDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { NonConformanceService } from "../non-conformance/non-conformance.service";
 import { nextDocNo } from "../common/numbering";
 import { writeTransactionalAudit } from "../common/transactional-audit";
@@ -20,8 +20,8 @@ const INSPECTION_INCLUDE = {
 export class InspectionsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly nonConformance: NonConformanceService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string) {
@@ -100,14 +100,14 @@ export class InspectionsService {
         action: "CREATE",
         after: inspection,
       });
+      await this.outbox.record(tx, tenantId, "inspection", inspection.id, "inspection.created", {
+        id: inspection.id,
+        workOrderId: dto.workOrderId,
+        result,
+      });
       return inspection;
     });
 
-    this.realtime.emitToTenant(tenantId, "inspection.created", {
-      id: created.id,
-      workOrderId: dto.workOrderId,
-      result,
-    });
     return created;
   }
 }

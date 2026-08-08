@@ -41,7 +41,7 @@ function buildTxMock() {
 
 function buildService(prisma: ReturnType<typeof buildPrismaMock>) {
   if (!prisma.$transaction.getMockImplementation()) prisma.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) => cb(prisma));
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const notifications = { notifyRoles: jest.fn().mockResolvedValue(undefined) };
   const approvals = {
     request: jest.fn().mockResolvedValue({ id: "ar1" }),
@@ -56,8 +56,8 @@ function buildService(prisma: ReturnType<typeof buildPrismaMock>) {
   };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new MrpService(prisma as any, realtime as any, notifications as any, approvals as any, purchasing as any, workOrders as any, auth as any);
-  return { service, prisma, realtime, notifications, approvals, purchasing, workOrders, auth };
+  const service = new MrpService(prisma as any, notifications as any, approvals as any, purchasing as any, workOrders as any, auth as any, outbox as any);
+  return { service, prisma, outbox, notifications, approvals, purchasing, workOrders, auth };
 }
 
 describe("MrpService.run", () => {
