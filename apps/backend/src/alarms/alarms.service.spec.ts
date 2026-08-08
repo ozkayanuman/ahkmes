@@ -2,16 +2,17 @@ import { AlarmsService } from "./alarms.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     machine: { findFirst: jest.fn().mockResolvedValue({ id: "m1" }) },
     alarmDefinition: { findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn(), findMany: jest.fn() },
     machineStatusEvent: { findFirst: jest.fn(), update: jest.fn(), findMany: jest.fn() },
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  prisma.$transaction = jest.fn((fn: any) => fn(prisma));
+  const outbox = { record: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new AlarmsService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const service = new AlarmsService(prisma as any, outbox as any);
+  return { service, prisma, outbox };
 }
 
 describe("AlarmsService.acknowledge", () => {
@@ -34,7 +35,7 @@ describe("AlarmsService.acknowledge", () => {
   });
 
   it("onaylanmamış ALARM olayı onaylanır", async () => {
-    const { service, prisma, realtime } = buildService();
+    const { service, prisma, outbox } = buildService();
     prisma.machineStatusEvent.findFirst.mockResolvedValue({ id: "e1", type: "ALARM", acknowledgedAt: null, machineId: "m1" });
     prisma.machineStatusEvent.update.mockResolvedValue({ id: "e1", acknowledgedById: "u1" });
 
@@ -46,7 +47,7 @@ describe("AlarmsService.acknowledge", () => {
         data: expect.objectContaining({ acknowledgedById: "u1", ackNote: "giderildi" }),
       }),
     );
-    expect(realtime.emitToTenant).toHaveBeenCalled();
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "t1", "alarm", "e1", "alarm.acknowledged", { id: "e1", machineId: "m1" });
     expect(result.id).toBe("e1");
   });
 });

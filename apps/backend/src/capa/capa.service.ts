@@ -2,7 +2,6 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import type { Role } from "@prisma/client";
 import type { CreateCapaDto, UpdateCapaDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { AuthService } from "../auth/auth.service";
 import { nextDocNo } from "../common/numbering";
@@ -24,7 +23,6 @@ type Decision = "approve" | "reject";
 export class CapaService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly approvals: ApprovalsService,
     private readonly auth: AuthService,
     private readonly outbox: OutboxService,
@@ -54,12 +52,13 @@ export class CapaService {
 
     const created = await this.prisma.$transaction(async (tx) => {
       const dofNo = await nextDocNo(tx, "capa", "dofNo", "DOF");
-      return tx.capa.create({
+      const capa = await tx.capa.create({
         data: { ...dto, tenantId, dofNo, createdById: userId },
         include: CAPA_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "capa", capa.id, "capa.updated", { id: capa.id });
+      return capa;
     });
-    this.realtime.emitToTenant(tenantId, "capa.updated", { id: created.id });
     return created;
   }
 
@@ -68,8 +67,11 @@ export class CapaService {
     if (capa.status !== "DRAFT") {
       throw new ConflictException("Sadece taslak (DRAFT) CAPA düzenlenebilir");
     }
-    const updated = await this.prisma.capa.update({ where: { id }, data: dto, include: CAPA_INCLUDE });
-    this.realtime.emitToTenant(tenantId, "capa.updated", { id });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.capa.update({ where: { id }, data: dto, include: CAPA_INCLUDE });
+      await this.outbox.record(tx, tenantId, "capa", id, "capa.updated", { id });
+      return updated;
+    });
     return updated;
   }
 
@@ -81,9 +83,10 @@ export class CapaService {
       await this.approvals.request(tenantId, userId, {
         entity: "capa", entityId: id, requiredRoles: ["ADMIN"],
       }, tx);
-      return tx.capa.update({ where: { id }, data: { status: "PENDING_APPROVAL" }, include: CAPA_INCLUDE });
+      const result = await tx.capa.update({ where: { id }, data: { status: "PENDING_APPROVAL" }, include: CAPA_INCLUDE });
+      await this.outbox.record(tx, tenantId, "capa", id, "capa.updated", { id, status: "PENDING_APPROVAL" });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: "PENDING_APPROVAL" });
     return updated;
   }
 
@@ -129,12 +132,15 @@ export class CapaService {
     if (capa.status !== "APPROVED") {
       throw new ConflictException("Sadece onaylanmış (APPROVED) CAPA kapatılabilir");
     }
-    const updated = await this.prisma.capa.update({
-      where: { id },
-      data: { status: "CLOSED", closedAt: new Date() },
-      include: CAPA_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.capa.update({
+        where: { id },
+        data: { status: "CLOSED", closedAt: new Date() },
+        include: CAPA_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "capa", id, "capa.updated", { id, status: "CLOSED" });
+      return updated;
     });
-    this.realtime.emitToTenant(tenantId, "capa.updated", { id, status: "CLOSED" });
     return updated;
   }
 }

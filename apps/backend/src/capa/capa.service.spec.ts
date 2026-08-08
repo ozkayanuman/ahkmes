@@ -11,7 +11,6 @@ function buildService(overrides: any = {}) {
     $transaction: jest.fn((fn) => fn(prisma)),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
   const approvals = {
     request: jest.fn().mockResolvedValue({ id: "ar1" }),
     approve: jest.fn().mockResolvedValue({}),
@@ -23,8 +22,8 @@ function buildService(overrides: any = {}) {
   };
   const outbox = new OutboxService();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new CapaService(prisma as any, realtime as any, approvals as any, auth as any, outbox);
-  return { service, prisma, realtime, approvals, auth, outbox };
+  const service = new CapaService(prisma as any, approvals as any, auth as any, outbox);
+  return { service, prisma, approvals, auth, outbox };
 }
 
 describe("CapaService.submitForApproval", () => {
@@ -53,7 +52,7 @@ describe("CapaService.submitForApproval", () => {
 
 describe("CapaService.decide", () => {
   it("onaylanınca status APPROVED olur", async () => {
-    const { service, prisma, approvals, auth, realtime } = buildService();
+    const { service, prisma, approvals, auth } = buildService();
     prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "PENDING_APPROVAL" });
     prisma.capa.update.mockResolvedValue({ id: "c1", status: "APPROVED" });
 
@@ -70,7 +69,6 @@ describe("CapaService.decide", () => {
     expect(prisma.outboxEvent.create).toHaveBeenCalledWith({
       data: { tenantId: "t1", aggregateType: "capa", aggregateId: "c1", eventType: "capa.updated", payload: { id: "c1", status: "APPROVED" } },
     });
-    expect(realtime.emitToTenant).not.toHaveBeenCalled();
   });
 
   it("reddedilince status REJECTED olur", async () => {
