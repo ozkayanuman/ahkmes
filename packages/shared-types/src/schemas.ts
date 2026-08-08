@@ -737,7 +737,8 @@ export type PurchaseOrderStatusUpdateDto = z.infer<typeof purchaseOrderStatusUpd
 // ---- MaterialConsumption (Faz 0c) ----
 export const createConsumptionSchema = z.object({
   workOrderId: idSchema,
-  materialId: idSchema,
+  itemType: StockItemTypeSchema,
+  itemId: idSchema,
   type: ConsumptionTypeSchema,
   quantity: positiveQty,
   date: isoDate.optional(),

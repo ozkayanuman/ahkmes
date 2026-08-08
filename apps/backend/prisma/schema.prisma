@@ -1371,7 +1371,6 @@ model Material {
   updatedAt    DateTime     @updatedAt
 
   purchaseOrderLines    PurchaseOrderLine[]
-  consumptions          MaterialConsumption[]
   purchaseProposalLines PurchaseProposalLine[]
 
   @@unique([tenantId, code])
@@ -1536,7 +1535,11 @@ model MaterialConsumption {
   id          String          @id @default(uuid())
   tenantId    String
   workOrderId String
-  materialId  String
+  /// Faz K: tüketilen kalem doğrudan Material veya alt montaj olarak Part
+  /// olabilir (diğer polimorfik modellerle aynı desen) — isim çözümlemesi
+  /// frontend'de itemType'a göre yapılır (Lot'un zaten kullandığı desen).
+  itemType    StockItemType
+  itemId      String
   type        ConsumptionType
   quantity    Decimal         @db.Decimal(18, 3)
   date        DateTime        @default(now())
@@ -1545,7 +1548,6 @@ model MaterialConsumption {
   updatedAt   DateTime        @updatedAt
 
   workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
-  material  Material  @relation(fields: [materialId], references: [id])
   createdBy User      @relation(fields: [createdById], references: [id])
   /// Faz F: tüketilen malzemenin hangi lottan geldiği — backward traceability'nin temeli
   /// (bkz. LotsService.trace). Opsiyonel: lot takibi yapılmayan malzemelerde null kalır.
@@ -1554,6 +1556,7 @@ model MaterialConsumption {
   binId     String?
 
   @@index([tenantId])
+  @@index([tenantId, itemType, itemId])
 }
 
 model ProductionRun {

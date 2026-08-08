@@ -25,6 +25,11 @@ interface MaterialOption {
   unit: string;
   stockQty: string;
 }
+interface PartOption {
+  id: string;
+  partNo: string;
+  name: string;
+}
 interface BinOption {
   id: string;
   code: string;
@@ -32,10 +37,11 @@ interface BinOption {
 }
 interface ConsumptionRow {
   id: string;
+  itemType: "MATERIAL" | "PART";
+  itemId: string;
   type: "RESERVED" | "CONSUMED";
   quantity: string;
   date: string;
-  material: MaterialOption;
   createdBy: { name: string };
 }
 interface FinishedGoodsRow {
@@ -83,13 +89,19 @@ export function WorkOrderDetailPage() {
     notes: "",
   });
   const [err, setErr] = useState<string | null>(null);
-  const [consForm, setConsForm] = useState({ materialId: "", type: "CONSUMED", quantity: "", binId: "" });
+  const [consForm, setConsForm] = useState({
+    itemType: "MATERIAL" as "MATERIAL" | "PART",
+    itemId: "",
+    type: "CONSUMED",
+    quantity: "",
+    binId: "",
+  });
   const [fgQty, setFgQty] = useState("");
   const [fgBinId, setFgBinId] = useState("");
 
   useInvalidateOn(
     ["workorder.updated", "stock.updated", "productionrun.updated"],
-    ["/work-orders", "/consumptions", "/finished-goods", "/materials"],
+    ["/work-orders", "/consumptions", "/finished-goods", "/materials", "/parts"],
   );
 
   const query = useQuery({
@@ -137,6 +149,11 @@ export function WorkOrderDetailPage() {
   const materials = useQuery({
     queryKey: ["/materials"],
     queryFn: () => apiGet<MaterialOption[]>("/materials"),
+    enabled: canConsume,
+  });
+  const parts = useQuery({
+    queryKey: ["/parts"],
+    queryFn: () => apiGet<PartOption[]>("/parts"),
     enabled: canConsume,
   });
   const bins = useQuery({
@@ -200,19 +217,21 @@ export function WorkOrderDetailPage() {
     qc.invalidateQueries({ queryKey: ["/consumptions"] });
     qc.invalidateQueries({ queryKey: ["/finished-goods"] });
     qc.invalidateQueries({ queryKey: ["/materials"] });
+    qc.invalidateQueries({ queryKey: ["/parts"] });
   };
   const addConsumption = useMutation({
     mutationFn: () =>
       apiPost("/consumptions", {
         workOrderId: id,
-        materialId: consForm.materialId,
+        itemType: consForm.itemType,
+        itemId: consForm.itemId,
         type: consForm.type,
         quantity: Number(consForm.quantity),
         ...(consForm.binId ? { binId: consForm.binId } : {}),
       }),
     onSuccess: () => {
       invalidateOps();
-      setConsForm({ materialId: "", type: "CONSUMED", quantity: "", binId: "" });
+      setConsForm({ itemType: "MATERIAL", itemId: "", type: "CONSUMED", quantity: "", binId: "" });
     },
     onError,
   });
@@ -418,19 +437,38 @@ export function WorkOrderDetailPage() {
           {canConsume && !terminal && (
             <Card className="mb-3">
               <div className="flex flex-wrap items-end gap-2">
+                <div className="w-32">
+                  <Label htmlFor="consItemType">Kalem Tipi</Label>
+                  <Select
+                    id="consItemType"
+                    value={consForm.itemType}
+                    onChange={(e) =>
+                      setConsForm({ ...consForm, itemType: e.target.value as "MATERIAL" | "PART", itemId: "" })
+                    }
+                  >
+                    <option value="MATERIAL">Malzeme</option>
+                    <option value="PART">Parça (alt montaj)</option>
+                  </Select>
+                </div>
                 <div className="min-w-52 flex-1">
-                  <Label htmlFor="consMat">Malzeme</Label>
+                  <Label htmlFor="consMat">Kalem</Label>
                   <Select
                     id="consMat"
-                    value={consForm.materialId}
-                    onChange={(e) => setConsForm({ ...consForm, materialId: e.target.value })}
+                    value={consForm.itemId}
+                    onChange={(e) => setConsForm({ ...consForm, itemId: e.target.value })}
                   >
                     <option value="">Seçin…</option>
-                    {materials.data?.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.code} — {m.name} (stok {fmtQty(m.stockQty)} {m.unit})
-                      </option>
-                    ))}
+                    {consForm.itemType === "MATERIAL"
+                      ? materials.data?.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.code} — {m.name} (stok {fmtQty(m.stockQty)} {m.unit})
+                          </option>
+                        ))
+                      : parts.data?.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.partNo} — {p.name}
+                          </option>
+                        ))}
                   </Select>
                 </div>
                 <div className="w-32">
@@ -464,7 +502,7 @@ export function WorkOrderDetailPage() {
                 </div>
                 <Button
                   disabled={
-                    !consForm.materialId || !(Number(consForm.quantity) > 0) || addConsumption.isPending
+                    !consForm.itemId || !(Number(consForm.quantity) > 0) || addConsumption.isPending
                   }
                   onClick={() => addConsumption.mutate()}
                 >
@@ -473,7 +511,7 @@ export function WorkOrderDetailPage() {
               </div>
             </Card>
           )}
-          <Table headers={["Malzeme", "Tür", "Miktar", "Tarih", "Kaydeden", ""]}>
+          <Table headers={["Kalem", "Tür", "Miktar", "Tarih", "Kaydeden", ""]}>
             {consumptions.data?.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
@@ -481,11 +519,20 @@ export function WorkOrderDetailPage() {
                 </td>
               </tr>
             )}
-            {consumptions.data?.map((c) => (
+            {consumptions.data?.map((c) => {
+              const item =
+                c.itemType === "MATERIAL"
+                  ? materials.data?.find((m) => m.id === c.itemId)
+                  : parts.data?.find((p) => p.id === c.itemId);
+              const itemLabel = item
+                ? c.itemType === "MATERIAL"
+                  ? `${(item as MaterialOption).code} — ${item.name}`
+                  : `${(item as PartOption).partNo} — ${item.name}`
+                : c.itemId;
+              const unit = c.itemType === "MATERIAL" ? (item as MaterialOption | undefined)?.unit ?? "" : "";
+              return (
               <tr key={c.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3">
-                  {c.material.code} — {c.material.name}
-                </td>
+                <td className="px-4 py-3">{itemLabel}</td>
                 <td className="px-4 py-3">
                   <span
                     className={
@@ -498,7 +545,7 @@ export function WorkOrderDetailPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {fmtQty(c.quantity)} {c.material.unit}
+                  {fmtQty(c.quantity)} {unit}
                 </td>
                 <td className="px-4 py-3">{fmtDate(c.date)}</td>
                 <td className="px-4 py-3">{c.createdBy.name}</td>
@@ -520,7 +567,8 @@ export function WorkOrderDetailPage() {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </Table>
         </div>
 

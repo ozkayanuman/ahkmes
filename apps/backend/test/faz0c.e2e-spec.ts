@@ -121,7 +121,7 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
       const res = await auth(
         api()
           .post("/consumptions")
-          .send({ workOrderId: woId, materialId, type: "RESERVED", quantity: 10 }),
+          .send({ workOrderId: woId, itemType: "MATERIAL", itemId: materialId, type: "RESERVED", quantity: 10 }),
       ).expect(201);
       consumptionIds.push(res.body.id);
       const mat = await auth(api().get(`/materials/${materialId}`)).expect(200);
@@ -132,7 +132,7 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
       const res = await auth(
         api()
           .post("/consumptions")
-          .send({ workOrderId: woId, materialId, type: "CONSUMED", quantity: 10 }),
+          .send({ workOrderId: woId, itemType: "MATERIAL", itemId: materialId, type: "CONSUMED", quantity: 10 }),
       ).expect(201);
       consumptionIds.push(res.body.id);
       const movements = await auth(api().get(`/inventory/movements?sourceType=MATERIAL_CONSUMPTION&sourceId=${res.body.id}`)).expect(200);
@@ -146,7 +146,7 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
       await auth(
         api()
           .post("/consumptions")
-          .send({ workOrderId: woId, materialId, type: "CONSUMED", quantity: 999 }),
+          .send({ workOrderId: woId, itemType: "MATERIAL", itemId: materialId, type: "CONSUMED", quantity: 999 }),
       ).expect(409);
       const mat = await auth(api().get(`/materials/${materialId}`)).expect(200);
       expect(Number(mat.body.stockQty)).toBe(20);

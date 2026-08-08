@@ -119,9 +119,12 @@ export class LotsService {
             id: true,
             woNo: true,
             status: true,
+            // Faz K: itemType/itemId polimorfik — Prisma tek bir "material" relation'ı
+            // desteklemiyor, isim/kod çözümlemesi frontend'de yapılır (Alt-Faz B/C'de
+            // bu trace() zaten recursive hale gelecek — bkz. PLAN.md Faz K notu).
             consumptions: {
               where: { lotId: { not: null } },
-              include: { material: { select: { id: true, code: true, name: true } }, lot: true },
+              include: { lot: true },
             },
           },
         },

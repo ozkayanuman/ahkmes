@@ -6,7 +6,6 @@ import { InventoryService } from "../inventory/inventory.service";
 import { InventoryMovementType } from "@prisma/client";
 
 const INCLUDE = {
-  material: { select: { id: true, code: true, name: true, unit: true, stockQty: true } },
   workOrder: { select: { id: true, woNo: true } },
   createdBy: { select: { id: true, name: true } },
 } as const;
@@ -30,7 +29,9 @@ export class ConsumptionService {
   /**
    * RESERVED: stok düşmez, sadece ayrılmış gösterilir.
    * CONSUMED: immutable hareket/bakiye/toplam projeksiyonu aynı transaction'da
-   * düşer; yetersiz stok 409.
+   * düşer; yetersiz stok 409. Faz K: itemType=PART ise alt montaj tüketimi —
+   * aynı akış Material yerine Part + PartStock üzerinden çalışır
+   * (InventoryService.record zaten polimorfik).
    */
   async create(tenantId: string, userId: string, dto: CreateConsumptionDto) {
     const created = await this.prisma.$transaction(async (tx) => {
@@ -39,18 +40,25 @@ export class ConsumptionService {
       if (wo.status === "COMPLETED" || wo.status === "CANCELLED") {
         throw new ConflictException("Tamamlanmış/iptal edilmiş iş emrine kayıt eklenemez");
       }
-      const material = await tx.material.findFirst({ where: { id: dto.materialId, tenantId } });
-      if (!material) throw new NotFoundException("Malzeme bulunamadı");
-      if (material.lotTrackingRequired && !dto.lotId) {
-        throw new ConflictException("Bu malzeme için lot seçimi zorunludur");
+      const lotTrackingRequired =
+        dto.itemType === "MATERIAL"
+          ? (await tx.material.findFirst({ where: { id: dto.itemId, tenantId } }))?.lotTrackingRequired
+          : (await tx.part.findFirst({ where: { id: dto.itemId, tenantId } }))?.lotTrackingRequired;
+      if (lotTrackingRequired === undefined) {
+        throw new NotFoundException(dto.itemType === "MATERIAL" ? "Malzeme bulunamadı" : "Parça bulunamadı");
+      }
+      if (lotTrackingRequired && !dto.lotId) {
+        throw new ConflictException(
+          dto.itemType === "MATERIAL" ? "Bu malzeme için lot seçimi zorunludur" : "Bu parça için lot seçimi zorunludur",
+        );
       }
       if (dto.lotId) {
         const lot = await tx.lot.findFirst({
-          where: { id: dto.lotId, tenantId, itemType: "MATERIAL", itemId: dto.materialId },
+          where: { id: dto.lotId, tenantId, itemType: dto.itemType, itemId: dto.itemId },
         });
-        if (!lot) throw new NotFoundException("Lot bulunamadı veya bu malzemeye ait değil");
+        if (!lot) throw new NotFoundException("Lot bulunamadı veya bu kaleme ait değil");
         if (lot.acceptanceStatus !== "ACCEPTED") {
-          throw new ConflictException("Sadece kabul edilmiş malzeme lotu tüketilebilir");
+          throw new ConflictException("Sadece kabul edilmiş lot tüketilebilir");
         }
       }
 
@@ -58,7 +66,8 @@ export class ConsumptionService {
         data: {
           tenantId,
           workOrderId: dto.workOrderId,
-          materialId: dto.materialId,
+          itemType: dto.itemType,
+          itemId: dto.itemId,
           type: dto.type,
           quantity: dto.quantity,
           date: dto.date ?? new Date(),
@@ -70,8 +79,8 @@ export class ConsumptionService {
       if (dto.type === "CONSUMED") {
         const movement = await this.inventory.record(tx, {
           tenantId,
-          itemType: "MATERIAL",
-          itemId: material.id,
+          itemType: dto.itemType,
+          itemId: dto.itemId,
           quantityDelta: -dto.quantity,
           movementType: InventoryMovementType.CONSUMPTION,
           sourceType: "MATERIAL_CONSUMPTION",
@@ -87,7 +96,7 @@ export class ConsumptionService {
     });
 
     if (dto.type === "CONSUMED") {
-      this.realtime.emitToTenant(tenantId, "stock.updated", { materialId: dto.materialId });
+      this.realtime.emitToTenant(tenantId, "stock.updated", { itemType: dto.itemType, itemId: dto.itemId });
     }
     this.realtime.emitToTenant(tenantId, "workorder.updated", { id: dto.workOrderId });
     return created;
@@ -101,8 +110,8 @@ export class ConsumptionService {
       if (entry.type === "CONSUMED") {
         await this.inventory.record(tx, {
           tenantId,
-          itemType: "MATERIAL",
-          itemId: entry.materialId,
+          itemType: entry.itemType,
+          itemId: entry.itemId,
           quantityDelta: Number(entry.quantity),
           movementType: InventoryMovementType.CONSUMPTION_REVERSAL,
           sourceType: "MATERIAL_CONSUMPTION_REVERSAL",
@@ -114,7 +123,7 @@ export class ConsumptionService {
       }
       return tx.materialConsumption.delete({ where: { id } });
     });
-    this.realtime.emitToTenant(tenantId, "stock.updated", { materialId: deleted.materialId });
+    this.realtime.emitToTenant(tenantId, "stock.updated", { itemType: deleted.itemType, itemId: deleted.itemId });
     return deleted;
   }
 }

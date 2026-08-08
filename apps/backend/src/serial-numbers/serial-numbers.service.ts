@@ -58,9 +58,11 @@ export class SerialNumbersService {
         woNo: true,
         status: true,
         part: { select: { id: true, partNo: true, name: true } },
+        // Faz K: itemType/itemId polimorfik — isim çözümlemesi frontend'de yapılır
+        // (Alt-Faz B/C'de recursive hale gelecek — bkz. PLAN.md Faz K notu).
         consumptions: {
           where: { lotId: { not: null } },
-          include: { material: { select: { id: true, code: true, name: true } }, lot: true },
+          include: { lot: true },
         },
       },
     });

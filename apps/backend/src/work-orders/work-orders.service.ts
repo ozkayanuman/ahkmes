@@ -141,9 +141,11 @@ export class WorkOrdersService {
     if (!wo) throw new NotFoundException("İş emri bulunamadı");
 
     const [consumptions, productionRuns, finishedGoods] = await Promise.all([
+      // Faz K: itemType/itemId polimorfik — Prisma tek bir "material" relation'ı
+      // desteklemiyor, isim/kod çözümlemesi frontend'de (Lot'ta zaten kullanılan
+      // desenle aynı) yapılır.
       this.prisma.materialConsumption.findMany({
         where: { tenantId, workOrderId },
-        include: { material: { select: { id: true, code: true, name: true } } },
         orderBy: { date: "asc" },
       }),
       this.prisma.productionRun.findMany({
@@ -186,16 +188,35 @@ export class WorkOrdersService {
 
     const consumptions = await this.prisma.materialConsumption.findMany({
       where: { tenantId, workOrderId, type: "CONSUMED" },
-      include: { material: { select: { id: true, code: true, name: true, standardCost: true } } },
     });
+    // Faz K: itemType=PART (alt montaj) tüketimleri de mümkün ama Part'ta
+    // standardCost alanı yok (Material'ın aksine) — bu satırlar için maliyet
+    // hesaplanamaz, sahte kesinlik vermek yerine partial olarak işaretlenir
+    // (mevcut "veri yoksa sessizce atlanmaz" felsefesiyle tutarlı).
+    const materialIds = consumptions.filter((c) => c.itemType === "MATERIAL").map((c) => c.itemId);
+    const materialsById = materialIds.length
+      ? new Map(
+          (
+            await this.prisma.material.findMany({
+              where: { id: { in: materialIds }, tenantId },
+              select: { id: true, standardCost: true },
+            })
+          ).map((m) => [m.id, m.standardCost]),
+        )
+      : new Map<string, Prisma.Decimal | null>();
     let materialCost = 0;
     let materialCostPartial = false;
     for (const c of consumptions) {
-      if (c.material.standardCost === null) {
+      if (c.itemType !== "MATERIAL") {
         materialCostPartial = true;
         continue;
       }
-      materialCost += Number(c.quantity) * Number(c.material.standardCost);
+      const standardCost = materialsById.get(c.itemId);
+      if (standardCost == null) {
+        materialCostPartial = true;
+        continue;
+      }
+      materialCost += Number(c.quantity) * Number(standardCost);
     }
 
     const runs = await this.prisma.productionRun.findMany({

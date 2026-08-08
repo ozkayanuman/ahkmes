@@ -95,11 +95,12 @@ describe("AHK-005 — lot kabulü ve as-built izlenebilirlik (e2e)", () => {
     await auth(api().post(`/purchase-orders/${po.body.id}/receive`).send({ lines: [{ lineId, receivedQty: 10, lotId: pendingMaterialLotId }] })).expect(409);
     await auth(api().post(`/purchase-orders/${po.body.id}/receive`).send({ lines: [{ lineId, receivedQty: 10, lotId: acceptedMaterialLotId }] })).expect(201);
 
-    await auth(api().post("/consumptions").send({ workOrderId, materialId, type: "CONSUMED", quantity: 2 })).expect(409);
-    await auth(api().post("/consumptions").send({ workOrderId, materialId, type: "CONSUMED", quantity: 2, lotId: pendingMaterialLotId })).expect(409);
+    await auth(api().post("/consumptions").send({ workOrderId, itemType: "MATERIAL", itemId: materialId, type: "CONSUMED", quantity: 2 })).expect(409);
+    await auth(api().post("/consumptions").send({ workOrderId, itemType: "MATERIAL", itemId: materialId, type: "CONSUMED", quantity: 2, lotId: pendingMaterialLotId })).expect(409);
     const consumed = await auth(api().post("/consumptions").send({
       workOrderId,
-      materialId,
+      itemType: "MATERIAL",
+      itemId: materialId,
       type: "CONSUMED",
       quantity: 2,
       lotId: acceptedMaterialLotId,

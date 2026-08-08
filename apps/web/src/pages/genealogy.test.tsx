@@ -19,7 +19,7 @@ const GENEALOGY_DATA = {
   quoteNo: "TKF-2026-0001",
   backward: {
     materialsConsumed: [
-      { id: "mc-1", type: "CONSUMED", quantity: "5", date: "2026-07-27T10:00:00.000Z", material: { code: "C1040", name: "Çubuk" } },
+      { id: "mc-1", itemType: "MATERIAL", itemId: "m1", type: "CONSUMED", quantity: "5", date: "2026-07-27T10:00:00.000Z" },
     ],
   },
   forward: {
@@ -51,6 +51,7 @@ describe("GenealogyPage", () => {
   beforeEach(() => {
     apiGet.mockReset().mockImplementation((path: string) => {
       if (path === "/work-orders") return Promise.resolve([{ id: "wo-1", woNo: "WO-2026-0001" }]);
+      if (path === "/materials") return Promise.resolve([{ id: "m1", code: "C1040", name: "Çubuk" }]);
       if (path.startsWith("/work-orders/wo-1/genealogy")) return Promise.resolve(GENEALOGY_DATA);
       return Promise.resolve([]);
     });
