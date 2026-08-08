@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { InventoryMovementType } from "@prisma/client";
 import type { CreateDeliveryDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { InventoryService } from "../inventory/inventory.service";
 
@@ -25,8 +25,8 @@ const DELIVERY_INCLUDE = {
 export class DeliveryService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, salesOrderId?: string) {
@@ -114,12 +114,13 @@ export class DeliveryService {
         });
       }
 
+      await this.outbox.record(tx, tenantId, "delivery", delivery.id, "delivery.created", { id: delivery.id, salesOrderId: dto.salesOrderId });
+      await this.outbox.record(tx, tenantId, "delivery", delivery.id, "stock.updated", { reason: "delivery", deliveryId: delivery.id });
+      await this.outbox.record(tx, tenantId, "delivery", delivery.id, "salesorder.updated", { id: dto.salesOrderId });
+
       return delivery;
     });
 
-    this.realtime.emitToTenant(tenantId, "delivery.created", { id: created.id, salesOrderId: dto.salesOrderId });
-    this.realtime.emitToTenant(tenantId, "stock.updated", { reason: "delivery", deliveryId: created.id });
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id: dto.salesOrderId });
     return created;
   }
 }

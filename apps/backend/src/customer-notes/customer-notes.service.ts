@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateCustomerNoteDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 
 const NOTE_INCLUDE = {
   author: { select: { id: true, name: true } },
@@ -13,7 +13,7 @@ const NOTE_INCLUDE = {
 export class CustomerNotesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   private async ensureCustomer(tenantId: string, customerId: string) {
@@ -32,11 +32,14 @@ export class CustomerNotesService {
 
   async create(tenantId: string, customerId: string, authorId: string, dto: CreateCustomerNoteDto) {
     await this.ensureCustomer(tenantId, customerId);
-    const created = await this.prisma.customerNote.create({
-      data: { tenantId, customerId, authorId, note: dto.note },
-      include: NOTE_INCLUDE,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const note = await tx.customerNote.create({
+        data: { tenantId, customerId, authorId, note: dto.note },
+        include: NOTE_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "customernote", note.id, "customernote.created", { customerId, id: note.id });
+      return note;
     });
-    this.realtime.emitToTenant(tenantId, "customernote.created", { customerId, id: created.id });
     return created;
   }
 }

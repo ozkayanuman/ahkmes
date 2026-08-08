@@ -3,10 +3,10 @@ import { CycleCountsService } from "./cycle-counts.service";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma = { bin: { findFirst: jest.fn().mockResolvedValue({ id: "bin1" }) }, cycleCount: { findFirst: jest.fn() }, $transaction: jest.fn(), ...overrides };
-  const realtime = { emitToTenant: jest.fn() };
   const inventory = { record: jest.fn().mockResolvedValue({ id: "im1" }) };
-  const service = new CycleCountsService(prisma as any, realtime as any, inventory as any);
-  return { service, prisma, realtime, inventory };
+  const outbox = { record: jest.fn() };
+  const service = new CycleCountsService(prisma as any, inventory as any, outbox as any);
+  return { service, prisma, inventory, outbox };
 }
 
 describe("CycleCountsService", () => {

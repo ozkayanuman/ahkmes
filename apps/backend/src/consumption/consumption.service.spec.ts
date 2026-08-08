@@ -20,11 +20,11 @@ function buildTxMock(overrides: any = {}) {
 
 function buildService(tx: ReturnType<typeof buildTxMock>) {
   const prisma = { $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(tx)) };
-  const realtime = { emitToTenant: jest.fn() };
   const inventory = { record: jest.fn().mockResolvedValue({ binId: "b1" }) };
+  const outbox = { record: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new ConsumptionService(prisma as any, realtime as any, inventory as any);
-  return { service, prisma, realtime, inventory };
+  const service = new ConsumptionService(prisma as any, inventory as any, outbox as any);
+  return { service, prisma, inventory, outbox };
 }
 
 describe("ConsumptionService.create — Faz K polimorfik (Material/Part)", () => {

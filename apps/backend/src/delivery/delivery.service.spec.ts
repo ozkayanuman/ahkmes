@@ -3,10 +3,10 @@ import { DeliveryService } from "./delivery.service";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma = { $transaction: jest.fn(), ...overrides };
-  const realtime = { emitToTenant: jest.fn() };
   const inventory = { record: jest.fn().mockResolvedValue({ id: "im1" }) };
-  const service = new DeliveryService(prisma as any, realtime as any, inventory as any);
-  return { service, prisma, realtime, inventory };
+  const outbox = { record: jest.fn() };
+  const service = new DeliveryService(prisma as any, inventory as any, outbox as any);
+  return { service, prisma, inventory, outbox };
 }
 
 function buildTx() {
@@ -37,10 +37,9 @@ describe("DeliveryService.create", () => {
 
   it("sevkiyat için immutable stok hareketi ve shippedQty üretir", async () => {
     const tx = buildTx();
-    const { service, inventory, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const { service, inventory } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     await service.create("t1", "u1", { salesOrderId: "so1", lines: [{ salesOrderLineId: "sol1", qty: 5, binId: "bin1" }] });
     expect(tx.salesOrderLine.update).toHaveBeenCalledWith({ where: { id: "sol1" }, data: { shippedQty: { increment: 5 } } });
     expect(inventory.record).toHaveBeenCalledWith(tx, expect.objectContaining({ movementType: "DELIVERY", itemType: "PART", itemId: "p1", quantityDelta: -5, binId: "bin1" }));
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "delivery.created", { id: "dlv1", salesOrderId: "so1" });
   });
 });

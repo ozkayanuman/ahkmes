@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateCycleCountDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { InventoryService } from "../inventory/inventory.service";
 import { InventoryMovementType } from "@prisma/client";
@@ -21,8 +21,8 @@ const CC_INCLUDE = {
 export class CycleCountsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, binId?: string) {
@@ -82,10 +82,11 @@ export class CycleCountsService {
         after: cycleCount,
       });
 
+      await this.outbox.record(tx, tenantId, "cyclecount", cycleCount.id, "cyclecount.created", { id: cycleCount.id, binId: dto.binId });
+
       return cycleCount;
     });
 
-    this.realtime.emitToTenant(tenantId, "cyclecount.created", { id: created.id, binId: dto.binId });
     return created;
   }
 
@@ -137,11 +138,12 @@ export class CycleCountsService {
         after: { status: posted.status, postedAt: posted.postedAt },
       });
 
+      await this.outbox.record(tx, tenantId, "cyclecount", id, "cyclecount.updated", { id, status: "POSTED" });
+      await this.outbox.record(tx, tenantId, "cyclecount", id, "stock.updated", { reason: "cyclecount", cycleCountId: id });
+
       return posted;
     });
 
-    this.realtime.emitToTenant(tenantId, "cyclecount.updated", { id, status: "POSTED" });
-    this.realtime.emitToTenant(tenantId, "stock.updated", { reason: "cyclecount", cycleCountId: id });
     return updated;
   }
 }

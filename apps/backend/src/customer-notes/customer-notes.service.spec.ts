@@ -2,15 +2,16 @@ import { CustomerNotesService } from "./customer-notes.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     customer: { findFirst: jest.fn() },
     customerNote: { findMany: jest.fn(), create: jest.fn() },
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  prisma.$transaction = jest.fn((cb: any) => cb(prisma));
+  const outbox = { record: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new CustomerNotesService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const service = new CustomerNotesService(prisma as any, outbox as any);
+  return { service, prisma, outbox };
 }
 
 describe("CustomerNotesService", () => {
@@ -43,8 +44,8 @@ describe("CustomerNotesService", () => {
     expect(prisma.customerNote.create).not.toHaveBeenCalled();
   });
 
-  it("create: notu kaydeder ve realtime yayınlar", async () => {
-    const { service, prisma, realtime } = buildService();
+  it("create: notu kaydeder ve outbox'a event yazar", async () => {
+    const { service, prisma, outbox } = buildService();
     prisma.customer.findFirst.mockResolvedValue({ id: "c1" });
     prisma.customerNote.create.mockResolvedValue({ id: "n1", note: "aradı" });
 
@@ -54,7 +55,7 @@ describe("CustomerNotesService", () => {
       expect.objectContaining({ data: { tenantId: "t1", customerId: "c1", authorId: "u1", note: "aradı" } }),
     );
     expect(created.id).toBe("n1");
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "customernote.created", {
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "t1", "customernote", "n1", "customernote.created", {
       customerId: "c1",
       id: "n1",
     });

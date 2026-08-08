@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateFinishedGoodsDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { InventoryService } from "../inventory/inventory.service";
 import { InventoryMovementType } from "@prisma/client";
 
@@ -15,8 +15,8 @@ const INCLUDE = {
 export class FinishedGoodsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string) {
@@ -97,6 +97,10 @@ export class FinishedGoodsService {
         _sum: { quantity: true },
       });
       const totalProduced = Number(agg._sum.quantity ?? 0);
+
+      await this.outbox.record(tx, tenantId, "finishedgoods", entryWithBin.id, "stock.updated", { partId: entryWithBin.part.id });
+      await this.outbox.record(tx, tenantId, "finishedgoods", entryWithBin.id, "workorder.updated", { id: dto.workOrderId });
+
       return {
         entry: entryWithBin,
         totalProduced,
@@ -105,8 +109,6 @@ export class FinishedGoodsService {
       };
     });
 
-    this.realtime.emitToTenant(tenantId, "stock.updated", { partId: result.entry.part.id });
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id: dto.workOrderId });
     return result;
   }
 }

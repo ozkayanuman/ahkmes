@@ -1,9 +1,9 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateConsumptionDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { InventoryService } from "../inventory/inventory.service";
 import { InventoryMovementType } from "@prisma/client";
+import { OutboxService } from "../outbox/outbox.service";
 
 const INCLUDE = {
   workOrder: { select: { id: true, woNo: true } },
@@ -14,8 +14,8 @@ const INCLUDE = {
 export class ConsumptionService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, workOrderId?: string) {
@@ -90,15 +90,15 @@ export class ConsumptionService {
           createdById: userId,
           occurredAt: dto.date ?? undefined,
         });
-        return tx.materialConsumption.update({ where: { id: entry.id }, data: { binId: movement.binId }, include: INCLUDE });
+        const updated = await tx.materialConsumption.update({ where: { id: entry.id }, data: { binId: movement.binId }, include: INCLUDE });
+        await this.outbox.record(tx, tenantId, "consumption", entry.id, "stock.updated", { itemType: dto.itemType, itemId: dto.itemId });
+        await this.outbox.record(tx, tenantId, "consumption", entry.id, "workorder.updated", { id: dto.workOrderId });
+        return updated;
       }
+      await this.outbox.record(tx, tenantId, "consumption", entry.id, "workorder.updated", { id: dto.workOrderId });
       return entry;
     });
 
-    if (dto.type === "CONSUMED") {
-      this.realtime.emitToTenant(tenantId, "stock.updated", { itemType: dto.itemType, itemId: dto.itemId });
-    }
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { id: dto.workOrderId });
     return created;
   }
 
@@ -121,9 +121,10 @@ export class ConsumptionService {
           createdById: userId,
         });
       }
-      return tx.materialConsumption.delete({ where: { id } });
+      const removed = await tx.materialConsumption.delete({ where: { id } });
+      await this.outbox.record(tx, tenantId, "consumption", id, "stock.updated", { itemType: removed.itemType, itemId: removed.itemId });
+      return removed;
     });
-    this.realtime.emitToTenant(tenantId, "stock.updated", { itemType: deleted.itemType, itemId: deleted.itemId });
     return deleted;
   }
 }
