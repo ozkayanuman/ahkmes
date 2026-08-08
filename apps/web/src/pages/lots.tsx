@@ -7,6 +7,7 @@ import { useAuth } from "../lib/auth";
 import { Button, Input, Label, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
 import { DocumentsPanel } from "../components/documents-panel";
+import { BackwardTree, ForwardTree, type BackwardTraceNode, type ForwardTraceNode } from "../components/trace-tree";
 
 interface MaterialOption {
   id: string;
@@ -32,33 +33,10 @@ interface LotRow {
   acceptanceNote: string | null;
 }
 
-interface TraceLotRef {
-  id: string;
-  lotNo: string;
-  itemType: "MATERIAL" | "PART";
-}
 interface TraceResult {
   lot: LotRow;
-  forward?: {
-    consumedByWorkOrders: {
-      consumption: { id: string; quantity: string; date: string };
-      workOrder: { id: string; woNo: string; status: string; part: { partNo: string; name: string } };
-      producedLots: { id: string; quantity: string; date: string; lot: TraceLotRef | null }[];
-    }[];
-  };
-  backward?: {
-    producedByWorkOrders: {
-      entry: { id: string; quantity: string; date: string };
-      workOrder: { id: string; woNo: string; status: string };
-      consumedLots: {
-        id: string;
-        itemType: "MATERIAL" | "PART";
-        itemId: string;
-        quantity: string;
-        lot: TraceLotRef | null;
-      }[];
-    }[];
-  };
+  forward?: ForwardTraceNode;
+  backward?: BackwardTraceNode;
 }
 
 /** Barkod/QR tarama sonrası arama — fiziksel scanner çoğu zaman klavye girişi
@@ -124,49 +102,27 @@ function ScanModal({ onClose }: { onClose: () => void }) {
             <span className="text-slate-400">({result.lot.itemType === "MATERIAL" ? "Malzeme" : "Mamul"})</span>
           </div>
 
+          {result.backward && (
+            <div>
+              <div className="mb-1 text-xs font-semibold uppercase text-slate-500">
+                Üreten İş Emri (geri izlenebilirlik — çok seviyeli)
+              </div>
+              {result.backward.producedByWorkOrders.length === 0 && (
+                <p className="text-slate-400">Üreten iş emri bulunamadı.</p>
+              )}
+              <BackwardTree node={result.backward} itemLabel={itemLabel} />
+            </div>
+          )}
+
           {result.forward && (
             <div>
               <div className="mb-1 text-xs font-semibold uppercase text-slate-500">
-                Tüketen İş Emirleri (ileri izlenebilirlik)
+                Tüketen İş Emirleri (ileri izlenebilirlik — çok seviyeli)
               </div>
               {result.forward.consumedByWorkOrders.length === 0 && (
                 <p className="text-slate-400">Henüz hiçbir iş emrinde tüketilmedi.</p>
               )}
-              {result.forward.consumedByWorkOrders.map((c) => (
-                <div key={c.consumption.id} className="rounded-md border border-slate-100 p-2">
-                  <div className="font-medium">
-                    {c.workOrder.woNo} — {c.workOrder.part.partNo} ({c.workOrder.status})
-                  </div>
-                  <div className="text-slate-500">Tüketilen: {c.consumption.quantity}</div>
-                  {c.producedLots.length > 0 && (
-                    <div className="text-slate-500">
-                      Üretilen lotlar: {c.producedLots.map((p) => p.lot?.lotNo ?? "—").join(", ")}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {result.backward && (
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase text-slate-500">
-                Üreten İş Emri (geri izlenebilirlik)
-              </div>
-              {result.backward.producedByWorkOrders.map((p) => (
-                <div key={p.entry.id} className="rounded-md border border-slate-100 p-2">
-                  <div className="font-medium">
-                    {p.workOrder.woNo} ({p.workOrder.status})
-                  </div>
-                  <div className="text-slate-500">Üretilen: {p.entry.quantity}</div>
-                  {p.consumedLots.length > 0 && (
-                    <div className="text-slate-500">
-                      Tüketilen lotlar:{" "}
-                      {p.consumedLots.map((c) => `${itemLabel(c)}${c.lot ? ` (${c.lot.lotNo})` : ""}`).join(", ")}
-                    </div>
-                  )}
-                </div>
-              ))}
+              <ForwardTree node={result.forward} />
             </div>
           )}
         </div>

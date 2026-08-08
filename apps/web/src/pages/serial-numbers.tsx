@@ -7,6 +7,7 @@ import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { Button, Input, Label, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
+import { BackwardTree, type BackwardTraceNode } from "../components/trace-tree";
 
 interface PartOption {
   id: string;
@@ -47,6 +48,7 @@ interface TraceResult {
       itemType: "MATERIAL" | "PART";
       itemId: string;
       lot: { id: string; lotNo: string } | null;
+      backward: BackwardTraceNode | null;
     }[];
   } | null;
 }
@@ -124,14 +126,18 @@ function ScanModal({ onClose }: { onClose: () => void }) {
                   {result.producedByWorkOrder.woNo} — {result.producedByWorkOrder.part.partNo} (
                   {result.producedByWorkOrder.status})
                 </div>
-                {result.producedByWorkOrder.consumptions.length > 0 && (
-                  <div className="text-slate-500">
-                    Tüketilen lotlar:{" "}
-                    {result.producedByWorkOrder.consumptions
-                      .map((c) => `${itemLabel(c)}${c.lot ? ` (${c.lot.lotNo})` : ""}`)
-                      .join(", ")}
-                  </div>
+                {result.producedByWorkOrder.consumptions.length === 0 && (
+                  <div className="text-slate-400">Tüketilen kalem yok</div>
                 )}
+                {result.producedByWorkOrder.consumptions.map((c) => (
+                  <div key={c.id} className="mt-1">
+                    <div className="text-slate-500">
+                      ← Tüketilen: {itemLabel(c)}
+                      {c.lot ? ` (${c.lot.lotNo})` : ""}
+                    </div>
+                    {c.backward && <BackwardTree node={c.backward} itemLabel={itemLabel} depth={1} />}
+                  </div>
+                ))}
               </div>
             )}
           </div>
