@@ -44,7 +44,14 @@ describe("AHK-014 — tenant module entitlements (e2e)", () => {
     operatorToken = await login(`tenant-operator-${STAMP}@ahkmes.test`, "TenantTest123!");
   });
 
-  afterAll(async () => app.close());
+  afterAll(async () => {
+    // Bu dosyadaki son testler QMS_INSPECTION'ı isEnabled:false bırakıyor — paylaşılan
+    // varsayılan tenant'ı (tenantA) kirletir, tam suite çalıştığında "alarms" sayfasını
+    // (QMS_INSPECTION'a eşlenir, bkz. packages/shared-types/src/enums.ts PAGE_PRODUCT_MODULE)
+    // yeniden kullanan downtime.e2e-spec.ts gibi sonraki dosyalarda sahte 403'e yol açar.
+    await auth(adminToken, api().patch("/platform/modules/QMS_INSPECTION").send({ isEnabled: true }));
+    await app.close();
+  });
 
   it("defaults unconfigured modules to enabled and denies an unauthenticated caller", async () => {
     await api().get("/platform/modules").expect(401);
