@@ -18,6 +18,7 @@ interface RecipeStepRow {
   parameterName: string | null;
   parameterValue: string | null;
   unit: string | null;
+  standardMinutes: number | null;
 }
 interface RecipeRow {
   id: string;
@@ -33,9 +34,10 @@ interface StepInput {
   parameterName: string;
   parameterValue: string;
   unit: string;
+  standardMinutes: string;
 }
 
-const emptyStep = (seq: number): StepInput => ({ seq, name: "", parameterName: "", parameterValue: "", unit: "" });
+const emptyStep = (seq: number): StepInput => ({ seq, name: "", parameterName: "", parameterValue: "", unit: "", standardMinutes: "" });
 
 export function RecipesPage() {
   const { user } = useAuth();
@@ -70,6 +72,7 @@ export function RecipesPage() {
           ...(s.parameterName ? { parameterName: s.parameterName } : {}),
           ...(s.parameterValue ? { parameterValue: s.parameterValue } : {}),
           ...(s.unit ? { unit: s.unit } : {}),
+          ...(s.standardMinutes ? { standardMinutes: Number(s.standardMinutes) } : {}),
         })),
       }),
     onSuccess: () => {
@@ -177,7 +180,7 @@ export function RecipesPage() {
             </div>
             <div className="space-y-2">
               {steps.map((s, idx) => (
-                <div key={idx} className="grid grid-cols-[2rem_1fr_1fr_1fr_5rem_2rem] items-center gap-2">
+                <div key={idx} className="grid grid-cols-[2rem_1fr_1fr_1fr_5rem_6rem_2rem] items-center gap-2">
                   <span className="text-sm text-slate-500">{s.seq}</span>
                   <Input placeholder="Adım adı" required value={s.name} onChange={(e) => updateStep(idx, { name: e.target.value })} />
                   <Input
@@ -191,6 +194,13 @@ export function RecipesPage() {
                     onChange={(e) => updateStep(idx, { parameterValue: e.target.value })}
                   />
                   <Input placeholder="Birim" value={s.unit} onChange={(e) => updateStep(idx, { unit: e.target.value })} />
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Standart süre (dk)"
+                    value={s.standardMinutes}
+                    onChange={(e) => updateStep(idx, { standardMinutes: e.target.value })}
+                  />
                   <button
                     type="button"
                     className="text-slate-400 hover:text-red-600"

@@ -272,6 +272,9 @@ export const createMachineSchema = z.object({
   // Faz G Cost Accounting'de eklenmişti ama şemaya hiç girmemişti — WorkOrdersService.cost()
   // bu alanı okuyordu ama UI'dan girilemiyordu (bkz. Faz H/I asimetri notu).
   hourlyRate: z.coerce.number().nonnegative().optional(),
+  // AHK-011: opsiyonel — girilmezse SchedulingService.capacity() bu makineyi
+  // yük/aşım hesabına dahil etmez.
+  dailyCapacityMinutes: z.coerce.number().nonnegative().optional(),
 });
 export const updateMachineSchema = createMachineSchema.partial();
 export type CreateMachineDto = z.infer<typeof createMachineSchema>;
@@ -903,6 +906,7 @@ export const recipeStepInputSchema = z.object({
   parameterValue: z.string().optional(),
   unit: z.string().optional(),
   ncProgramId: idSchema.optional(),
+  standardMinutes: z.coerce.number().nonnegative().optional(),
 });
 export const createRecipeHeaderSchema = z.object({
   partId: idSchema,

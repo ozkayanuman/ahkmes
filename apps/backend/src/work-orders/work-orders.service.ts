@@ -398,6 +398,7 @@ export class WorkOrdersService {
                   parameterName: step.parameterName,
                   parameterValue: step.parameterValue,
                   unit: step.unit,
+                  standardMinutes: step.standardMinutes,
                   machineId: data.machineId ?? undefined,
                   ...(step.ncProgramId
                     ? (() => {

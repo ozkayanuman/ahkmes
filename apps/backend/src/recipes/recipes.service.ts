@@ -61,6 +61,7 @@ export class RecipesService {
                 parameterValue: s.parameterValue,
                 unit: s.unit,
                 ncProgramId: s.ncProgramId,
+                standardMinutes: s.standardMinutes,
               })),
             },
           },

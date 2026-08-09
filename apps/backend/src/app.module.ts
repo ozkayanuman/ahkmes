@@ -25,6 +25,7 @@ import { NonConformanceModule } from "./non-conformance/non-conformance.module";
 import { HierarchyModule } from "./hierarchy/hierarchy.module";
 import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
+import { SchedulingModule } from "./scheduling/scheduling.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { LaborModule } from "./labor/labor.module";
@@ -97,6 +98,7 @@ import { DowntimeModule } from "./downtime/downtime.module";
     HierarchyModule,
     DigitalTwinModule,
     OeeModule,
+    SchedulingModule,
     AuditLogModule,
     ShiftReportModule,
     LaborModule,

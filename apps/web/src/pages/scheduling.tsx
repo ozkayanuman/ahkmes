@@ -15,6 +15,14 @@ interface WorkOrderRow {
   machine: { id: string; name: string } | null;
   part: { partNo: string; name: string };
 }
+interface CapacityRow {
+  machineId: string;
+  machineName: string;
+  date: string;
+  loadMinutes: number;
+  capacityMinutes: number;
+  overloaded: boolean;
+}
 
 const DAYS_VISIBLE = 14;
 const STATUS_COLOR: Record<string, string> = {
@@ -97,6 +105,25 @@ export function SchedulingPage() {
     return d.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" });
   });
 
+  const windowEnd = useMemo(() => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + DAYS_VISIBLE - 1);
+    return d;
+  }, [today]);
+  const capacity = useQuery({
+    queryKey: ["/scheduling/capacity", today.toISOString(), windowEnd.toISOString()],
+    queryFn: () => apiGet<CapacityRow[]>(`/scheduling/capacity?from=${today.toISOString()}&to=${windowEnd.toISOString()}`),
+  });
+  const capacityByMachine = useMemo(() => {
+    const map = new Map<string, { machineName: string; rows: CapacityRow[] }>();
+    for (const row of capacity.data ?? []) {
+      const entry = map.get(row.machineId) ?? { machineName: row.machineName, rows: [] };
+      entry.rows.push(row);
+      map.set(row.machineId, entry);
+    }
+    return map;
+  }, [capacity.data]);
+
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Scheduling — Basit Gantt</h1>
@@ -104,6 +131,35 @@ export function SchedulingPage() {
         Otomatik kapasite planlama algoritması değil — manuel çizelgeleme. Planlanmamış iş emirleri için
         termin tarihi (dueDate) kullanılır.
       </p>
+
+      {capacityByMachine.size > 0 && (
+        <Card>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">
+            Günlük Kapasite Yükü <span className="font-normal text-slate-400">(standart süre, gün genelinde eşit dağıtılır — gerçek sıralı çizelgeleme değil)</span>
+          </h2>
+          <div className="space-y-2">
+            {Array.from(capacityByMachine.entries()).map(([machineId, { machineName, rows }]) => (
+              <div key={machineId} className="flex items-center gap-2 text-xs">
+                <div className="w-32 shrink-0 truncate text-slate-600">{machineName}</div>
+                <div className="flex flex-1 gap-1">
+                  {rows.map((row) => {
+                    const pct = row.capacityMinutes > 0 ? Math.min(100, (row.loadMinutes / row.capacityMinutes) * 100) : 0;
+                    return (
+                      <div
+                        key={row.date}
+                        className="h-4 flex-1 overflow-hidden rounded bg-slate-100"
+                        title={`${row.date}: ${row.loadMinutes.toFixed(0)}/${row.capacityMinutes.toFixed(0)} dk`}
+                      >
+                        <div className={`h-full ${row.overloaded ? "bg-red-500" : "bg-emerald-400"}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       <Card className="overflow-x-auto">
         <div className="mb-2 grid text-xs text-slate-400" style={{ gridTemplateColumns: `160px repeat(${DAYS_VISIBLE}, 1fr)` }}>
