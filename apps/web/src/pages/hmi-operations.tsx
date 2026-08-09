@@ -46,7 +46,10 @@ export function HmiOperationsPage() {
     enabled: canRead,
   });
   const detail = useQuery({ queryKey: ["/hmi/operations", selectedId], queryFn: () => apiGet<Detail>(`/hmi/operations/${selectedId}`), enabled: canRead && !!selectedId });
-  useInvalidateOn(["productionrun.updated", "workorder.updated"], ["/hmi/operations"]);
+  useInvalidateOn(
+    ["productionrun.updated", "workorder.updated", "downtime.started", "downtime.ended"],
+    ["/hmi/operations"],
+  );
   const refresh = () => { queryClient.invalidateQueries({ queryKey: ["/hmi/operations"] }); queryClient.invalidateQueries({ queryKey: ["/hmi/actions"] }); };
   const start = useMutation({ mutationFn: (id: string) => apiPost(`/hmi/operations/${id}/start`, {}), onSuccess: () => { toast("Operasyon başlatıldı.", "success"); refresh(); }, onError: (error) => toast(errorMessage(error, "Operasyon başlatılamadı."), "error") });
   const complete = useMutation({ mutationFn: ({ id, goodCount, scrapCount, notes }: { id: string; goodCount: number; scrapCount: number; notes?: string }) => apiPost(`/hmi/operations/${id}/complete`, { goodCount, scrapCount, ...(notes ? { notes } : {}) }), onSuccess: () => { toast("Operasyon tamamlandı.", "success"); refresh(); }, onError: (error) => toast(errorMessage(error, "Operasyon tamamlanamadı."), "error") });
@@ -83,7 +86,75 @@ function OperationDetail({ detail, loading, error, canStart, canComplete, startP
     {detail.status === "PENDING" && <Card><h3 className="font-semibold">Operasyonu başlat</h3>{blockers.length > 0 && <p className="mt-2 flex gap-2 text-sm text-red-700"><AlertTriangle className="h-4 w-4 shrink-0" />{blockers.join(" ")}</p>}{!canStart && <p className="mt-2 text-sm text-red-700">HMI_START action grant'i yok.</p>}<Button className="mt-4 h-12 px-7" disabled={startDisabled || startPending} onClick={onStart}><Play className="h-5 w-5" /> Başlat</Button></Card>}
     {detail.status === "IN_PROGRESS" && <Card><h3 className="font-semibold">Operasyonu tamamla</h3><p className="mt-1 text-sm text-slate-500">Aktif koşu varsa adetler önce canonical production completion akışına yazılır, ardından operasyon kapatılır.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><div><Label htmlFor="hmi-good">Sağlam adet</Label><Input id="hmi-good" type="number" min="0" step="1" value={goodCount} onChange={(event) => setGoodCount(event.target.value)} /></div><div><Label htmlFor="hmi-scrap">Hurda adet</Label><Input id="hmi-scrap" type="number" min="0" step="1" value={scrapCount} onChange={(event) => setScrapCount(event.target.value)} /></div></div><div className="mt-3"><Label htmlFor="hmi-notes">Not</Label><Input id="hmi-notes" value={notes} onChange={(event) => setNotes(event.target.value)} /></div>{!canComplete && <p className="mt-2 text-sm text-red-700">HMI_COMPLETE action grant'i yok.</p>}<Button className="mt-4 h-12 px-7" disabled={completeDisabled || completePending} onClick={() => onComplete({ goodCount: Number(goodCount), scrapCount: Number(scrapCount), ...(notes ? { notes } : {}) })}><CheckCircle2 className="h-5 w-5" /> Tamamla</Button></Card>}
     {detail.activeRun && <Card className="border-blue-200 bg-blue-50"><div className="flex items-center gap-2 font-medium text-blue-900"><Factory className="h-5 w-5" /> Aktif koşu</div><div className="mt-2 text-sm text-blue-800">Başlangıç: {fmtDate(detail.activeRun.startedAt)} · Sağlam: {detail.activeRun.goodCount} · Hurda: {detail.activeRun.scrapCount}</div></Card>}
+    {detail.machine && <DowntimeCard machineId={detail.machine.id} canStart={canStart} />}
   </div>;
+}
+
+type DowntimeReasonOption = { id: string; label: string };
+type OpenDowntime = { id: string; startedAt: string; reason?: { label: string } | null };
+
+function DowntimeCard({ machineId, canStart }: { machineId: string; canStart: boolean }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [reasonId, setReasonId] = useState("");
+  const [note, setNote] = useState("");
+
+  const open = useQuery({
+    queryKey: ["/downtime", machineId, "open"],
+    queryFn: () => apiGet<OpenDowntime[]>(`/downtime?machineId=${machineId}&open=true`),
+  });
+  const reasons = useQuery({
+    queryKey: ["/downtime/reasons"],
+    queryFn: () => apiGet<DowntimeReasonOption[]>("/downtime/reasons"),
+  });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["/downtime", machineId, "open"] });
+
+  const start = useMutation({
+    mutationFn: () => apiPost("/downtime/start", { machineId, ...(reasonId ? { reasonId } : {}), ...(note ? { note } : {}) }),
+    onSuccess: () => {
+      toast("Duruş bildirildi.", "success");
+      setReasonId("");
+      setNote("");
+      refresh();
+    },
+    onError: (error) => toast(errorMessage(error, "Duruş bildirilemedi."), "error"),
+  });
+  const end = useMutation({
+    mutationFn: (id: string) => apiPost(`/downtime/${id}/end`, { ...(reasonId ? { reasonId } : {}), ...(note ? { note } : {}) }),
+    onSuccess: () => {
+      toast("Duruş kapatıldı.", "success");
+      setReasonId("");
+      setNote("");
+      refresh();
+    },
+    onError: (error) => toast(errorMessage(error, "Duruş kapatılamadı."), "error"),
+  });
+
+  const current = (open.data ?? [])[0];
+
+  return <Card>
+    <h3 className="font-semibold">Duruş</h3>
+    {current ? <>
+      <p className="mt-2 text-sm text-slate-600">Başlangıç: {fmtDate(current.startedAt)} · Neden: {current.reason?.label ?? "Sınıflandırılmamış"}</p>
+      <div className="mt-3"><Label htmlFor="dt-end-reason">Neden (opsiyonel)</Label>
+        <Select id="dt-end-reason" value={reasonId} onChange={(event) => setReasonId(event.target.value)}>
+          <option value="">Seçilmedi</option>
+          {reasons.data?.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </Select>
+      </div>
+      <Button className="mt-3" disabled={end.isPending} onClick={() => end.mutate(current.id)}>Duruşu Bitir</Button>
+    </> : canStart ? <>
+      <div className="mt-2"><Label htmlFor="dt-start-reason">Neden (opsiyonel)</Label>
+        <Select id="dt-start-reason" value={reasonId} onChange={(event) => setReasonId(event.target.value)}>
+          <option value="">Seçilmedi</option>
+          {reasons.data?.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </Select>
+      </div>
+      <div className="mt-2"><Label htmlFor="dt-start-note">Not</Label>
+        <Input id="dt-start-note" value={note} onChange={(event) => setNote(event.target.value)} /></div>
+      <Button className="mt-3" disabled={start.isPending} onClick={() => start.mutate()}>Duruş Bildir</Button>
+    </> : <p className="mt-2 text-sm text-slate-500">Açık duruş yok.</p>}
+  </Card>;
 }
 
 function SelectedResources({ assignments }: { assignments: NonNullable<Detail["setup"]["verification"]>["assignments"] }) {

@@ -125,4 +125,63 @@ describe("Downtime/Andon taksonomisi (PostgreSQL e2e)", () => {
       api().post("/downtime/start").send({ machineId, reasonId: "00000000-0000-0000-0000-000000000099" }),
     ).expect(404);
   });
+
+  it("pareto: kapanmış kayıtları neden etiketine göre gruplar (sınıflandırılmamış dahil)", async () => {
+    const s1 = await auth(api().post("/downtime/start").send({ machineId, reasonId })).expect(201);
+    await auth(api().patch(`/downtime/${s1.body.id}/end`).send({})).expect(200);
+
+    const s2 = await auth(api().post("/downtime/start").send({ machineId })).expect(201);
+    await auth(api().patch(`/downtime/${s2.body.id}/end`).send({})).expect(200);
+
+    const pareto = await auth(api().get("/downtime/pareto?days=1")).expect(200);
+    const labels = pareto.body.map((r: { reason: string }) => r.reason);
+    expect(labels).toEqual(expect.arrayContaining(["Mekanik arıza", "Sınıflandırılmamış"]));
+  });
+
+  describe("sadece 'hmi-operations' sayfa yetkisi olan kullanıcı (alarms yetkisi YOK)", () => {
+    let restrictedUserId: string;
+    let restrictedToken: string;
+    let groupId: string;
+
+    beforeAll(async () => {
+      const email = `dt-hmi-user-${STAMP}@ahkmes.local`;
+      const created = await auth(
+        api().post("/users").send({ email, password: "Restricted1234!", name: "HMI Test Kullanıcısı", role: "OPERATOR" }),
+      );
+      restrictedUserId = created.body.id;
+
+      const group = await auth(
+        api().post("/permission-groups").send({ name: `HMI Duruş Test ${STAMP}`, pages: ["hmi-operations"] }),
+      ).expect(201);
+      groupId = group.body.id;
+      await auth(api().post(`/permission-groups/${groupId}/members`).send({ userId: restrictedUserId })).expect(201);
+
+      const login = await api().post("/auth/login").send({ email, password: "Restricted1234!" });
+      restrictedToken = login.body.accessToken;
+    });
+
+    afterAll(async () => {
+      if (groupId) await prisma.permissionGroup.deleteMany({ where: { id: groupId } }).catch(() => undefined);
+      if (restrictedUserId) await prisma.user.deleteMany({ where: { id: restrictedUserId } }).catch(() => undefined);
+    });
+
+    const restricted = (r: request.Test) => r.set("Authorization", `Bearer ${restrictedToken}`);
+
+    it("list/start/end çağırabilir (RequirePage OR-semantiği sayesinde)", async () => {
+      await restricted(api().get(`/downtime?machineId=${machineId}&open=true`)).expect(200);
+
+      const started = await restricted(api().post("/downtime/start").send({ machineId })).expect(201);
+      await restricted(api().patch(`/downtime/${started.body.id}/end`).send({})).expect(200);
+    });
+
+    it("classify çağıramaz — sınıflandırma alarms-only kalır", async () => {
+      const started = await auth(api().post("/downtime/start").send({ machineId })).expect(201);
+      await restricted(api().patch(`/downtime/${started.body.id}/classify`).send({ reasonId })).expect(403);
+      await auth(api().patch(`/downtime/${started.body.id}/end`).send({})).expect(200);
+    });
+
+    it("reasons kataloğunu okuyabilir", async () => {
+      await restricted(api().get("/downtime/reasons")).expect(200);
+    });
+  });
 });

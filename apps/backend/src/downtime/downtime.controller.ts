@@ -31,8 +31,14 @@ export class DowntimeController {
   constructor(private readonly service: DowntimeService) {}
 
   @Get("reasons")
+  @RequirePage("alarms", "hmi-operations")
   findReasons(@CurrentUser() user: AuthUser) {
     return this.service.findReasons(user.tenantId);
+  }
+
+  @Get("pareto")
+  pareto(@CurrentUser() user: AuthUser, @Query("days") days?: string) {
+    return this.service.pareto(user.tenantId, days ? parseInt(days, 10) : 30);
   }
 
   @Post("reasons")
@@ -55,6 +61,7 @@ export class DowntimeController {
   }
 
   @Get()
+  @RequirePage("alarms", "hmi-operations")
   list(
     @CurrentUser() user: AuthUser,
     @Query("machineId") machineId?: string,
@@ -65,6 +72,7 @@ export class DowntimeController {
 
   @Post("start")
   @Roles("ADMIN", "PLANNER", "FOREMAN", "OPERATOR")
+  @RequirePage("alarms", "hmi-operations")
   start(
     @CurrentUser() user: AuthUser,
     @Body(new ZodValidationPipe(startDowntimeSchema)) dto: StartDowntimeDto,
@@ -89,6 +97,7 @@ export class DowntimeController {
 
   @Patch(":id/end")
   @Roles("ADMIN", "PLANNER", "FOREMAN", "OPERATOR")
+  @RequirePage("alarms", "hmi-operations")
   end(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,

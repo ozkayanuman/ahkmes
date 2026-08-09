@@ -142,6 +142,32 @@ export class DowntimeService {
     });
   }
 
+  /** Taksonomi bazlı Pareto: kapanmış DowntimeEvent'leri reason.label'a göre
+   * gruplar (OeeService.downtimePareto'nun serbest-metin MachineStatusEvent
+   * bazlı Pareto'sundan bağımsız, DowntimeReason kataloğunu kullanan
+   * eşdeğeri). */
+  async pareto(tenantId: string, days: number) {
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    const events = await this.prisma.downtimeEvent.findMany({
+      where: { tenantId, endedAt: { not: null, gte: since } },
+      include: { reason: { select: { label: true } } },
+    });
+
+    const byReason = new Map<string, { reason: string; totalSeconds: number; count: number }>();
+    for (const e of events) {
+      const key = e.reason?.label ?? "Sınıflandırılmamış";
+      const seconds = (e.endedAt!.getTime() - e.startedAt.getTime()) / 1000;
+      const entry = byReason.get(key) ?? { reason: key, totalSeconds: 0, count: 0 };
+      entry.totalSeconds += seconds;
+      entry.count += 1;
+      byReason.set(key, entry);
+    }
+
+    return Array.from(byReason.values())
+      .sort((a, b) => b.totalSeconds - a.totalSeconds)
+      .map((r) => ({ ...r, totalSeconds: Math.round(r.totalSeconds) }));
+  }
+
   /** Telemetri akışında (CYCLE_START/PART_COMPLETE/IDLE) makine "üretime
    * döndü" sinyali verince otomatik kapatır — kimse elle kapatmamışsa
    * reasonId null kalır, sonradan classify() ile sınıflandırılabilir. */
