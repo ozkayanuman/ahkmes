@@ -120,6 +120,13 @@ Web istemcisi `io(BACKEND_URL, { auth: { token } })` ile bağlanır. Yayınlanan
 
 ## 6. Sınırlamalar (v0.9)
 
-- ERP entegrasyonu (SAP/Logo/Netsis vb.) henüz yok — REST API üzerinden özel entegrasyon yazılabilir.
+- ERP entegrasyonu (SAP/Logo/Netsis vb.) henüz yok — hedef ERP ve sahiplik
+  matrisi seçilmeden adapter yazılmaz (bkz. `erp-ownership-matrix.md`,
+  `PLAN.md` AHK-010).
 - Toplu (batch) iş emri import API'si yok, tekil CRUD var.
-- Webhook/dış sistem bildirim mekanizması yok, yalnızca Socket.IO (yalnızca bağlı istemciler alır).
+- Gelen (inbound) webhook/mesaj için dedup (inbox) yok — sadece giden
+  (outbound) webhook teslimi kalıcı/tekrar denemeli (§2.1). Domain event'leri
+  Socket.IO ile canlı bağlı istemcilere, transactional outbox üzerinden
+  webhook abonelerine dağıtılır; bağlı olmayan bir istemci Socket.IO
+  event'ini kaçırırsa yeniden oynatma mekanizması yoktur (webhook teslim
+  geçmişinin aksine).
