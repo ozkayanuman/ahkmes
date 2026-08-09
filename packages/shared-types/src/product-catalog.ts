@@ -10,6 +10,15 @@ export type LegacyProductModule = (typeof LEGACY_PRODUCT_MODULES)[number];
 export const PRODUCT_SUITES = ["PLATFORM", "ERP", "MES", "QMS", "WMS", "APS", "PLM", "EAM", "IIOT", "ANALYTICS"] as const;
 export type ProductSuite = (typeof PRODUCT_SUITES)[number];
 
+/** Ascending license tier order — index comparison drives editionAtLeast(). */
+export const PRODUCT_EDITIONS = ["FOUNDATION", "ESSENTIALS", "PROFESSIONAL", "ENTERPRISE"] as const;
+export type ProductEdition = (typeof PRODUCT_EDITIONS)[number];
+
+/** Does tenantEdition meet or exceed requiredEdition? */
+export function editionAtLeast(tenantEdition: ProductEdition, requiredEdition: ProductEdition): boolean {
+  return PRODUCT_EDITIONS.indexOf(tenantEdition) >= PRODUCT_EDITIONS.indexOf(requiredEdition);
+}
+
 export const PRODUCT_IMPLEMENTATION_STATUSES = ["AVAILABLE", "BETA", "PLANNED", "MISSING"] as const;
 export type ProductImplementationStatus = (typeof PRODUCT_IMPLEMENTATION_STATUSES)[number];
 
@@ -25,7 +34,7 @@ export interface ProductModuleDefinition {
   dependencies: readonly string[];
   requiredCore: boolean;
   tenantToggleable: boolean;
-  edition: "FOUNDATION" | "ESSENTIALS" | "PROFESSIONAL" | "ENTERPRISE";
+  edition: ProductEdition;
   pageCodes: readonly PageKey[];
   permissionCodes: readonly string[];
   routes: readonly string[];

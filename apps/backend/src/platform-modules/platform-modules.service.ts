@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
-import { ProductModule } from "@prisma/client";
-import { getEntitlementModuleDefinition, PRODUCT_MODULE_CATALOG } from "@ahkmes/shared-types";
+import { ProductEdition, ProductModule } from "@prisma/client";
+import { editionAtLeast, getEntitlementModuleDefinition, PRODUCT_MODULE_CATALOG } from "@ahkmes/shared-types";
 import { writeTransactionalAudit } from "../common/transactional-audit";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -27,6 +27,7 @@ export class PlatformModulesService {
         tenantToggleable: definition.tenantToggleable,
         implementationStatus: definition.implementationStatus,
         canonicalModules: definition.canonicalModules,
+        edition: PRODUCT_MODULE_CATALOG.find((entry) => entry.code === module)?.edition,
       };
     });
   }
@@ -43,6 +44,13 @@ export class PlatformModulesService {
     }
     if (!definition.tenantToggleable) {
       throw new BadRequestException("Bu modül henüz tenant tarafından etkinleştirilebilir değildir");
+    }
+    if (isEnabled) {
+      const catalogEntry = PRODUCT_MODULE_CATALOG.find((entry) => entry.code === module);
+      const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { edition: true } });
+      if (catalogEntry && !editionAtLeast(tenant.edition, catalogEntry.edition)) {
+        throw new BadRequestException(`Bu modül ${catalogEntry.edition} lisans seviyesi gerektirir`);
+      }
     }
     // updateMany's state predicate is the concurrency boundary: only the request
     // that really changes the persisted state may emit an audit event. Creation
@@ -96,5 +104,27 @@ export class PlatformModulesService {
       }
     }
     throw new ConflictException("Modül durumu eşzamanlı güncellenemedi");
+  }
+
+  async getEdition(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { edition: true } });
+    return tenant.edition;
+  }
+
+  async setEdition(tenantId: string, userId: string, edition: ProductEdition) {
+    const before = await this.prisma.tenant.findUniqueOrThrow({ where: { id: tenantId } });
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.tenant.update({ where: { id: tenantId }, data: { edition } });
+      await writeTransactionalAudit(tx, {
+        tenantId,
+        userId,
+        entity: "tenant",
+        entityId: tenantId,
+        action: "UPDATE",
+        before: { edition: before.edition },
+        after: { edition: updated.edition },
+      });
+      return updated;
+    });
   }
 }

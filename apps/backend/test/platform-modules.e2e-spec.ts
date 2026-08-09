@@ -61,7 +61,7 @@ describe("AHK-014 — tenant module entitlements (e2e)", () => {
     ]));
     const catalog = await auth(adminToken, api().get("/platform/modules/catalog")).expect(200);
     expect(catalog.body).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: "MES_CNC_TOOLING", implementationStatus: "MISSING", tenantToggleable: false }),
+      expect.objectContaining({ code: "MES_DNC", implementationStatus: "MISSING", tenantToggleable: false }),
     ]));
   });
 
@@ -105,6 +105,29 @@ describe("AHK-014 — tenant module entitlements (e2e)", () => {
       orderBy: { createdAt: "desc" },
     });
     expect(audit?.after).toEqual(expect.objectContaining({ module: "QMS_INSPECTION", isEnabled: false }));
+  });
+
+  it("edition: FOUNDATION tenant ENTERPRISE-seviye bir modülü açamaz/kullanamaz, yükseltilince açabilir, düşürülünce zaten açık modül de bloklanır", async () => {
+    // tenantB izole bir tenant (bu dosyanın kendi kurduğu, başka e2e dosyasıyla paylaşılmıyor) —
+    // burada edition değiştirmek diğer dosyaları etkilemez, tenantA'ya (paylaşılan varsayılan) dokunulmuyor.
+    await auth(tenantBToken, api().patch("/platform/modules/edition").send({ edition: "FOUNDATION" })).expect(200);
+    expect((await auth(tenantBToken, api().get("/platform/modules/edition")).expect(200)).body).toEqual({ edition: "FOUNDATION" });
+
+    await auth(tenantBToken, api().patch("/platform/modules/PLATFORM_AI").send({ isEnabled: true })).expect(400);
+
+    await auth(tenantBToken, api().patch("/platform/modules/edition").send({ edition: "ENTERPRISE" })).expect(200);
+    await auth(tenantBToken, api().patch("/platform/modules/PLATFORM_AI").send({ isEnabled: true })).expect(200);
+    await auth(tenantBToken, api().post("/copilot/drafts").send({ prompt: "edition test prompt" })).expect(201);
+
+    await auth(tenantBToken, api().patch("/platform/modules/edition").send({ edition: "FOUNDATION" })).expect(200);
+    await auth(tenantBToken, api().post("/copilot/drafts").send({ prompt: "edition test prompt" })).expect(403);
+
+    await auth(tenantBToken, api().patch("/platform/modules/edition").send({ edition: "ENTERPRISE" })).expect(200);
+  });
+
+  it("non-admin PATCH /platform/modules/edition çağıramaz", async () => {
+    await auth(operatorToken, api().patch("/platform/modules/edition").send({ edition: "FOUNDATION" })).expect(403);
+    await auth(adminToken, api().patch("/platform/modules/edition").send({ edition: "NOT_AN_EDITION" })).expect(400);
   });
 
   it("never reads or mutates Material and WorkOrder records across the tenant boundary", async () => {

@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { ProductModule } from "@prisma/client";
-import type { PageKey } from "@ahkmes/shared-types";
+import { editionAtLeast, PRODUCT_MODULE_CATALOG, type PageKey } from "@ahkmes/shared-types";
 import { PAGES_KEY } from "../decorators/require-page.decorator";
 import { PRODUCT_MODULES_KEY } from "../decorators/require-product-module.decorator";
 import { PAGE_PRODUCT_MODULE } from "../module-entitlement";
@@ -34,12 +34,25 @@ export class PagesGuard implements CanActivate {
     ]) ?? [];
     const requiredModules = [...new Set([...required.map((page) => PAGE_PRODUCT_MODULE[page]), ...explicitModules])]
       .filter((module): module is ProductModule => module !== "PLATFORM_CORE");
-    const disabled = requiredModules.length === 0
-      ? []
-      : await this.prisma.tenantModuleEntitlement.findMany({
-          where: { tenantId: user.tenantId, module: { in: requiredModules }, isEnabled: false },
-          select: { module: true },
-        });
+
+    if (requiredModules.length === 0) return true;
+
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: user.tenantId },
+      select: { edition: true },
+    });
+    const overEdition = requiredModules.some((module) => {
+      const definition = PRODUCT_MODULE_CATALOG.find((entry) => entry.code === module);
+      return definition ? !editionAtLeast(tenant.edition, definition.edition) : false;
+    });
+    if (overEdition) {
+      throw new ForbiddenException("Bu modül bu tenant için etkin değil");
+    }
+
+    const disabled = await this.prisma.tenantModuleEntitlement.findMany({
+      where: { tenantId: user.tenantId, module: { in: requiredModules }, isEnabled: false },
+      select: { module: true },
+    });
     if (disabled.length > 0) {
       throw new ForbiddenException("Bu modül bu tenant için etkin değil");
     }

@@ -15,6 +15,15 @@ enum Role {
   OPERATOR
 }
 
+/// Tenant'ın satın aldığı lisans seviyesi; product-catalog.ts'teki modül
+/// edition'ları buna göre karşılaştırılır (PagesGuard + PlatformModulesService).
+enum ProductEdition {
+  FOUNDATION
+  ESSENTIALS
+  PROFESSIONAL
+  ENTERPRISE
+}
+
 /// Ticari paketleme sınırı; sayfa yetkisinden bağımsız tenant bazlı ürün modülü.
 enum ProductModule {
   PLATFORM_DOCUMENTS
@@ -619,10 +628,11 @@ model Unit {
 }
 
 model Tenant {
-  id        String   @id @default(uuid())
+  id        String         @id @default(uuid())
   name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  edition   ProductEdition @default(ENTERPRISE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
   moduleEntitlements TenantModuleEntitlement[]
 }

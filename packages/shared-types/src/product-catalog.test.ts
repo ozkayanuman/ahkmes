@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ENTITLEMENT_MODULE_CATALOG, LEGACY_PRODUCT_MODULE_MIGRATION, PRODUCT_MODULE_CATALOG } from "./product-catalog";
+import { editionAtLeast, ENTITLEMENT_MODULE_CATALOG, LEGACY_PRODUCT_MODULE_MIGRATION, PRODUCT_EDITIONS, PRODUCT_MODULE_CATALOG } from "./product-catalog";
 import { PAGE_PRODUCT_MODULE, PRODUCT_MODULES } from "./enums";
 
 describe("product capability catalogue", () => {
@@ -30,5 +30,26 @@ describe("product capability catalogue", () => {
     expect(PAGE_PRODUCT_MODULE.capa).toBe("QMS_NCR_CAPA");
     expect(PAGE_PRODUCT_MODULE["cycle-counts"]).toBe("WMS_INVENTORY_LEDGER");
     expect(PAGE_PRODUCT_MODULE["platform-modules"]).toBe("PLATFORM_CORE");
+  });
+});
+
+describe("editionAtLeast", () => {
+  it("FOUNDATION bir PROFESSIONAL modülü karşılamaz", () => {
+    expect(editionAtLeast("FOUNDATION", "PROFESSIONAL")).toBe(false);
+  });
+
+  it("ENTERPRISE her edition'ı karşılar", () => {
+    for (const required of PRODUCT_EDITIONS) {
+      expect(editionAtLeast("ENTERPRISE", required)).toBe(true);
+    }
+  });
+
+  it("eşit edition kendini karşılar", () => {
+    expect(editionAtLeast("PROFESSIONAL", "PROFESSIONAL")).toBe(true);
+  });
+
+  it("bir üst edition bir alt edition'ı karşılar ama tersi olmaz", () => {
+    expect(editionAtLeast("PROFESSIONAL", "ESSENTIALS")).toBe(true);
+    expect(editionAtLeast("ESSENTIALS", "PROFESSIONAL")).toBe(false);
   });
 });

@@ -9,10 +9,12 @@ describe("PlatformModulesService", () => {
         findUniqueOrThrow: jest.fn(),
         create: jest.fn(),
       },
+      tenant: { findUniqueOrThrow: jest.fn(), update: jest.fn() },
       auditLog: { create: jest.fn().mockResolvedValue({ id: "audit-1" }) },
     };
     const prisma: any = {
       tenantModuleEntitlement: { findMany: jest.fn().mockResolvedValue([]) },
+      tenant: { findUniqueOrThrow: jest.fn().mockResolvedValue({ edition: "ENTERPRISE" }) },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
     };
     return { service: new PlatformModulesService(prisma), prisma, tx };
@@ -84,5 +86,59 @@ describe("PlatformModulesService", () => {
     await expect(service.set("tenant-1", "admin-1", "PLATFORM_CORE" as never, false)).rejects.toThrow("Bilinmeyen");
     await expect(service.set("tenant-1", "admin-1", "MES_DNC" as never, true)).rejects.toThrow("Bilinmeyen");
     expect(tx.tenantModuleEntitlement.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("tenant edition'ını aşan bir modülü etkinleştirmeyi reddeder", async () => {
+    const { service, prisma, tx } = build();
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({ edition: "FOUNDATION" });
+
+    await expect(service.set("tenant-1", "admin-1", "PLATFORM_AI" as never, true)).rejects.toThrow("lisans");
+    expect(tx.tenantModuleEntitlement.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("tenant edition'ı yeterliyse modülü etkinleştirir", async () => {
+    const { service, prisma, tx } = build();
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({ edition: "ENTERPRISE" });
+    tx.tenantModuleEntitlement.updateMany.mockResolvedValue({ count: 1 });
+    tx.tenantModuleEntitlement.findUniqueOrThrow.mockResolvedValue({ id: "entitlement-1", module: "PLATFORM_AI", isEnabled: true });
+
+    await expect(service.set("tenant-1", "admin-1", "PLATFORM_AI" as never, true)).resolves.toEqual(
+      expect.objectContaining({ module: "PLATFORM_AI", isEnabled: true }),
+    );
+  });
+
+  it("edition kontrolü kapatma (isEnabled:false) işlemini etkilemez", async () => {
+    const { service, prisma, tx } = build();
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({ edition: "FOUNDATION" });
+    tx.tenantModuleEntitlement.updateMany.mockResolvedValue({ count: 1 });
+    tx.tenantModuleEntitlement.findUniqueOrThrow.mockResolvedValue({ id: "entitlement-1", module: "PLATFORM_AI", isEnabled: false });
+
+    await expect(service.set("tenant-1", "admin-1", "PLATFORM_AI" as never, false)).resolves.toEqual(
+      expect.objectContaining({ isEnabled: false }),
+    );
+  });
+
+  it("getEdition tenant'ın edition'ını döner", async () => {
+    const { service, prisma } = build();
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({ edition: "PROFESSIONAL" });
+    await expect(service.getEdition("tenant-1")).resolves.toBe("PROFESSIONAL");
+  });
+
+  it("setEdition audit yazarak günceller", async () => {
+    const { service, prisma, tx } = build();
+    prisma.tenant.findUniqueOrThrow.mockResolvedValue({ edition: "ESSENTIALS" });
+    tx.tenant.update.mockResolvedValue({ id: "tenant-1", edition: "PROFESSIONAL" });
+
+    const result = await service.setEdition("tenant-1", "admin-1", "PROFESSIONAL" as never);
+
+    expect(result).toEqual({ id: "tenant-1", edition: "PROFESSIONAL" });
+    expect(tx.tenant.update).toHaveBeenCalledWith({ where: { id: "tenant-1" }, data: { edition: "PROFESSIONAL" } });
+    expect(tx.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        tenantId: "tenant-1", userId: "admin-1", entity: "tenant", action: "UPDATE",
+        before: expect.objectContaining({ edition: "ESSENTIALS" }),
+        after: expect.objectContaining({ edition: "PROFESSIONAL" }),
+      }),
+    }));
   });
 });
