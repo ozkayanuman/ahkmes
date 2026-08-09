@@ -125,10 +125,10 @@ export const MachineConnectorTypeSchema = z.enum(["MANUAL", "OPC_UA", "M80"]);
 export type MachineConnectorType = z.infer<typeof MachineConnectorTypeSchema>;
 
 // ---- Non-Conformance (kalite modülü, v0.9) ----
-export const NonConformanceStatusSchema = z.enum(["OPEN", "RESOLVED"]);
+export const NonConformanceStatusSchema = z.enum(["OPEN", "RESOLVED", "PENDING_DEVIATION_APPROVAL"]);
 export type NonConformanceStatus = z.infer<typeof NonConformanceStatusSchema>;
 
-export const NonConformanceActionTypeSchema = z.enum(["GENERIC", "SCRAP", "REWORK", "BLOCKING"]);
+export const NonConformanceActionTypeSchema = z.enum(["GENERIC", "SCRAP", "REWORK", "BLOCKING", "DEVIATION"]);
 export type NonConformanceActionType = z.infer<typeof NonConformanceActionTypeSchema>;
 
 export const UserAuthSourceSchema = z.enum(["LOCAL", "LDAP", "OIDC"]);

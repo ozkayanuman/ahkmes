@@ -1,8 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
   createNonConformanceSchema,
+  decideCapaSchema,
   resolveNonConformanceSchema,
   type CreateNonConformanceDto,
+  type DecideCapaDto,
   type ResolveNonConformanceDto,
 } from "@ahkmes/shared-types";
 import { NonConformanceService } from "./non-conformance.service";
@@ -49,5 +51,31 @@ export class NonConformanceController {
     @Body(new ZodValidationPipe(resolveNonConformanceSchema)) dto: ResolveNonConformanceDto,
   ) {
     return this.service.resolve(user.tenantId, user.userId, id, dto);
+  }
+
+  @Patch(":id/request-deviation")
+  @Roles(...WRITE_ROLES)
+  requestDeviation(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.requestDeviation(user.tenantId, user.userId, id);
+  }
+
+  @Patch(":id/approve-deviation")
+  @Roles("ADMIN")
+  approveDeviation(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(decideCapaSchema)) dto: DecideCapaDto,
+  ) {
+    return this.service.decideDeviation(user.tenantId, id, user.userId, user.role, "approve", dto.note, dto.password);
+  }
+
+  @Patch(":id/reject-deviation")
+  @Roles("ADMIN")
+  rejectDeviation(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(decideCapaSchema)) dto: DecideCapaDto,
+  ) {
+    return this.service.decideDeviation(user.tenantId, id, user.userId, user.role, "reject", dto.note, dto.password);
   }
 }

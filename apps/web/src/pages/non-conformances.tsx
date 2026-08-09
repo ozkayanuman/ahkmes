@@ -7,6 +7,7 @@ import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
+import { ReauthModal } from "../components/reauth-modal";
 
 interface WorkOrderOption {
   id: string;
@@ -20,8 +21,8 @@ interface NcRow {
   reportedBy: { id: string; name: string };
   failureType: string;
   description?: string | null;
-  actionType: "GENERIC" | "SCRAP" | "REWORK" | "BLOCKING";
-  status: "OPEN" | "RESOLVED";
+  actionType: "GENERIC" | "SCRAP" | "REWORK" | "BLOCKING" | "DEVIATION";
+  status: "OPEN" | "RESOLVED" | "PENDING_DEVIATION_APPROVAL";
   createdAt: string;
   resolvedAt?: string | null;
   resolvedBy?: { id: string; name: string } | null;
@@ -32,7 +33,7 @@ interface NcFormState {
   workOrderId: string;
   failureType: string;
   description: string;
-  actionType: "GENERIC" | "SCRAP" | "REWORK" | "BLOCKING";
+  actionType: NcRow["actionType"];
 }
 
 const ACTION_LABEL: Record<NcRow["actionType"], string> = {
@@ -40,6 +41,13 @@ const ACTION_LABEL: Record<NcRow["actionType"], string> = {
   SCRAP: "Hurda",
   REWORK: "Yeniden İşlem",
   BLOCKING: "Bloke",
+  DEVIATION: "Deviation (olduğu gibi kabul)",
+};
+
+const STATUS_LABEL: Record<NcRow["status"], { label: string; cls: string }> = {
+  OPEN: { label: "Açık", cls: "bg-red-100 text-red-700" },
+  PENDING_DEVIATION_APPROVAL: { label: "Deviation Onayı Bekliyor", cls: "bg-amber-100 text-amber-700" },
+  RESOLVED: { label: "Kapalı", cls: "bg-slate-100 text-slate-500" },
 };
 
 function NewNcModal({ workOrders, onClose }: { workOrders: WorkOrderOption[]; onClose: () => void }) {
@@ -220,12 +228,43 @@ function NcDetailModal({ nc, onClose }: { nc: NcRow; onClose: () => void }) {
 export function NonConformancesPage() {
   const { user } = useAuth();
   const canManage = !!user && ["ADMIN", "PLANNER", "FOREMAN", "OPERATOR"].includes(user.role);
+  const canDecideDeviation = !!user && user.role === "ADMIN";
   const qc = useQueryClient();
+  const toast = useToast();
   const [showNew, setShowNew] = useState(false);
   const [resolvingNc, setResolvingNc] = useState<NcRow | null>(null);
   const [viewingNc, setViewingNc] = useState<NcRow | null>(null);
+  const [pendingDeviationDecision, setPendingDeviationDecision] = useState<{ id: string; action: "approve" | "reject" } | null>(null);
 
   useInvalidateOn(["nonconformance.updated"], ["/non-conformances"]);
+
+  const onError = (fallback: string) => (e: unknown) => {
+    const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+    toast(msg ?? fallback, "error");
+  };
+  const requestDeviation = useMutation({
+    mutationFn: (id: string) => apiPatch(`/non-conformances/${id}/request-deviation`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/non-conformances"] }),
+    onError: onError("Deviation talebi oluşturulamadı"),
+  });
+  const approveDeviation = useMutation({
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/non-conformances/${id}/approve-deviation`, { password }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/non-conformances"] });
+      setPendingDeviationDecision(null);
+    },
+    onError: onError("Onaylanamadı"),
+  });
+  const rejectDeviation = useMutation({
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/non-conformances/${id}/reject-deviation`, { password }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/non-conformances"] });
+      setPendingDeviationDecision(null);
+    },
+    onError: onError("Reddedilemedi"),
+  });
 
   const workOrders = useQuery({
     queryKey: ["/work-orders"],
@@ -262,14 +301,8 @@ export function NonConformancesPage() {
             <td className="px-4 py-3">{nc.failureType}</td>
             <td className="px-4 py-3">{ACTION_LABEL[nc.actionType]}</td>
             <td className="px-4 py-3">
-              <span
-                className={
-                  nc.status === "OPEN"
-                    ? "inline-flex rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700"
-                    : "inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500"
-                }
-              >
-                {nc.status === "OPEN" ? "Açık" : "Kapalı"}
+              <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_LABEL[nc.status].cls}`}>
+                {STATUS_LABEL[nc.status].label}
               </span>
             </td>
             <td className="px-4 py-3 text-xs text-slate-500">{nc.reportedBy.name}</td>
@@ -289,6 +322,34 @@ export function NonConformancesPage() {
                     <CheckCircle2 className="h-4 w-4" />
                   </Button>
                 )}
+                {canManage && nc.status === "OPEN" && nc.actionType === "DEVIATION" && (
+                  <Button
+                    variant="ghost"
+                    className="px-2 py-1 text-xs"
+                    disabled={requestDeviation.isPending}
+                    onClick={() => requestDeviation.mutate(nc.id)}
+                  >
+                    Deviation Talep Et
+                  </Button>
+                )}
+                {canDecideDeviation && nc.status === "PENDING_DEVIATION_APPROVAL" && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs text-green-700"
+                      onClick={() => setPendingDeviationDecision({ id: nc.id, action: "approve" })}
+                    >
+                      Onayla
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs text-red-700"
+                      onClick={() => setPendingDeviationDecision({ id: nc.id, action: "reject" })}
+                    >
+                      Reddet
+                    </Button>
+                  </>
+                )}
               </div>
             </td>
           </tr>
@@ -307,6 +368,17 @@ export function NonConformancesPage() {
         <ResolveNcModal nc={resolvingNc} onClose={() => setResolvingNc(null)} onResolved={invalidate} />
       )}
       {viewingNc && <NcDetailModal nc={viewingNc} onClose={() => setViewingNc(null)} />}
+
+      <ReauthModal
+        open={pendingDeviationDecision !== null}
+        onClose={() => setPendingDeviationDecision(null)}
+        busy={approveDeviation.isPending || rejectDeviation.isPending}
+        onConfirm={(password) => {
+          if (!pendingDeviationDecision) return;
+          const mutation = pendingDeviationDecision.action === "approve" ? approveDeviation : rejectDeviation;
+          mutation.mutate({ id: pendingDeviationDecision.id, password });
+        }}
+      />
     </div>
   );
 }

@@ -1306,6 +1306,9 @@ model WorkOrderOperation {
 enum NonConformanceStatus {
   OPEN
   RESOLVED
+  /// AHK-012: DEVIATION actionType'lı bir NCR, ApprovalRequest karara
+  /// bağlanana kadar bu durumda kalır — resolve() bu durumda reddedilir.
+  PENDING_DEVIATION_APPROVAL
 }
 
 enum NonConformanceActionType {
@@ -1313,6 +1316,7 @@ enum NonConformanceActionType {
   SCRAP
   REWORK
   BLOCKING
+  DEVIATION
 }
 
 /// Kalite: iş emrine bağlı uygunsuzluk kaydı. Açık (OPEN) bir kayıt varken o iş
