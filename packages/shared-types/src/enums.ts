@@ -102,7 +102,7 @@ export type AuditAction = z.infer<typeof AuditActionSchema>;
 export const DocumentTypeSchema = z.enum(["STEP", "WORK_INSTRUCTION", "OTHER"]);
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
 
-export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration", "lot"]);
+export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration", "lot", "recipe-step"]);
 export type DocumentEntityType = z.infer<typeof DocumentEntityTypeSchema>;
 
 export const NcProgramStatusSchema = z.enum(["DRAFT", "REVIEW", "APPROVED", "PUBLISHED", "SUPERSEDED", "ARCHIVED"]);

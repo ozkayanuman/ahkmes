@@ -1272,6 +1272,10 @@ model WorkOrderOperation {
   /// AHK-011: RecipeStep.standardMinutes'ten oluşturma anında kopyalanan
   /// immutable snapshot (ncProgramId ile aynı desen) — kapasite yükü buradan hesaplanır.
   standardMinutes Decimal?                @db.Decimal(10, 2)
+  /// MES-OPERATOR-HMI-002: RecipeStep.instructionHtml'den oluşturma anında
+  /// kopyalanan immutable snapshot (standardMinutes ile aynı desen) — Recipe
+  /// sonradan değişse bile bu operasyon oluşturulduğu andaki talimatı gösterir.
+  instructionHtml String?                @db.Text
   /// Released NC revision snapshot. The FK keeps genealogy; the checksum and
   /// file fields preserve as-built evidence even after a later supersession.
   ncProgramId    String?
@@ -1811,6 +1815,11 @@ model RecipeStep {
   /// AHK-011: opsiyonel planlama verisi — WorkOrder oluşturulunca
   /// WorkOrderOperation.standardMinutes'e immutable snapshot olarak kopyalanır.
   standardMinutes Decimal? @db.Decimal(10, 2)
+  /// MES-OPERATOR-HMI-002: sanitize-html ile temizlenmiş zengin iş talimatı
+  /// (gömülü resimler <img data-document-id> referansıyla tutulur, ham signed
+  /// URL saklanmaz). WorkOrder oluşturulunca WorkOrderOperation.instructionHtml'e
+  /// immutable snapshot olarak kopyalanır (standardMinutes ile aynı desen).
+  instructionHtml String? @db.Text
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

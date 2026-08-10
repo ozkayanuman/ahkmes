@@ -900,6 +900,8 @@ export type UpdateBomHeaderDto = z.infer<typeof updateBomHeaderSchema>;
 
 // ---- Recipe (Faz F) — süreç reçetesi versiyonlama, BomHeader ile aynı desen ----
 export const recipeStepInputSchema = z.object({
+  /// Upsert eşleştirme anahtarı — mevcut adım güncellenirken gönderilir; yoksa yeni adım oluşturulur.
+  id: idSchema.optional(),
   seq: z.number().int().min(1),
   name: z.string().min(1),
   parameterName: z.string().optional(),
@@ -907,6 +909,7 @@ export const recipeStepInputSchema = z.object({
   unit: z.string().optional(),
   ncProgramId: idSchema.optional(),
   standardMinutes: z.coerce.number().nonnegative().optional(),
+  instructionHtml: z.string().optional(),
 });
 export const createRecipeHeaderSchema = z.object({
   partId: idSchema,

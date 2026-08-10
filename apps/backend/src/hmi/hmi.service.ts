@@ -98,6 +98,7 @@ export class HmiService {
       scrapQty: operation.scrapQty,
       startedAt: operation.startedAt,
       completedAt: operation.completedAt,
+      instructionHtml: operation.instructionHtml,
       machine: operation.machine ?? operation.workOrder.machine,
       workCenter: operation.machine?.unit ?? operation.workOrder.machine?.unit ?? null,
       workOrder: operation.workOrder,

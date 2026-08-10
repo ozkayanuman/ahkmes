@@ -23,6 +23,20 @@ describe("HmiService", () => {
     }));
   });
 
+  it("MES-OPERATOR-HMI-002: operasyon kuyruğu talimatın immutable snapshot'ını (instructionHtml) döndürür", async () => {
+    prisma.workOrderOperation.findMany.mockResolvedValue([{
+      id: "operation-a", workOrderId: "work-order-a", seq: 1, name: "Tornalama", status: "PENDING",
+      completedQty: "0", scrapQty: "0", startedAt: null, completedAt: null,
+      instructionHtml: "<p>talimat</p>",
+      machine: null, ncProgram: null, toolRequirements: [], fixtureRequirements: [], setupVerifications: [],
+      workOrder: { machine: null },
+    }]);
+
+    const rows = await service.list("tenant-a", {});
+
+    expect(rows[0]).toMatchObject({ instructionHtml: "<p>talimat</p>" });
+  });
+
   it("does not silently complete an in-progress operation when its active run is absent", async () => {
     (service as any).operation = jest.fn().mockResolvedValue({ id: "operation-a", workOrderId: "work-order-a", status: "IN_PROGRESS" });
     prisma.productionRun.findFirst.mockResolvedValue(null);
