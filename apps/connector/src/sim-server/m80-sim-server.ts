@@ -14,12 +14,15 @@ export interface M80SimServerConfig {
   port: number;
   cycleTimeMs: number;
   alarmProbability?: number;
+  programIdentityItem?: { section: number; subSection: number };
+  programIdentity?: string;
 }
 
 export interface M80SimServerHandle {
   port: number;
   /** Açık istemci soketlerini kapatarak saha ağ kesintisini taklit eder. */
   disconnectClients(): void;
+  setProgramIdentity(identity: string): void;
   shutdown(): Promise<void>;
 }
 
@@ -38,6 +41,7 @@ export function startM80SimServer(config: M80SimServerConfig): Promise<M80SimSer
   let cycleStatus = 0;
   let partCount = 0;
   let alarmMessage = "";
+  let programIdentity = config.programIdentity ?? "O1000";
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   const clients = new Set<net.Socket>();
@@ -87,6 +91,8 @@ export function startM80SimServer(config: M80SimServerConfig): Promise<M80SimSer
           data = encodeLongValue(partCount);
         } else if (matchesItem(req, DEFAULT_ITEM_ADDRESSES.alarmMessage)) {
           data = encodeCharValue(alarmMessage);
+        } else if (config.programIdentityItem && matchesItem(req, config.programIdentityItem)) {
+          data = encodeCharValue(programIdentity);
         } else {
           socket.write(
             encodeGetDataReply({ requestId: req.requestId, isError: true, dataType: DataType.LONG, data: Buffer.alloc(0) }),
@@ -107,6 +113,7 @@ export function startM80SimServer(config: M80SimServerConfig): Promise<M80SimSer
         disconnectClients() {
           for (const client of clients) client.destroy();
         },
+        setProgramIdentity(identity: string) { programIdentity = identity; },
         async shutdown() {
           stopped = true;
           if (timer) clearTimeout(timer);

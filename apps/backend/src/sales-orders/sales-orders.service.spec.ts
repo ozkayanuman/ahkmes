@@ -21,8 +21,8 @@ function soFixture(overrides: any = {}) {
     soNo: "SIP-2026-0001",
     status: "OPEN",
     lines: [
-      { id: "sol1", part: { id: "p1" }, quantity: "10", dueDate: new Date("2026-08-01"), workOrders: [], shippedQty: "0" },
-      { id: "sol2", part: { id: "p2" }, quantity: "3", dueDate: new Date("2026-08-02"), workOrders: [{ id: "wo1" }], shippedQty: "0" },
+      { id: "sol1", part: { id: "p1" }, fulfillmentPlantId: "plant1", quantity: "10", dueDate: new Date("2026-08-01"), workOrders: [], shippedQty: "0" },
+      { id: "sol2", part: { id: "p2" }, fulfillmentPlantId: "plant1", quantity: "3", dueDate: new Date("2026-08-02"), workOrders: [{ id: "wo1" }], shippedQty: "0" },
     ],
     ...overrides,
   };
@@ -47,10 +47,18 @@ describe("SalesOrdersService.release", () => {
     expect(workOrders.createWithRoute).toHaveBeenCalledWith(
       tx,
       "t1",
-      expect.objectContaining({ salesOrderLineId: "sol1", partId: "p1", quantity: "10" }),
+      expect.objectContaining({ salesOrderLineId: "sol1", partId: "p1", plantId: "plant1", quantity: expect.anything() }),
     );
     expect(result.workOrders).toHaveLength(1);
     expect(result.skippedLineIds).toEqual(["sol2"]);
+  });
+
+  it("explicit plant atanmamış satırı üretime almaz", async () => {
+    const { service, prisma, workOrders } = buildService();
+    prisma.salesOrder.findFirst.mockResolvedValue(soFixture({ lines: [{ id: "sol1", part: { id: "p1" }, fulfillmentPlantId: null, quantity: "10", dueDate: new Date(), workOrders: [], shippedQty: "0" }] }));
+
+    await expect(service.release("t1", "so1", {})).rejects.toThrow("explicit fulfillment plant");
+    expect(workOrders.createWithRoute).not.toHaveBeenCalled();
   });
 
   it("tüm satırlar zaten üretime alınmışsa hata fırlatır", async () => {

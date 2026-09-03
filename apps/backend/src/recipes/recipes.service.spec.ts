@@ -26,15 +26,14 @@ describe("RecipesService.create", () => {
 
   it("yeni aktif reçete oluşturulunca önceki aktif revizyonlar pasife çekilir", async () => {
     const { service, prisma } = buildService();
-    prisma.recipeHeader.create.mockResolvedValue({ id: "r1", isActive: true });
+    prisma.recipeHeader.create.mockResolvedValue({ id: "r1", isActive: false, status: "DRAFT" });
 
     await service.create("t1", { partId: "p1", revision: "B", steps: [{ seq: 1, name: "Tornalama" }] });
 
-    expect(prisma.recipeHeader.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: "t1", partId: "p1", isActive: true },
-      data: { isActive: false },
-    });
-    expect(prisma.recipeHeader.create).toHaveBeenCalled();
+    expect(prisma.recipeHeader.updateMany).not.toHaveBeenCalled();
+    expect(prisma.recipeHeader.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ isActive: false, status: "DRAFT" }),
+    }));
   });
 
   it("adım iş talimatını kaydetmeden önce sanitize eder", async () => {
@@ -51,12 +50,42 @@ describe("RecipesService.create", () => {
     const stepData = created.data.steps.create[0];
     expect(stepData.instructionHtml).toBe("<p>talimat</p>");
   });
+
+  it("released operation performance standard is stored on the routing step", async () => {
+    const { service, prisma } = buildService();
+    prisma.recipeHeader.create.mockResolvedValue({ id: "r1" });
+
+    await service.create("t1", {
+      partId: "p1",
+      revision: "A",
+      steps: [{ seq: 1, name: "Machining", standardMinutes: 50, idealCycleTimeSec: 12.5 }],
+    });
+
+    expect(prisma.recipeHeader.create.mock.calls[0][0].data.steps.create[0]).toEqual(
+      expect.objectContaining({ idealCycleTimeSec: 12.5 }),
+    );
+  });
 });
 
 describe("RecipesService.update", () => {
+  it("forwards the performance standard when a draft routing step changes", async () => {
+    const { service, prisma } = buildService();
+    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", status: "DRAFT", steps: [{ id: "s1" }] });
+    prisma.recipeHeader.update.mockResolvedValue({ id: "r1" });
+
+    await service.update("t1", "r1", {
+      steps: [{ id: "s1", seq: 1, name: "Machining", idealCycleTimeSec: 9.75 }],
+    });
+
+    expect(prisma.recipeStep.update).toHaveBeenCalledWith({
+      where: { id: "s1" },
+      data: expect.objectContaining({ idealCycleTimeSec: 9.75 }),
+    });
+  });
+
   it("hiç var olan adım yokken gönderilen id'siz adımlar create ile eklenir, deleteMany çağrılmaz", async () => {
     const { service, prisma } = buildService();
-    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", steps: [] });
+    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", status: "DRAFT", steps: [] });
     prisma.recipeHeader.update.mockResolvedValue({ id: "r1" });
 
     await service.update("t1", "r1", { steps: [{ seq: 1, name: "Yeni Adım" }] });
@@ -70,7 +99,7 @@ describe("RecipesService.update", () => {
 
   it("id'si gönderilen var olan bir adım update ile güncellenir, silinmez/yeniden oluşturulmaz", async () => {
     const { service, prisma } = buildService();
-    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", steps: [{ id: "s1" }] });
+    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", status: "DRAFT", steps: [{ id: "s1" }] });
     prisma.recipeHeader.update.mockResolvedValue({ id: "r1" });
 
     await service.update("t1", "r1", { steps: [{ id: "s1", seq: 1, name: "Güncellendi" }] });
@@ -85,7 +114,7 @@ describe("RecipesService.update", () => {
 
   it("gelen listede olmayan var olan bir adım silinir", async () => {
     const { service, prisma } = buildService();
-    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", steps: [{ id: "s1" }, { id: "s2" }] });
+    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", status: "DRAFT", steps: [{ id: "s1" }, { id: "s2" }] });
     prisma.recipeHeader.update.mockResolvedValue({ id: "r1" });
 
     await service.update("t1", "r1", { steps: [{ id: "s1", seq: 1, name: "Kalan" }] });
@@ -95,7 +124,7 @@ describe("RecipesService.update", () => {
 
   it("bu reçeteye ait olmayan bir adım id'si gönderilirse reddedilir", async () => {
     const { service, prisma } = buildService();
-    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", steps: [{ id: "s1" }] });
+    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", status: "DRAFT", steps: [{ id: "s1" }] });
 
     await expect(
       service.update("t1", "r1", { steps: [{ id: "başka-reçetenin-adımı", seq: 1, name: "X" }] }),
@@ -106,7 +135,7 @@ describe("RecipesService.update", () => {
 
   it("güncellenen adımın iş talimatı kaydetmeden önce sanitize edilir", async () => {
     const { service, prisma } = buildService();
-    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", steps: [{ id: "s1" }] });
+    prisma.recipeHeader.findFirst.mockResolvedValue({ id: "r1", partId: "p1", status: "DRAFT", steps: [{ id: "s1" }] });
     prisma.recipeHeader.update.mockResolvedValue({ id: "r1" });
 
     await service.update("t1", "r1", {

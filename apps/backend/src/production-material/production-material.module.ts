@@ -1,0 +1,2 @@
+import { Module } from "@nestjs/common"; import { InventoryModule } from "../inventory/inventory.module"; import { OutboxModule } from "../outbox/outbox.module"; import { ProductionMaterialController } from "./production-material.controller"; import { ProductionMaterialService } from "./production-material.service";
+@Module({ imports:[InventoryModule,OutboxModule], controllers:[ProductionMaterialController], providers:[ProductionMaterialService], exports:[ProductionMaterialService] }) export class ProductionMaterialModule {}

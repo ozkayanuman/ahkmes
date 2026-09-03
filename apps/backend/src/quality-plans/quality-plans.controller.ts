@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
-import { createQualityPlanRevisionSchema, createQualityPlanSchema, type CreateQualityPlanDto, type CreateQualityPlanRevisionDto } from "@ahkmes/shared-types";
+import { createQualityPlanRevisionSchema, createQualityPlanSchema, engineeringStatusChangeSchema, type CreateQualityPlanDto, type CreateQualityPlanRevisionDto, type EngineeringStatusChangeDto } from "@ahkmes/shared-types";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequirePage } from "../common/decorators/require-page.decorator";
 import { SkipAudit } from "../common/decorators/skip-audit.decorator";
@@ -41,5 +41,11 @@ export class QualityPlansController {
     @Body(new ZodValidationPipe(createQualityPlanRevisionSchema)) dto: CreateQualityPlanRevisionDto,
   ) {
     return this.service.createRevision(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post(":id/status") @Roles("ADMIN", "PLANNER", "FOREMAN")
+  setStatus(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(engineeringStatusChangeSchema)) dto: EngineeringStatusChangeDto) {
+    if (dto.status !== "RELEASED" && dto.status !== "OBSOLETE") throw new Error("Invalid quality plan lifecycle status");
+    return this.service.setStatus(user.tenantId, user.userId, id, dto.status);
   }
 }

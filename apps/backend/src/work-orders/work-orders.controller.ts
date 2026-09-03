@@ -22,6 +22,8 @@ import {
   type UpdateWorkOrderDto,
   type UpdateWorkOrderOperationDto,
   type WorkOrderStatusUpdateDto,
+  releaseWorkOrderEngineeringSchema,
+  type ReleaseWorkOrderEngineeringDto,
 } from "@ahkmes/shared-types";
 import type { WorkOrderStatus } from "@prisma/client";
 import { WorkOrdersService } from "./work-orders.service";
@@ -33,6 +35,7 @@ import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { parseOeeCalculationContext } from "../oee/oee-request";
 
 @Controller("work-orders")
 @RequirePage("work-orders")
@@ -82,8 +85,15 @@ export class WorkOrdersController {
   }
 
   @Get(":id/oee")
-  oee(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.oee(user.tenantId, id);
+  oee(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Query("plantId") plantId?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("asOf") asOf?: string,
+  ) {
+    return this.service.oee(user.tenantId, id, parseOeeCalculationContext(plantId, from, to, asOf));
   }
 
   @Get(":id/cost")
@@ -135,6 +145,10 @@ export class WorkOrdersController {
   ) {
     return this.service.setStatus(user.tenantId, id, dto.status);
   }
+
+  @Post(":id/release-engineering")
+  @Roles("ADMIN", "PLANNER")
+  releaseEngineering(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(releaseWorkOrderEngineeringSchema)) dto: ReleaseWorkOrderEngineeringDto) { return this.service.releaseEngineering(user.tenantId, user.userId, id, dto); }
 
   @Delete(":id")
   @Roles("ADMIN")

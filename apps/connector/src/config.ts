@@ -14,6 +14,7 @@ export interface ConnectorEnv {
   m80Host: string;
   m80Port: number;
   m80PollIntervalMs: number;
+  m80ProgramIdentityAddress?: string;
   m80Tags: { name: string; address: string }[];
   tagPollIntervalMs: number;
   fanucHost: string;
@@ -81,6 +82,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConnectorEnv {
     m80Host: env.M80_HOST ?? "",
     m80Port: Number(env.M80_PORT ?? 683),
     m80PollIntervalMs: Number(env.M80_POLL_INTERVAL_MS ?? 500),
+    m80ProgramIdentityAddress: env.M80_PROGRAM_IDENTITY_ADDRESS,
     m80Tags: parseM80Tags(env.M80_TAGS),
     tagPollIntervalMs: Number(env.TAG_POLL_INTERVAL_MS ?? 0),
     fanucHost: env.FANUC_HOST ?? "",

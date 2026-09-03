@@ -1,11 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import type { CreateRecipeHeaderDto, UpdateRecipeHeaderDto } from "@ahkmes/shared-types";
+import type { CreateRecipeHeaderDto, EngineeringStatusChangeDto, UpdateRecipeHeaderDto } from "@ahkmes/shared-types";
 
 type RecipeStepInput = CreateRecipeHeaderDto["steps"][number];
 import { PrismaService } from "../prisma/prisma.service";
 import { PartsService } from "../parts/parts.service";
 import { sanitizeInstructionHtml } from "./recipe-instruction-sanitizer";
+import { writeTransactionalAudit } from "../common/transactional-audit";
 
 const RECIPE_INCLUDE = {
   part: { select: { id: true, partNo: true, name: true } },
@@ -43,16 +44,14 @@ export class RecipesService {
 
     try {
       return await this.prisma.$transaction(async (tx) => {
-        await tx.recipeHeader.updateMany({
-          where: { tenantId, partId: dto.partId, isActive: true },
-          data: { isActive: false },
-        });
         return tx.recipeHeader.create({
           data: {
             tenantId,
             partId: dto.partId,
             revision: dto.revision,
             notes: dto.notes,
+            isActive: false,
+            status: "DRAFT",
             steps: {
               create: dto.steps.map((s: RecipeStepInput) => ({
                 tenantId,
@@ -63,6 +62,7 @@ export class RecipesService {
                 unit: s.unit,
                 ncProgramId: s.ncProgramId,
                 standardMinutes: s.standardMinutes,
+                idealCycleTimeSec: s.idealCycleTimeSec,
                 instructionHtml: sanitizeInstructionHtml(s.instructionHtml),
               })),
             },
@@ -80,6 +80,7 @@ export class RecipesService {
 
   async update(tenantId: string, id: string, dto: UpdateRecipeHeaderDto) {
     const recipe = await this.findOne(tenantId, id);
+    if (recipe.status !== "DRAFT") throw new ConflictException("Released, obsolete, or legacy routing cannot be changed; create a new revision");
     if (dto.steps) {
       for (const step of dto.steps) {
         if (step.ncProgramId) await this.ncPrograms().assertNcProgramUsable(tenantId, step.ncProgramId, recipe.partId);
@@ -111,6 +112,7 @@ export class RecipesService {
             unit: s.unit,
             ncProgramId: s.ncProgramId,
             standardMinutes: s.standardMinutes,
+            idealCycleTimeSec: s.idealCycleTimeSec,
             instructionHtml: sanitizeInstructionHtml(s.instructionHtml),
           };
           if (s.id) {
@@ -122,7 +124,7 @@ export class RecipesService {
       }
       return tx.recipeHeader.update({
         where: { id: recipe.id },
-        data: { notes: dto.notes, isActive: dto.isActive },
+        data: { notes: dto.notes },
         include: RECIPE_INCLUDE,
       });
     });
@@ -131,6 +133,25 @@ export class RecipesService {
   async remove(tenantId: string, id: string) {
     await this.findOne(tenantId, id);
     return this.prisma.recipeHeader.delete({ where: { id } });
+  }
+
+  async setStatus(tenantId: string, userId: string, id: string, dto: EngineeringStatusChangeDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "RecipeHeader" WHERE "id" = ${id} FOR UPDATE`;
+      const recipe = await tx.recipeHeader.findFirst({ where: { id, tenantId }, include: { steps: true } });
+      if (!recipe) throw new NotFoundException("Routing was not found");
+      if (recipe.status === dto.status) return recipe;
+      if (dto.status === "RELEASED") {
+        if (!recipe.steps.length) throw new ConflictException("Released routing must contain at least one operation");
+        const duplicate = recipe.steps.some((step, index) => step.seq !== index + 1);
+        if (duplicate) throw new ConflictException("Routing operation sequence must be contiguous and start at 1");
+        for (const step of recipe.steps) if (step.ncProgramId) await this.ncPrograms().assertNcProgramUsable(tenantId, step.ncProgramId, recipe.partId, undefined, undefined, tx);
+        await tx.recipeHeader.updateMany({ where: { tenantId, partId: recipe.partId, status: "RELEASED", id: { not: recipe.id } }, data: { status: "OBSOLETE", isActive: false } });
+      }
+      const updated = await tx.recipeHeader.update({ where: { id }, data: { status: dto.status, isActive: dto.status === "RELEASED", releasedAt: dto.status === "RELEASED" ? new Date() : recipe.releasedAt, releasedById: dto.status === "RELEASED" ? userId : recipe.releasedById } });
+      await writeTransactionalAudit(tx, { tenantId, userId, entity: "routing", entityId: id, action: "STATUS_CHANGE", before: { status: recipe.status }, after: { status: updated.status, revision: recipe.revision } });
+      return updated;
+    });
   }
 
   private ncPrograms() {

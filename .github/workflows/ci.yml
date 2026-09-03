@@ -27,6 +27,7 @@ jobs:
       DATABASE_URL: postgresql://ahkmes:ahkmes-ci@localhost:5432/ahkmes?schema=public
       JWT_SECRET: ci-test-secret
       SEED_ADMIN_PASSWORD: ci-admin-password
+      SEED_MODE: demo
       MINIO_ENDPOINT: localhost
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"

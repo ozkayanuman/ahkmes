@@ -9,6 +9,8 @@ import type {
   CreateMachineTagDto,
   MachineTagValuesDto,
   MachineTelemetryDto,
+  ConnectorStatusDto,
+  ControllerObservationDto,
   UpdateMachineDto,
   UpdateMachineTagDto,
 } from "@ahkmes/shared-types";
@@ -16,6 +18,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { DowntimeService } from "../downtime/downtime.service";
 import { OutboxService } from "../outbox/outbox.service";
+import { MachineMaintenanceAvailabilityService } from "./machine-maintenance-availability.service";
 
 const CONNECTOR_USER_EMAIL = "machine-connector@ahkmes.local";
 
@@ -26,6 +29,7 @@ export class MachinesService {
     private readonly notifications: NotificationsService,
     private readonly downtime: DowntimeService,
     private readonly outbox: OutboxService,
+    private readonly maintenanceAvailability: MachineMaintenanceAvailabilityService,
   ) {}
 
   private static readonly PUBLIC_SELECT = {
@@ -39,7 +43,16 @@ export class MachinesService {
     lastEventAt: true,
     lastStatus: true,
     connectorType: true,
+    connectorAdapter: true,
+    connectorConnectionState: true,
+    connectorLastCommunicationAt: true,
+    connectorLastErrorCategory: true,
+    connectorReconnecting: true,
+    connectorConfigValid: true,
+    connectorStatusUpdatedAt: true,
     connectorConfig: true,
+    controllerVerificationRequired: true,
+    controllerFreshnessSeconds: true,
     unitId: true,
     runtimeHours: true,
     pmIntervalHours: true,
@@ -68,6 +81,7 @@ export class MachinesService {
   }
 
   create(tenantId: string, dto: CreateMachineDto) {
+    this.validateControllerConfiguration(dto.connectorType, dto.connectorConfig, dto);
     return this.prisma.machine.create({
       data: { ...dto, tenantId, connectorConfig: dto.connectorConfig as Prisma.InputJsonValue },
       select: MachinesService.PUBLIC_SELECT,
@@ -75,7 +89,11 @@ export class MachinesService {
   }
 
   async update(tenantId: string, id: string, dto: UpdateMachineDto) {
-    await this.findOne(tenantId, id);
+    const existing = await this.findOne(tenantId, id);
+    this.validateControllerConfiguration(dto.connectorType ?? existing.connectorType, dto.connectorConfig ?? existing.connectorConfig, {
+      controllerVerificationRequired: dto.controllerVerificationRequired ?? existing.controllerVerificationRequired,
+      controllerFreshnessSeconds: dto.controllerFreshnessSeconds ?? existing.controllerFreshnessSeconds,
+    });
     return this.prisma.machine.update({
       where: { id },
       data: { ...dto, connectorConfig: dto.connectorConfig as Prisma.InputJsonValue },
@@ -121,6 +139,106 @@ export class MachinesService {
     return { key: plainKey };
   }
 
+  async connectorStatus(tenantId: string, id: string) {
+    const machine = await this.findOne(tenantId, id);
+    const latestObservation = await this.prisma.machineControllerObservation.findFirst({ where: { tenantId, machineId: id }, orderBy: [{ ingestedAt: "desc" }, { connectionGeneration: "desc" }] });
+    return {
+      machineId: machine.id,
+      machineName: machine.name,
+      configuredConnectorType: machine.connectorType,
+      adapter: machine.connectorAdapter,
+      connectionState: machine.connectorConnectionState ?? "NOT_REPORTED",
+      lastSuccessfulCommunicationAt: machine.connectorLastCommunicationAt,
+      lastErrorCategory: machine.connectorLastErrorCategory,
+      reconnecting: machine.connectorReconnecting,
+      configurationValid: machine.connectorConfigValid,
+      updatedAt: machine.connectorStatusUpdatedAt,
+      controllerVerificationRequired: machine.controllerVerificationRequired,
+      controllerFreshnessSeconds: machine.controllerFreshnessSeconds,
+      latestObservation: latestObservation ? {
+        connectionState: latestObservation.connectionState,
+        machineState: latestObservation.machineState,
+        activeProgramIdentity: latestObservation.activeProgramIdentity,
+        trustLevel: latestObservation.trustLevel,
+        ingestedAt: latestObservation.ingestedAt,
+        connectionGeneration: latestObservation.connectionGeneration,
+        alarmCode: latestObservation.alarmCode,
+        alarmText: latestObservation.alarmText,
+        capabilities: latestObservation.capabilities,
+      } : null,
+      qualification: machine.connectorAdapter === "m80" || machine.connectorAdapter === "fanuc" ? "EXPERIMENTAL" : machine.connectorAdapter === "simulator" ? "SIMULATED" : "PARTIAL",
+    };
+  }
+
+  async recordControllerObservation(machine: Machine, dto: ControllerObservationDto) {
+    const existing = await this.prisma.machineControllerObservation.findFirst({ where: { machineId: machine.id, idempotencyKey: dto.idempotencyKey } });
+    if (existing) return { ok: true, duplicate: true, id: existing.id };
+    const observation = await this.prisma.machineControllerObservation.create({
+      data: {
+        tenantId: machine.tenantId,
+        machineId: machine.id,
+        idempotencyKey: dto.idempotencyKey,
+        connectionState: dto.connectionState,
+        machineState: dto.machineState,
+        trustLevel: dto.trustLevel,
+        controllerTimestamp: dto.controllerTimestamp,
+        activeProgramIdentity: dto.activeProgramIdentity,
+        activeProgramChecksum: dto.activeProgramChecksum,
+        alarmCode: dto.alarmCode,
+        alarmText: dto.alarmText,
+        partCounter: dto.partCounter,
+        connectionGeneration: dto.connectionGeneration,
+        capabilities: dto.capabilities as Prisma.InputJsonValue,
+        raw: dto.raw as Prisma.InputJsonValue,
+      },
+    });
+    await this.prisma.machine.update({
+      where: { id: machine.id },
+      data: {
+        connectorConnectionState: dto.connectionState === "ONLINE" ? "CONNECTED" : dto.connectionState === "CONNECTING" ? "RECONNECTING" : "DISCONNECTED",
+        connectorLastCommunicationAt: dto.connectionState === "ONLINE" ? new Date() : undefined,
+        connectorReconnecting: dto.connectionState === "CONNECTING",
+        connectorStatusUpdatedAt: new Date(),
+      },
+    });
+    return { ok: true, id: observation.id };
+  }
+
+  private validateControllerConfiguration(connectorType: any, connectorConfig: unknown, policy: { controllerVerificationRequired?: boolean; controllerFreshnessSeconds?: number }) {
+    if (policy.controllerFreshnessSeconds !== undefined && (!Number.isInteger(policy.controllerFreshnessSeconds) || policy.controllerFreshnessSeconds < 5 || policy.controllerFreshnessSeconds > 3600)) {
+      throw new ConflictException("Controller freshness must be an integer between 5 and 3600 seconds");
+    }
+    if (connectorType !== "M80") {
+      if (policy.controllerVerificationRequired) throw new ConflictException("Controller verification is currently available only for an explicitly configured M80 machine");
+      return;
+    }
+    const config = connectorConfig && typeof connectorConfig === "object" ? connectorConfig as Record<string, unknown> : {};
+    const port = Number(config.port ?? 683);
+    if (typeof config.host !== "string" || !config.host.trim() || !Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new ConflictException("M80 controller configuration requires a host and valid TCP port");
+    }
+    if (policy.controllerVerificationRequired && (typeof config.programIdentityAddress !== "string" || !config.programIdentityAddress.trim())) {
+      throw new ConflictException("M80 program verification requires an explicit controller programIdentityAddress; it cannot be inferred from a file name");
+    }
+  }
+
+  async recordConnectorStatus(machine: Machine, dto: ConnectorStatusDto) {
+    const lastSuccessfulCommunicationAt = dto.lastSuccessfulCommunicationAt ? new Date(dto.lastSuccessfulCommunicationAt) : undefined;
+    await this.prisma.machine.update({
+      where: { id: machine.id },
+      data: {
+        connectorAdapter: dto.adapter,
+        connectorConnectionState: dto.connectionState,
+        connectorLastCommunicationAt: lastSuccessfulCommunicationAt,
+        connectorLastErrorCategory: dto.lastErrorCategory ?? null,
+        connectorReconnecting: dto.reconnecting,
+        connectorConfigValid: dto.configurationValid,
+        connectorStatusUpdatedAt: new Date(),
+      },
+    });
+    return { ok: true };
+  }
+
   /** MachineKeyGuard ile doğrulanmış makine üzerinden telemetri işleme (kullanıcı JWT'si yok). */
   async handleTelemetry(machine: Machine, dto: MachineTelemetryDto) {
     const tenantId = machine.tenantId;
@@ -142,6 +260,9 @@ export class MachinesService {
     }
 
     if (dto.type === "CYCLE_START") {
+      // Controller observation never owns maintenance business state. It may
+      // request production, but the same shared MES safety gate remains authoritative.
+      await this.maintenanceAvailability.assertProductionAvailable(tenantId, machine.id);
       if (!machine.activeWorkOrderId) {
         throw new AppException(HttpStatus.CONFLICT, "NO_ACTIVE_WORK_ORDER", "Tezgaha atanmış aktif iş emri yok");
       }
@@ -345,8 +466,10 @@ export class MachinesService {
   }
 
   private async connectorUser(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { code: true } });
+    const emails = [CONNECTOR_USER_EMAIL, ...(tenant?.code ? [`machine-connector+${tenant.code}@ahkmes.local`] : [])];
     const user = await this.prisma.user.findFirst({
-      where: { tenantId, email: CONNECTOR_USER_EMAIL },
+      where: { tenantId, email: { in: emails } },
     });
     if (!user) throw new NotFoundException("Makine bağlantısı sistem kullanıcısı bulunamadı (seed çalıştırılmalı)");
     return user;

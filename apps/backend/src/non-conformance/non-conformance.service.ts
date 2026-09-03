@@ -14,6 +14,15 @@ const INCLUDE = {
   workOrder: { select: { id: true, woNo: true, status: true } },
   reportedBy: { select: { id: true, name: true } },
   resolvedBy: { select: { id: true, name: true } },
+  inspectionLot: {
+    include: {
+      holds: true,
+      measurements: true,
+      requirement: { select: { planRevision: true, inspectionPoint: true, snapshot: true } },
+    },
+  },
+  dispositions: true,
+  reworkRequirements: true,
 } as const;
 
 @Injectable()

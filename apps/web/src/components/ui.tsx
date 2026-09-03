@@ -11,9 +11,10 @@ import { useTranslation } from "react-i18next";
 
 export function Button({
   variant = "primary",
+  size,
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "outline" | "danger" | "ghost" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "outline" | "danger" | "ghost"; size?: "sm" }) {
   return (
     <button
       className={clsx(
@@ -22,6 +23,7 @@ export function Button({
         variant === "outline" && "border border-slate-300 bg-white hover:bg-slate-100",
         variant === "danger" && "bg-red-600 text-white hover:bg-red-700",
         variant === "ghost" && "hover:bg-slate-100",
+        size === "sm" && "px-2 py-1 text-xs",
         className,
       )}
       {...props}

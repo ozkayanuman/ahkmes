@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { Prisma, Role } from "@prisma/client";
-import type { CreateNcProgramDto, CreateNcProgramRevisionDto, CreatePartDto, ElectronicSignatureDto, UpdatePartDto } from "@ahkmes/shared-types";
+import type { CreateNcProgramDto, CreateNcProgramRevisionDto, CreatePartDto, ElectronicSignatureDto, EngineeringStatusChangeDto, UpdatePartDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { MinioService } from "../documents/minio.service";
 import { ApprovalsService } from "../approvals/approvals.service";
@@ -60,7 +60,8 @@ export class PartsService {
   }
 
   async update(tenantId: string, id: string, dto: UpdatePartDto) {
-    await this.findOne(tenantId, id);
+    const part = await this.findOne(tenantId, id);
+    if (part.engineeringStatus !== "DRAFT") throw new ConflictException("Released, obsolete, or legacy part revisions cannot be changed; create a new revision");
     try {
       return await this.prisma.part.update({ where: { id }, data: dto });
     } catch (e) {
@@ -69,6 +70,17 @@ export class PartsService {
       }
       throw e;
     }
+  }
+
+  async setEngineeringStatus(tenantId: string, userId: string, id: string, dto: EngineeringStatusChangeDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const part = await tx.part.findFirst({ where: { id, tenantId } });
+      if (!part) throw new NotFoundException("Part was not found");
+      if (part.engineeringStatus === dto.status) return part;
+      const updated = await tx.part.update({ where: { id }, data: { engineeringStatus: dto.status } });
+      await writeTransactionalAudit(tx, { tenantId, userId, entity: "part-engineering", entityId: id, action: "STATUS_CHANGE", before: { status: part.engineeringStatus }, after: { status: updated.engineeringStatus, partNo: part.partNo, revision: part.revision } });
+      return updated;
+    });
   }
 
   async remove(tenantId: string, id: string) {

@@ -1,12 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, apiGet, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { Button, Input, Label, Modal, Select, Table, Textarea } from "../components/ui";
 import { useToast } from "../components/toast";
+
+type ExecutionLot = { id: string; status: string; requiredSamples: number; inspectionPoint: string; requirement: { planRevision: string; snapshot: { checks: Array<{ seq: number; checkpointName: string; characteristicType: string; unit?: string; lowerLimit?: string; upperLimit?: string; qualitativeExpected?: string }> } }; workOrder: { woNo: string }; measurements: Array<{ sampleNo: number; checkSeq: number; result: string; numericValue?: string; resultValue?: string }>; nonConformance?: { id: string } | null; holds: Array<{ id: string; status: string; reason: string }> };
+type ExecutionRequirement = { id: string; planRevision: string; inspectionPoint: string; samplingMethod: string; sampleCount?: number | null; workOrder: { woNo: string; part: { partNo: string; name: string } }; operation?: { seq: number; name: string } | null };
 
 interface WorkOrderOption {
   id: string;
@@ -72,11 +75,19 @@ export function InspectionsPage() {
   const [planChecks, setPlanChecks] = useState<QualityPlanCheckDraft[]>([emptyQualityPlanCheck()]);
   const [revisionSource, setRevisionSource] = useState<QualityPlan | null>(null);
   const [nextRevision, setNextRevision] = useState("");
+  const executionRequirementRef = useRef("");
+  const setExecutionRequirementId = (requirementId: string) => { executionRequirementRef.current = requirementId; };
+  const [executionLotId, setExecutionLotId] = useState("");
+  const [sampleNo, setSampleNo] = useState("1"); const [checkSeq, setCheckSeq] = useState("1"); const [executionValue, setExecutionValue] = useState("");
 
   const inspections = useQuery({
     queryKey: ["/inspections"],
     queryFn: () => apiGet<InspectionRow[]>("/inspections"),
   });
+  const executionLots = useQuery({ queryKey: ["/quality-execution/lots"], queryFn: () => apiGet<ExecutionLot[]>("/quality-execution/lots") });
+  const executionRequirements = useQuery({ queryKey: ["/quality-execution/requirements"], queryFn: () => apiGet<ExecutionRequirement[]>("/quality-execution/requirements") });
+  const createExecutionLot = useMutation({ mutationFn: () => apiPost<ExecutionLot>("/quality-execution/lots", { requirementId: executionRequirementRef.current, idempotencyKey: `ui-lot-${crypto.randomUUID()}` }), onSuccess: (lot) => { setExecutionLotId(lot.id); qc.invalidateQueries({ queryKey: ["/quality-execution/lots"] }); toast("Inspection lot açıldı.", "success"); }, onError: () => toast("Inspection lot açılamadı.", "error") });
+  const submitExecutionMeasurement = useMutation({ mutationFn: () => apiPost(`/quality-execution/lots/${executionLotId}/measurements`, { sampleNo: Number(sampleNo), checkSeq: Number(checkSeq), numericValue: executionValue || undefined, resultValue: executionValue || undefined, idempotencyKey: `ui-measure-${crypto.randomUUID()}` }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["/quality-execution/lots"] }); toast("Server sonucu kaydedildi.", "success"); }, onError: (error) => toast(error instanceof ApiError ? String((error.body as any)?.message ?? "Ölçüm reddedildi") : "Ölçüm reddedildi", "error") });
   const workOrders = useQuery({
     queryKey: ["/work-orders"],
     queryFn: () => apiGet<WorkOrderOption[]>("/work-orders"),
@@ -186,6 +197,11 @@ export function InspectionsPage() {
             </Button>
           </div>
         )}
+      </div>
+
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border bg-white p-4"><h2 className="font-semibold">Released quality requirements</h2><div className="mt-3 space-y-2">{(executionRequirements.data ?? []).map((req) => <div key={req.id} className="rounded border p-2 text-sm"><b>{req.workOrder.woNo}</b> · {req.workOrder.part.partNo} · plan {req.planRevision} · {req.inspectionPoint}{req.operation ? ` · OP${req.operation.seq} ${req.operation.name}` : ""}<Button className="ml-3" size="sm" disabled={!canWrite || createExecutionLot.isPending} onClick={() => { setExecutionRequirementId(req.id); createExecutionLot.mutate(); }}>Open lot</Button></div>) || <p className="text-sm text-slate-500">No released requirements.</p>}</div></div>
+        <div className="rounded-lg border bg-white p-4"><h2 className="font-semibold">Inspector execution</h2><Select value={executionLotId} onChange={(event) => setExecutionLotId(event.target.value)}><option value="">Select inspection lot…</option>{(executionLots.data ?? []).map((lot) => <option key={lot.id} value={lot.id}>{lot.workOrder.woNo} · plan {lot.requirement.planRevision} · {lot.status}</option>)}</Select>{executionLotId && (() => { const lot = executionLots.data?.find((item) => item.id === executionLotId); return lot ? <div className="mt-3 space-y-2 text-sm"><p>Samples: {lot.measurements.length}/{lot.requiredSamples * lot.requirement.snapshot.checks.length}; server status: <b>{lot.status}</b></p><ul>{lot.requirement.snapshot.checks.map((check) => <li key={check.seq}>{check.seq}. {check.checkpointName} · {check.characteristicType} {check.lowerLimit !== undefined ? `[${check.lowerLimit}–${check.upperLimit}] ${check.unit ?? ""}` : check.qualitativeExpected ?? ""}</li>)}</ul><div className="grid grid-cols-3 gap-2"><Input aria-label="sample" type="number" min="1" value={sampleNo} onChange={(e) => setSampleNo(e.target.value)} /><Input aria-label="check sequence" type="number" min="1" value={checkSeq} onChange={(e) => setCheckSeq(e.target.value)} /><Input aria-label="measurement or result" value={executionValue} onChange={(e) => setExecutionValue(e.target.value)} /></div><Button disabled={!canWrite || submitExecutionMeasurement.isPending} onClick={() => submitExecutionMeasurement.mutate()}>Submit server-evaluated result</Button>{lot.nonConformance && <Link className="ml-3 text-red-700 underline" to="/non-conformances">NCR active</Link>}{lot.holds.some((hold) => hold.status === "ACTIVE") && <p className="font-medium text-red-700">Quality hold active: {lot.holds.find((hold) => hold.status === "ACTIVE")?.reason}</p>}</div> : null; })()}</div>
       </div>
 
       {inspections.isLoading && <p className="text-slate-500">Yükleniyor…</p>}

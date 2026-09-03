@@ -23,6 +23,8 @@ import {
   type CreateNcProgramRevisionDto,
   type ElectronicSignatureDto,
   type CreatePartDto,
+  engineeringStatusChangeSchema,
+  type EngineeringStatusChangeDto,
   type UpdatePartDto,
 } from "@ahkmes/shared-types";
 import { PartsService } from "./parts.service";
@@ -69,6 +71,12 @@ export class PartsController {
     @Body(new ZodValidationPipe(updatePartSchema)) dto: UpdatePartDto,
   ) {
     return this.service.update(user.tenantId, id, dto);
+  }
+
+  @Patch(":id/engineering-status")
+  @Roles("ADMIN", "PLANNER")
+  setEngineeringStatus(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(engineeringStatusChangeSchema)) dto: EngineeringStatusChangeDto) {
+    return this.service.setEngineeringStatus(user.tenantId, user.userId, id, dto);
   }
 
   @Delete(":id")

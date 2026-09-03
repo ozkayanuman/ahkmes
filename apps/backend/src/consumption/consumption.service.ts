@@ -40,6 +40,9 @@ export class ConsumptionService {
       if (wo.status === "COMPLETED" || wo.status === "CANCELLED") {
         throw new ConflictException("Tamamlanmış/iptal edilmiş iş emrine kayıt eklenemez");
       }
+      if (wo.engineeringReleaseRequired) {
+        throw new ConflictException("Released work orders must use the controlled production-material execution flow");
+      }
       const lotTrackingRequired =
         dto.itemType === "MATERIAL"
           ? (await tx.material.findFirst({ where: { id: dto.itemId, tenantId } }))?.lotTrackingRequired

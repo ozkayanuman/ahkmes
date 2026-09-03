@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
   releaseSalesOrderSchema,
+  assignSalesOrderFulfillmentPlantSchema,
+  type AssignSalesOrderFulfillmentPlantDto,
   salesOrderStatusUpdateSchema,
   type ReleaseSalesOrderDto,
   type SalesOrderStatusUpdateDto,
@@ -54,5 +56,16 @@ export class SalesOrdersController {
     @Body(new ZodValidationPipe(releaseSalesOrderSchema)) dto: ReleaseSalesOrderDto,
   ) {
     return this.service.release(user.tenantId, id, dto);
+  }
+
+  @Patch(":id/lines/:lineId/fulfillment-plant")
+  @Roles("ADMIN", "PLANNER")
+  assignFulfillmentPlant(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Param("lineId") lineId: string,
+    @Body(new ZodValidationPipe(assignSalesOrderFulfillmentPlantSchema)) dto: AssignSalesOrderFulfillmentPlantDto,
+  ) {
+    return this.service.assignFulfillmentPlant(user.tenantId, user.userId, id, lineId, dto);
   }
 }

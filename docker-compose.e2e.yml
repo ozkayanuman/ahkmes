@@ -38,7 +38,7 @@ services:
     working_dir: /app/apps/backend
     environment:
       DATABASE_URL: postgresql://ahkmes:ahkmes-e2e@postgres:5432/ahkmes?schema=public
-      JWT_SECRET: e2e-test-secret
+      JWT_SECRET: e2e-test-secret-key
       SEED_ADMIN_PASSWORD: e2e-admin-password
       MINIO_ENDPOINT: minio
       MINIO_PORT: "9000"
@@ -51,6 +51,7 @@ services:
       LDAP_TEST_HOST: ldap
       LDAP_TEST_PORT: "389"
       E2E_TEST_ARGS: ${E2E_TEST_ARGS:-}
+      SEED_MODE: demo
     depends_on:
       postgres:
         condition: service_healthy

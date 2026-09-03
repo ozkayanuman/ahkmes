@@ -63,3 +63,42 @@ describe("ProductionService.complete", () => {
     expect(prisma.machine.update).not.toHaveBeenCalled();
   });
 });
+
+describe("ProductionService maintenance gate", () => {
+  it("checks the resolved machine inside the canonical start transaction before creating a run", async () => {
+    const prisma: any = {
+      workOrder: { findFirst: jest.fn().mockResolvedValue({ id: "wo1", status: "PLANNED", engineeringReleaseRequired: false, machineId: "m1" }), update: jest.fn() },
+      productionRun: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn() },
+      workOrderOperation: { findMany: jest.fn().mockResolvedValue([]) },
+      machine: { findFirst: jest.fn().mockResolvedValue({ id: "m1" }) },
+    };
+    prisma.$transaction = jest.fn((callback: any) => callback(prisma));
+    const maintenanceAvailability = { assertProductionAvailable: jest.fn().mockRejectedValue(new Error("MACHINE_MAINTENANCE_BLOCK")) };
+    const service = new ProductionService(prisma, {} as any, { record: jest.fn() } as any, undefined, undefined, undefined, undefined, undefined, undefined, maintenanceAvailability as any);
+
+    await expect(service.start("t1", "u1", "wo1", {})).rejects.toThrow("MACHINE_MAINTENANCE_BLOCK");
+
+    expect(maintenanceAvailability.assertProductionAvailable).toHaveBeenCalledWith("t1", "m1", expect.any(Date), prisma);
+    expect(prisma.productionRun.create).not.toHaveBeenCalled();
+  });
+
+  it("re-checks maintenance availability inside the locked resume transition", async () => {
+    const prisma: any = {
+      productionExecutionEvent: { findFirst: jest.fn().mockResolvedValue(null) },
+      workOrderOperation: {
+        findFirst: jest.fn().mockResolvedValue({ id: "op1", status: "PAUSED", workOrderId: "wo1", machineId: null, workOrder: { id: "wo1", machineId: "m1" } }),
+        update: jest.fn(),
+      },
+      productionRun: { findFirst: jest.fn().mockResolvedValue({ id: "run1" }) },
+      $queryRaw: jest.fn(),
+    };
+    prisma.$transaction = jest.fn((callback: any) => callback(prisma));
+    const maintenanceAvailability = { assertProductionAvailable: jest.fn().mockRejectedValue(new Error("MACHINE_OUT_OF_SERVICE")) };
+    const service = new ProductionService(prisma, {} as any, { record: jest.fn() } as any, undefined, undefined, undefined, undefined, undefined, undefined, maintenanceAvailability as any);
+
+    await expect(service.resume("t1", "u1", "op1", { idempotencyKey: "resume-1" })).rejects.toThrow("MACHINE_OUT_OF_SERVICE");
+
+    expect(maintenanceAvailability.assertProductionAvailable).toHaveBeenCalledWith("t1", "m1", expect.any(Date), prisma);
+    expect(prisma.workOrderOperation.update).not.toHaveBeenCalled();
+  });
+});

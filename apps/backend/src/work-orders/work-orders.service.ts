@@ -6,16 +6,24 @@ import type {
   ScheduleWorkOrderDto,
   UpdateWorkOrderDto,
   UpdateWorkOrderOperationDto,
+  ReleaseWorkOrderEngineeringDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { PartsService } from "../parts/parts.service";
 import { ToolingService } from "../tooling/tooling.service";
+import { writeTransactionalAudit } from "../common/transactional-audit";
+import { ProductionMaterialService } from "../production-material/production-material.service";
+import { UomService } from "../uom/uom.service";
+import { QualityExecutionService } from "../quality-execution/quality-execution.service";
+import { OeeCalculationService } from "../oee/oee-calculation.service";
+import type { OeeCalculationContext } from "../oee/oee-request";
 
 const TRANSITIONS: Record<WorkOrderStatus, WorkOrderStatus[]> = {
-  PLANNED: ["WAITING_MATERIAL", "IN_PRODUCTION", "CANCELLED"],
-  WAITING_MATERIAL: ["PLANNED", "IN_PRODUCTION", "CANCELLED"],
+  PLANNED: ["RELEASED", "WAITING_MATERIAL", "IN_PRODUCTION", "CANCELLED"],
+  RELEASED: ["WAITING_MATERIAL", "IN_PRODUCTION", "CANCELLED"],
+  WAITING_MATERIAL: ["PLANNED", "RELEASED", "IN_PRODUCTION", "CANCELLED"],
   IN_PRODUCTION: ["COMPLETED", "CANCELLED"],
   COMPLETED: [],
   CANCELLED: [],
@@ -45,6 +53,10 @@ export class WorkOrdersService {
     private readonly outbox: OutboxService,
     private readonly parts?: PartsService,
     private readonly tooling?: ToolingService,
+    private readonly materials?: ProductionMaterialService,
+    private readonly uom?: UomService,
+    private readonly quality?: QualityExecutionService,
+    private readonly canonicalOee?: OeeCalculationService,
   ) {}
 
   /**
@@ -56,66 +68,29 @@ export class WorkOrdersService {
    * (manuel giriş) availability null kalır ve OEE formülünde çarpan olarak devre dışı
    * bırakılır (1 kabul edilir) — ölçülemeyen bir şey için ceza uygulanmaz.
    */
-  async oee(tenantId: string, workOrderId: string) {
+  async oee(tenantId: string, workOrderId: string, context: OeeCalculationContext) {
     const wo = await this.prisma.workOrder.findFirst({
       where: { id: workOrderId, tenantId },
-      include: { part: { select: { idealCycleTimeSec: true } } },
+      select: { id: true },
     });
     if (!wo) throw new NotFoundException("İş emri bulunamadı");
 
-    const runs = await this.prisma.productionRun.findMany({ where: { tenantId, workOrderId } });
-    const goodCount = runs.reduce((sum, r) => sum + r.goodCount, 0);
-    const scrapCount = runs.reduce((sum, r) => sum + r.scrapCount, 0);
-    const totalCount = goodCount + scrapCount;
-    const quality = totalCount > 0 ? goodCount / totalCount : null;
-
-    const runtimeSeconds = runs.reduce((sum, r) => {
-      const end = r.endedAt ?? new Date();
-      return sum + Math.max(0, (end.getTime() - r.startedAt.getTime()) / 1000);
-    }, 0);
-
-    const idealCycleTimeSec = wo.part.idealCycleTimeSec ? Number(wo.part.idealCycleTimeSec) : null;
-    const performance =
-      idealCycleTimeSec && runtimeSeconds > 0
-        ? Math.min(1, (idealCycleTimeSec * goodCount) / runtimeSeconds)
-        : null;
-
-    const runsWithMachine = runs.filter((r): r is typeof r & { machineId: string } => !!r.machineId);
-    let availability: number | null = null;
-    if (runsWithMachine.length > 0 && runtimeSeconds > 0) {
-      let downtimeSeconds = 0;
-      for (const run of runsWithMachine) {
-        const runEnd = run.endedAt ?? new Date();
-        const events = await this.prisma.machineStatusEvent.findMany({
-          where: { tenantId, machineId: run.machineId, occurredAt: { gte: run.startedAt, lte: runEnd } },
-          orderBy: { occurredAt: "asc" },
-        });
-        for (let i = 0; i < events.length; i++) {
-          if (events[i].type !== "ALARM") continue;
-          const end = events[i + 1]?.occurredAt ?? runEnd;
-          downtimeSeconds += Math.max(0, (end.getTime() - events[i].occurredAt.getTime()) / 1000);
-        }
-      }
-      availability = Math.max(0, Math.min(1, 1 - downtimeSeconds / runtimeSeconds));
-    }
-
-    const oeeValue =
-      quality !== null && performance !== null ? quality * performance * (availability ?? 1) : null;
+    if (!this.canonicalOee) throw new ConflictException("Canonical OEE calculation service is unavailable");
+    const canonical = await this.canonicalOee.calculate({ tenantId, workOrderId, ...context });
 
     return {
       workOrderId,
-      goodCount,
-      scrapCount,
-      quality,
-      performance,
-      availability,
-      oee: oeeValue,
-      note:
-        performance === null
-          ? "Performance/OEE hesaplanamadı: parçada ideal çevrim süresi (idealCycleTimeSec) tanımlı değil."
-          : availability === null
-            ? "Availability hesaplanamadı: koşu bir makineye bağlı değil (manuel giriş)."
-            : undefined,
+      goodCount: canonical.metrics.facts.goodCount,
+      scrapCount: canonical.metrics.facts.scrapCount,
+      quality: canonical.metrics.quality.value,
+      performance: canonical.metrics.performance.value,
+      availability: canonical.metrics.availability.value,
+      oee: canonical.metrics.oee.value,
+      asOf: context.asOf,
+      dataQuality: canonical.metrics.dataQuality,
+      issues: canonical.metrics.issues,
+      canonical,
+      note: canonical.metrics.issues.map((item) => item.message).join(" ") || undefined,
     };
   }
 
@@ -140,7 +115,7 @@ export class WorkOrdersService {
     });
     if (!wo) throw new NotFoundException("İş emri bulunamadı");
 
-    const [consumptions, productionRuns, finishedGoods] = await Promise.all([
+    const [consumptions, materialTransactions, productionRuns, finishedGoods] = await Promise.all([
       // Faz K: itemType/itemId polimorfik — Prisma tek bir "material" relation'ı
       // desteklemiyor, isim/kod çözümlemesi frontend'de (Lot'ta zaten kullanılan
       // desenle aynı) yapılır.
@@ -148,6 +123,7 @@ export class WorkOrdersService {
         where: { tenantId, workOrderId },
         orderBy: { date: "asc" },
       }),
+      this.prisma.productionMaterialTransaction.findMany({ where: { tenantId, requirement: { workOrderId } }, include: { requirement: { select: { itemType: true, itemId: true, unit: true } }, lot: { select: { id: true, lotNo: true } } }, orderBy: { createdAt: "asc" } }),
       this.prisma.productionRun.findMany({
         where: { tenantId, workOrderId },
         include: {
@@ -167,7 +143,7 @@ export class WorkOrdersService {
       part: wo.part,
       customer: wo.quoteLine?.quote.customer ?? null,
       quoteNo: wo.quoteLine?.quote.quoteNo ?? null,
-      backward: { materialsConsumed: consumptions },
+      backward: { materialsConsumed: consumptions, productionMaterialTransactions: materialTransactions },
       forward: { productionRuns, finishedGoodsEntries: finishedGoods },
     };
   }
@@ -320,6 +296,10 @@ export class WorkOrdersService {
     const part = await tx.part.findFirst({ where: { id: dto.partId, tenantId } });
     if (!part) throw new NotFoundException("Parça bulunamadı");
     if (dto.machineId) await this.ensureMachine(tenantId, dto.machineId, tx);
+    if (dto.plantId) {
+      const plant = await tx.plant.findFirst({ where: { id: dto.plantId, tenantId } });
+      if (!plant) throw new NotFoundException("Plant was not found");
+    }
     const woNo = await nextDocNo(tx, "workOrder", "woNo", "IE");
     return this.createWithRoute(tx, tenantId, { ...dto, woNo });
   }
@@ -350,8 +330,15 @@ export class WorkOrdersService {
     if (!TRANSITIONS[wo.status].includes(status)) {
       throw new ConflictException(`Geçersiz durum geçişi: ${wo.status} → ${status}`);
     }
+    if (status === "RELEASED") throw new ConflictException("Use the controlled engineering release command to release a work order");
+    if (status === "IN_PRODUCTION" && wo.engineeringReleaseRequired && wo.status !== "RELEASED") throw new ConflictException("Work order requires a released engineering snapshot before production can start");
     if (status === "COMPLETED" && wo.operations.some((operation) => operation.status !== "COMPLETED" && operation.status !== "SKIPPED")) {
       throw new ConflictException("Rotalı iş emri, tüm operasyonları tamamlanmadan kapatılamaz");
+    }
+    if (status === "COMPLETED" && wo.engineeringReleaseRequired && this.materials) {
+      const requirements = await this.materials.requirements(tenantId, id);
+      const inconsistent = requirements.find((item) => item.issueMethod === "BACKFLUSH" && Number(item.consumedQty) < Number(item.requiredQty));
+      if (inconsistent) throw new ConflictException("Backflush material accounting is incomplete; finish production consumption before closing the work order");
     }
     await this.prisma.$transaction(async (tx) => {
       const updated = await tx.workOrder.updateMany({
@@ -371,56 +358,57 @@ export class WorkOrdersService {
     tenantId: string,
     data: Omit<Prisma.WorkOrderUncheckedCreateInput, "tenantId">,
   ) {
-    const recipe = await tx.recipeHeader.findFirst({
-      where: { tenantId, partId: data.partId, isActive: true },
-      include: { steps: { orderBy: { seq: "asc" } } },
-    });
-    const ncSnapshots = new Map<string, Awaited<ReturnType<PartsService["assertNcProgramUsable"]>>>();
-    if (recipe) {
-      for (const step of recipe.steps) {
-        if (step.ncProgramId) ncSnapshots.set(step.ncProgramId, await this.ncPrograms().assertNcProgramUsable(tenantId, step.ncProgramId, data.partId, data.machineId, undefined, tx));
+    return tx.workOrder.create({ data: { ...data, tenantId, engineeringReleaseRequired: true }, include: WO_INCLUDE });
+  }
+
+  async releaseEngineering(tenantId: string, userId: string, id: string, dto: ReleaseWorkOrderEngineeringDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "WorkOrder" WHERE "id" = ${id} FOR UPDATE`;
+      const wo = await tx.workOrder.findFirst({ where: { id, tenantId }, include: { operations: true } });
+      if (!wo) throw new NotFoundException("Work order was not found");
+      if (wo.status !== "PLANNED" && wo.status !== "WAITING_MATERIAL") throw new ConflictException("Only an unstarted work order can receive an engineering release");
+      if (wo.operations.length) throw new ConflictException("Work order already has an engineering snapshot");
+      if (wo.plantId && wo.plantId !== dto.plantId) throw new ConflictException("Work order fulfillment plant cannot change during engineering release");
+      const definition = await tx.productionDefinition.findFirst({ where: { id: dto.productionDefinitionId, tenantId, plantId: dto.plantId, partId: wo.partId, status: "RELEASED" }, include: { part: true, bomHeader: { include: { lines: true } }, recipeHeader: { include: { steps: { include: { toolRequirements: true, fixtureRequirements: true }, orderBy: { seq: "asc" } } } } } });
+      if (!definition) throw new ConflictException("No matching released production definition was found for this plant and part revision");
+      if (definition.part.engineeringStatus !== "RELEASED" || definition.bomHeader.status !== "RELEASED" || definition.recipeHeader.status !== "RELEASED") throw new ConflictException("Production definition engineering references are no longer released");
+      if (!definition.recipeHeader.steps.length) throw new ConflictException("Released routing has no operations");
+      if (wo.machineId) await this.ensureMachine(tenantId, wo.machineId, tx);
+      const ncSnapshots = new Map<string, Awaited<ReturnType<PartsService["assertNcProgramUsable"]>>>();
+      for (const step of definition.recipeHeader.steps) if (step.ncProgramId) ncSnapshots.set(step.ncProgramId, await this.ncPrograms().assertNcProgramUsable(tenantId, step.ncProgramId, wo.partId, wo.machineId ?? undefined, undefined, tx));
+      const now = new Date();
+      const snapshotLines = definition.bomHeader.lines.map((line) => ({ itemType: line.itemType, itemId: line.itemId, qtyPer: line.qtyPer.toString(), unit: line.unit, scrapPct: line.scrapPct?.toString(), issueMethod: line.issueMethod, consumeOnScrap: line.consumeOnScrap }));
+      if (!this.uom) throw new ConflictException("Canonical UOM service is unavailable");
+      await this.uom.ensureSystemUnits(tenantId, tx);
+      const [componentMaterials, componentParts] = await Promise.all([
+        tx.material.findMany({ where: { tenantId, id: { in: snapshotLines.filter((line) => line.itemType === "MATERIAL").map((line) => line.itemId) } }, select: { id: true, unit: true } }),
+        tx.part.findMany({ where: { tenantId, id: { in: snapshotLines.filter((line) => line.itemType === "PART").map((line) => line.itemId) } }, select: { id: true, unit: true } }),
+      ]);
+      const componentUnits = new Map([...componentMaterials, ...componentParts].map((item) => [item.id, item.unit]));
+      const materialRequirements = await Promise.all(snapshotLines.map(async (line) => {
+        const canonicalUnit = componentUnits.get(line.itemId);
+        if (!canonicalUnit) throw new ConflictException("Released BOM component could not be resolved");
+        const conversion = await this.uom!.assertCompatible(tenantId, line.unit ?? canonicalUnit, canonicalUnit, tx);
+        const sourceQty = new Prisma.Decimal(line.qtyPer).mul(wo.quantity).mul(new Prisma.Decimal(1).plus(new Prisma.Decimal(line.scrapPct ?? "0").div(100)));
+        const requiredQty = sourceQty.mul(conversion.from.factorToBase).div(conversion.to.factorToBase).toDecimalPlaces(conversion.to.decimalPlaces, Prisma.Decimal.ROUND_HALF_UP);
+        return { tenantId, itemType: line.itemType, itemId: line.itemId, unit: canonicalUnit, requiredQty, issueMethod: line.issueMethod, consumeOnScrap: line.consumeOnScrap, snapshotLine: { ...line, sourceUnit: line.unit ?? canonicalUnit, canonicalUnit } };
+      }));
+      const qualityPlans = await tx.qualityPlan.findMany({ where: { tenantId, partId: wo.partId, status: "RELEASED" }, include: { checks: { orderBy: { seq: "asc" } } } });
+      const qualityRequirements = qualityPlans.flatMap((plan) => {
+        const operationSequences = [...new Set(plan.checks.map((check) => check.operationSeq).filter((seq): seq is number => seq !== null))];
+        const points = operationSequences.length ? operationSequences.map((seq) => ({ operationSeq: seq, inspectionPoint: "IN_PROCESS" as const })) : [{ operationSeq: undefined, inspectionPoint: "FINAL" as const }];
+        return points.map(({ operationSeq, inspectionPoint }) => ({ tenantId, qualityPlanId: plan.id, planRevision: plan.revision, inspectionPoint, samplingMethod: plan.samplingMethod, sampleCount: plan.sampleCount, snapshot: { planId: plan.id, revision: plan.revision, inspectionPoint, operationSeq, samplingMethod: plan.samplingMethod, sampleCount: plan.sampleCount, checks: plan.checks.filter((check) => operationSeq === undefined ? check.operationSeq === null : check.operationSeq === operationSeq).map((check) => ({ seq: check.seq, checkpointName: check.checkpointName, unit: check.unit, lowerLimit: check.lowerLimit?.toString(), upperLimit: check.upperLimit?.toString(), characteristicType: check.characteristicType, qualitativeExpected: check.qualitativeExpected, isRequired: check.isRequired })) } }));
+      });
+      const updated = await tx.workOrder.update({ where: { id }, data: { plantId: dto.plantId, productionDefinitionId: definition.id, recipeHeaderId: definition.recipeHeader.id, recipeRevision: definition.recipeHeader.revision, routeSnapshotAt: now, engineeringReleasedAt: now, engineeringReleaseRequired: true, status: "RELEASED", engineeringSnapshot: { part: { id: definition.part.id, partNo: definition.part.partNo, revision: definition.part.revision, unit: definition.part.unit, drawingFileRef: definition.part.drawingFileRef, stepFileRef: definition.part.stepFileRef }, bom: { id: definition.bomHeader.id, revision: definition.bomHeader.revision, lines: snapshotLines }, routing: { id: definition.recipeHeader.id, revision: definition.recipeHeader.revision, operations: definition.recipeHeader.steps.map((step) => ({ seq: step.seq, name: step.name, standardMinutes: step.standardMinutes?.toString() ?? null, idealCycleTimeSec: step.idealCycleTimeSec?.toString() ?? null, ncProgramId: step.ncProgramId, toolRequirements: step.toolRequirements, fixtureRequirements: step.fixtureRequirements })) }, quality: qualityRequirements.map((item) => item.snapshot) }, materialRequirements: { create: materialRequirements }, operations: { create: definition.recipeHeader.steps.map((step) => { const nc = step.ncProgramId ? ncSnapshots.get(step.ncProgramId)! : null; return { tenantId, seq: step.seq, name: step.name, parameterName: step.parameterName, parameterValue: step.parameterValue, unit: step.unit, standardMinutes: step.standardMinutes, idealCycleTimeSec: step.idealCycleTimeSec, instructionHtml: step.instructionHtml, machineId: wo.machineId ?? undefined, ...(nc ? { ncProgramId: nc.id, ncProgramVersion: nc.version, ncProgramChecksum: nc.checksum, ncProgramFileName: nc.fileName, ncProgramStorageKey: nc.storageKey } : {}) }; }) } }, include: WO_INCLUDE });
+      for (const quality of qualityRequirements) {
+        const operationId = quality.snapshot.operationSeq ? updated.operations.find((operation) => operation.seq === quality.snapshot.operationSeq)?.id : undefined;
+        await tx.productionQualityRequirement.create({ data: { ...quality, workOrderId: wo.id, operationId } });
       }
-    }
-    const created = await tx.workOrder.create({
-      data: {
-        ...data,
-        tenantId,
-        ...(recipe
-          ? {
-              recipeHeaderId: recipe.id,
-              recipeRevision: recipe.revision,
-              routeSnapshotAt: new Date(),
-              operations: {
-                create: recipe.steps.map((step) => ({
-                  tenantId,
-                  seq: step.seq,
-                  name: step.name,
-                  parameterName: step.parameterName,
-                  parameterValue: step.parameterValue,
-                  unit: step.unit,
-                  standardMinutes: step.standardMinutes,
-                  instructionHtml: step.instructionHtml,
-                  machineId: data.machineId ?? undefined,
-                  ...(step.ncProgramId
-                    ? (() => {
-                        const program = ncSnapshots.get(step.ncProgramId)!;
-                        return { ncProgramId: program.id, ncProgramVersion: program.version, ncProgramChecksum: program.checksum, ncProgramFileName: program.fileName, ncProgramStorageKey: program.storageKey };
-                      })()
-                    : {}),
-                })),
-              },
-            }
-          : {}),
-      },
-      include: WO_INCLUDE,
+      if (this.tooling) for (const step of definition.recipeHeader.steps) { const operation = updated.operations.find((item) => item.seq === step.seq); if (operation) await this.tooling.copyRecipeRequirements(tx, tenantId, step.id, operation.id); }
+      await writeTransactionalAudit(tx, { tenantId, userId, entity: "work-order-engineering-release", entityId: id, action: "STATUS_CHANGE", before: { status: wo.status }, after: { status: "RELEASED", productionDefinitionId: definition.id, bomRevision: definition.bomHeader.revision, routingRevision: definition.recipeHeader.revision } });
+      await this.outbox.record(tx, tenantId, "workorder", id, "workorder.updated", { id, status: "RELEASED" });
+      return updated;
     });
-    if (recipe && this.tooling) {
-      for (const step of recipe.steps) {
-        const operation = created.operations.find((item) => item.seq === step.seq);
-        if (operation) await this.tooling.copyRecipeRequirements(tx, tenantId, step.id, operation.id);
-      }
-    }
-    return created;
   }
 
   async findOperations(tenantId: string, workOrderId: string) {
@@ -487,6 +475,7 @@ export class WorkOrdersService {
     if (operation.status !== "IN_PROGRESS") {
       throw new ConflictException("Yalnızca devam eden operasyon tamamlanabilir");
     }
+    if (this.quality) await this.quality.assertOperationClear(tenantId, workOrderId, operationId);
     const activeRun = await this.prisma.productionRun.findFirst({ where: { tenantId, operationId, endedAt: null } });
     if (activeRun) throw new ConflictException("Aktif üretim koşusu varken operasyon tamamlanamaz");
     await this.prisma.$transaction(async (tx) => {

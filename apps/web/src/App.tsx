@@ -58,6 +58,8 @@ import { CopilotPage } from "./pages/copilot";
 import { PlatformModulesPage } from "./pages/platform-modules";
 import { ToolingPage } from "./pages/tooling";
 import { HmiOperationsPage } from "./pages/hmi-operations";
+import { EngineeringMasterDataPage } from "./pages/engineering-master-data";
+import { ProductionStandardsPage } from "./pages/production-standards";
 
 export function App() {
   return (
@@ -135,6 +137,8 @@ export function App() {
         <Route path="/maintenance-orders" element={<PageGuard page="maintenance-orders"><MaintenanceOrdersPage /></PageGuard>} />
         <Route path="/energy" element={<PageGuard page="energy"><EnergyPage /></PageGuard>} />
         <Route path="/recipes" element={<PageGuard page="recipes"><RecipesPage /></PageGuard>} />
+        <Route path="/engineering-master-data" element={<PageGuard page="recipes"><EngineeringMasterDataPage /></PageGuard>} />
+        <Route path="/production-standards" element={<PageGuard page="hierarchy"><ProductionStandardsPage /></PageGuard>} />
         <Route path="/spc" element={<PageGuard page="spc"><SpcPage /></PageGuard>} />
         <Route path="/alarms" element={<PageGuard page="alarms"><AlarmsPage /></PageGuard>} />
         <Route path="/ar" element={<PageGuard page="ar"><ArPage /></PageGuard>} />

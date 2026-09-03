@@ -1,0 +1,48 @@
+# Isolated CNC-V1-00 installation/restore verification. It declares no host
+# ports and uses a unique project name from scripts/run-operations-e2e.mjs.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: ahkmes, POSTGRES_PASSWORD: ahkmes-ops-e2e, POSTGRES_DB: ahkmes }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ahkmes -d ahkmes"], interval: 2s, timeout: 3s, retries: 30 }
+  postgres-restore:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: ahkmes, POSTGRES_PASSWORD: ahkmes-ops-e2e, POSTGRES_DB: ahkmes }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U ahkmes -d ahkmes"], interval: 2s, timeout: 3s, retries: 30 }
+  minio:
+    image: minio/minio:latest
+    environment: { MINIO_ROOT_USER: ahkmes, MINIO_ROOT_PASSWORD: ahkmes-ops-e2e }
+    command: server /data
+    healthcheck: { test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"], interval: 2s, timeout: 3s, retries: 30 }
+  operations-e2e:
+    build: { context: ., dockerfile: apps/backend/Dockerfile }
+    working_dir: /app/apps/backend
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://ahkmes:ahkmes-ops-e2e@postgres:5432/ahkmes?schema=public
+      JWT_SECRET: operations-e2e-secret-at-least-32-characters
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ROOT_USER: ahkmes
+      MINIO_ROOT_PASSWORD: ahkmes-ops-e2e
+      MINIO_BUCKET: ahkmes-documents
+      MINIO_PUBLIC_ENDPOINT: minio
+      MINIO_PUBLIC_PORT: "9000"
+      BOOTSTRAP_TENANT_NAME: Operations E2E Manufacturing
+      BOOTSTRAP_TENANT_CODE: operations-e2e
+      BOOTSTRAP_ADMIN_EMAIL: admin@operations-e2e.test
+      BOOTSTRAP_ADMIN_PASSWORD: operations-e2e-admin-password
+      BOOTSTRAP_ADMIN_NAME: Operations Administrator
+      BOOTSTRAP_PLANT_NAME: Operations Plant
+      BOOTSTRAP_EDITION: PROFESSIONAL
+    depends_on:
+      postgres: { condition: service_healthy }
+      postgres-restore: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    command: >
+      sh -c "pnpm run db:migrate && pnpm run db:provision && pnpm run db:provision && pnpm test:e2e -- test/deployment-operations.e2e-spec.ts test/engineering-master-data.e2e-spec.ts test/production-material.e2e-spec.ts test/cnc-v1-03r.e2e-spec.ts test/quality-execution.e2e-spec.ts test/mes-lifecycle.e2e-spec.ts test/cnc-v1-07r.e2e-spec.ts &&
+      DATABASE_URL=postgresql://ahkmes:ahkmes-ops-e2e@postgres:5432/ahkmes?schema=public BACKUP_RETENTION_DAYS=90 bash ../../scripts/backup.sh /tmp/ops-backups &&
+      RESTORE_YES=1 DATABASE_URL= PGHOST=postgres-restore PGPORT=5432 PGUSER=ahkmes PGPASSWORD=ahkmes-ops-e2e PGDATABASE=ahkmes bash ../../scripts/restore.sh $$(find /tmp/ops-backups -name 'ahkmes_*.sql.gz' -print -quit) &&
+      DATABASE_URL=postgresql://ahkmes:ahkmes-ops-e2e@postgres-restore:5432/ahkmes?schema=public pnpm exec prisma migrate status &&
+      DATABASE_URL=postgresql://ahkmes:ahkmes-ops-e2e@postgres-restore:5432/ahkmes?schema=public pnpm test:e2e -- test/deployment-restore.e2e-spec.ts"

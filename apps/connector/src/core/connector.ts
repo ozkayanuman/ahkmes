@@ -17,6 +17,10 @@ export interface ConnectorConfig {
   durableQueuePath?: string;
   /** Operasyon denetimi için yalnızca 127.0.0.1 üzerinde açılan HTTP portu. */
   healthPort?: number;
+  adapter?: "simulator" | "opcua" | "m80" | "fanuc";
+  statusIntervalMs?: number;
+  observationPollIntervalMs?: number;
+  observationHeartbeatMs?: number;
 }
 
 export interface ConnectorStatus {
@@ -28,7 +32,9 @@ export interface ConnectorStatus {
   tagPollSuccesses: number;
   tagPollFailures: number;
   lastDeliveryAt?: string;
+  lastSuccessfulCommunicationAt?: string;
   lastError?: string;
+  lastErrorCategory?: "CONNECTION" | "BACKEND_DELIVERY" | "CONFIGURATION" | "ADAPTER" | "UNKNOWN";
 }
 
 type Fetch = typeof fetch;
@@ -50,7 +56,15 @@ export class Connector {
   private tagPollSuccesses = 0;
   private tagPollFailures = 0;
   private lastDeliveryAt: string | undefined;
+  private lastSuccessfulCommunicationAt: string | undefined;
   private lastError: string | undefined;
+  private lastErrorCategory: ConnectorStatus["lastErrorCategory"];
+  private statusTimer: ReturnType<typeof setInterval> | null = null;
+  private observationTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly observationPollIntervalMs: number;
+  private readonly observationHeartbeatMs: number;
+  private lastObservationSignature: string | undefined;
+  private lastObservationSentAt = 0;
 
   constructor(
     private readonly adapter: MachineAdapter,
@@ -61,15 +75,31 @@ export class Connector {
     this.retryDelayMs = config.retryDelayMs ?? 1000;
     this.maxRetryDelayMs = config.maxRetryDelayMs ?? 30_000;
     this.tagPollIntervalMs = config.tagPollIntervalMs ?? 0;
+    this.observationPollIntervalMs = config.observationPollIntervalMs ?? 2_000;
+    this.observationHeartbeatMs = config.observationHeartbeatMs ?? 30_000;
     this.queue = config.durableQueuePath ? new DurableEventQueue(config.durableQueuePath) : new MemoryEventQueue();
   }
 
   async start(): Promise<void> {
     await this.queue.load();
     this.adapter.onEvent((event) => this.enqueue(event));
+    this.adapter.onConnectionState?.((state, detail) => {
+      this.connected = state === "ONLINE";
+      if (state !== "ONLINE") {
+        this.lastError = detail;
+        this.lastErrorCategory = "CONNECTION";
+      }
+      if (this.config.adapter) void this.reportStatus(this.connected ? "CONNECTED" : state === "CONNECTING" ? "RECONNECTING" : "DISCONNECTED");
+      if (this.adapter.readControllerObservation) void this.pollControllerObservation(true);
+    });
     await this.startHealthServer();
     await this.adapter.connect();
     this.connected = true;
+    this.lastSuccessfulCommunicationAt = new Date().toISOString();
+    if (this.config.adapter) {
+      void this.reportStatus("CONNECTED");
+      this.statusTimer = setInterval(() => void this.reportStatus(this.connected ? "CONNECTED" : "DISCONNECTED"), this.config.statusIntervalMs ?? 30_000);
+    }
     if (this.queue.length > 0 && !this.draining) {
       this.draining = true;
       void this.drain();
@@ -78,13 +108,22 @@ export class Connector {
     if (this.adapter.readTags && this.tagPollIntervalMs > 0) {
       this.tagPollTimer = setInterval(() => void this.pollTags(), this.tagPollIntervalMs);
     }
+    if (this.adapter.readControllerObservation) {
+      await this.pollControllerObservation(true);
+      this.observationTimer = setInterval(() => void this.pollControllerObservation(), this.observationPollIntervalMs);
+    }
   }
 
   async stop(): Promise<void> {
     if (this.tagPollTimer) clearInterval(this.tagPollTimer);
+    if (this.statusTimer) clearInterval(this.statusTimer);
+    if (this.observationTimer) clearInterval(this.observationTimer);
     this.tagPollTimer = null;
+    this.statusTimer = null;
+    this.observationTimer = null;
     await this.adapter.disconnect();
     this.connected = false;
+    if (this.config.adapter) await this.reportStatus("DISCONNECTED");
     if (this.healthServer) {
       await new Promise<void>((resolve, reject) => this.healthServer!.close((error) => error ? reject(error) : resolve()));
       this.healthServer = null;
@@ -101,7 +140,9 @@ export class Connector {
       tagPollSuccesses: this.tagPollSuccesses,
       tagPollFailures: this.tagPollFailures,
       ...(this.lastDeliveryAt ? { lastDeliveryAt: this.lastDeliveryAt } : {}),
+      ...(this.lastSuccessfulCommunicationAt ? { lastSuccessfulCommunicationAt: this.lastSuccessfulCommunicationAt } : {}),
       ...(this.lastError ? { lastError: this.lastError } : {}),
+      ...(this.lastErrorCategory ? { lastErrorCategory: this.lastErrorCategory } : {}),
     };
   }
 
@@ -159,7 +200,37 @@ export class Connector {
     } catch (error) {
       this.tagPollFailures += 1;
       this.lastError = error instanceof Error ? error.message : "tag polling failed";
+      this.lastErrorCategory = "ADAPTER";
       // Bir sonraki pollde tekrar denenir.
+    }
+  }
+
+  private async pollControllerObservation(force = false): Promise<void> {
+    if (!this.adapter.readControllerObservation) return;
+    try {
+      const observation = await this.adapter.readControllerObservation();
+      const signature = JSON.stringify({
+        connectionState: observation.connectionState,
+        machineState: observation.machineState,
+        program: observation.activeProgramIdentity ?? null,
+        alarm: observation.alarmCode ?? observation.alarmText ?? null,
+        partCounter: observation.partCounter ?? null,
+        generation: observation.connectionGeneration,
+      });
+      const now = Date.now();
+      if (!force && signature === this.lastObservationSignature && now - this.lastObservationSentAt < this.observationHeartbeatMs) return;
+      const response = await this.httpFetch(`${this.config.backendUrl}/machines/${this.config.machineId}/controller-observation`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Machine-Key": this.config.machineKey },
+        body: JSON.stringify({ ...observation, idempotencyKey: `${this.config.machineId}:${observation.connectionGeneration}:${randomUUID()}` }),
+      });
+      if (!response.ok) throw new Error(`controller-observation HTTP ${response.status}`);
+      this.lastObservationSignature = signature;
+      this.lastObservationSentAt = now;
+      if (observation.connectionState === "ONLINE") this.lastSuccessfulCommunicationAt = new Date().toISOString();
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : "controller observation failed";
+      this.lastErrorCategory = "ADAPTER";
     }
   }
 
@@ -188,7 +259,9 @@ export class Connector {
           await this.queue.shift();
           this.deliveredEvents += 1;
           this.lastDeliveryAt = new Date().toISOString();
+          this.lastSuccessfulCommunicationAt = this.lastDeliveryAt;
           this.lastError = undefined;
+          this.lastErrorCategory = undefined;
           delay = this.retryDelayMs;
         } else {
           await new Promise((r) => setTimeout(r, delay));
@@ -229,7 +302,29 @@ export class Connector {
       return res.ok;
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : "telemetry delivery failed";
+      this.lastErrorCategory = "BACKEND_DELIVERY";
       return false;
+    }
+  }
+
+  private async reportStatus(connectionState: "CONNECTED" | "DISCONNECTED" | "RECONNECTING" | "ERROR") {
+    try {
+      const response = await this.httpFetch(`${this.config.backendUrl}/machines/${this.config.machineId}/connector-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Machine-Key": this.config.machineKey },
+        body: JSON.stringify({
+          adapter: this.config.adapter ?? "simulator",
+          connectionState,
+          lastSuccessfulCommunicationAt: this.lastSuccessfulCommunicationAt,
+          lastErrorCategory: this.lastErrorCategory,
+          reconnecting: connectionState === "RECONNECTING",
+          configurationValid: true,
+        }),
+      });
+      if (!response.ok) throw new Error(`connector-status HTTP ${response.status}`);
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : "connector status delivery failed";
+      this.lastErrorCategory = "BACKEND_DELIVERY";
     }
   }
 }

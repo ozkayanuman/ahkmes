@@ -1,22 +1,33 @@
 import { Test } from "@nestjs/testing";
-import { DowntimeService } from "./downtime.service";
+import { DowntimeService, resolveProductionLossCategory } from "./downtime.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { OutboxService } from "../outbox/outbox.service";
 
 describe("DowntimeService.pareto", () => {
   let service: DowntimeService;
   const findMany = jest.fn();
+  const findFirst = jest.fn();
 
   beforeEach(async () => {
     findMany.mockReset();
     const moduleRef = await Test.createTestingModule({
       providers: [
         DowntimeService,
-        { provide: PrismaService, useValue: { downtimeEvent: { findMany } } },
+        { provide: PrismaService, useValue: { downtimeEvent: { findMany, findFirst } } },
         { provide: OutboxService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     service = moduleRef.get(DowntimeService);
+  });
+
+  it("telemetry resume auto-closes only MES-owned downtime and never maintenance downtime", async () => {
+    findFirst.mockResolvedValue(null);
+
+    await expect(service.autoCloseOnResume("tenant-1", "machine-1")).resolves.toBeNull();
+
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", machineId: "machine-1", ownership: "MES", endedAt: null },
+    });
   });
 
   it("reason.label'a göre gruplar ve süreyi azalan sırada döner", async () => {
@@ -53,5 +64,13 @@ describe("DowntimeService.pareto", () => {
         where: expect.objectContaining({ tenantId: "tenant-9", endedAt: expect.objectContaining({ not: null }) }),
       }),
     );
+  });
+});
+
+describe("resolveProductionLossCategory", () => {
+  it("preserves an explicit OEE loss mapping and deterministically falls back to the legacy category", () => {
+    expect(resolveProductionLossCategory({ category: "PLANNED", lossCategory: "PLANNED_MAINTENANCE" })).toBe("PLANNED_MAINTENANCE");
+    expect(resolveProductionLossCategory({ category: "PLANNED", lossCategory: null })).toBe("OTHER_PLANNED");
+    expect(resolveProductionLossCategory({ category: "UNPLANNED", lossCategory: null })).toBe("OTHER_UNPLANNED");
   });
 });

@@ -27,6 +27,16 @@ interface NcRow {
   resolvedAt?: string | null;
   resolvedBy?: { id: string; name: string } | null;
   resolutionNote?: string | null;
+  inspectionLot?: {
+    id: string;
+    lotId?: string | null;
+    status: string;
+    requirement: { planRevision: string; inspectionPoint: string; snapshot: { checks?: Array<{ seq: number; checkpointName: string; lowerLimit?: string; upperLimit?: string }> } };
+    measurements: Array<{ sampleNo: number; checkSeq: number; result: string; numericValue?: string | null; resultValue?: string | null }>;
+    holds: Array<{ id: string; status: string; reason: string; quantity?: string | null }>;
+  } | null;
+  dispositions?: Array<{ id: string; type: string; quantity?: string | null; reason: string; createdAt: string }>;
+  reworkRequirements?: Array<{ id: string; status: string; quantity: string }>;
 }
 
 interface NcFormState {
@@ -220,9 +230,30 @@ function NcDetailModal({ nc, onClose }: { nc: NcRow; onClose: () => void }) {
             </div>
           </div>
         )}
+        {nc.inspectionLot && (
+          <div className="rounded-md bg-slate-50 p-3">
+            <div className="text-xs uppercase text-slate-400">Released inspection context</div>
+            <div className="mt-1">Plan revision {nc.inspectionLot.requirement.planRevision} · {nc.inspectionLot.requirement.inspectionPoint} · lot {nc.inspectionLot.status}</div>
+            <ul className="mt-2 list-disc pl-5 text-slate-600">{nc.inspectionLot.measurements.map((measurement) => <li key={`${measurement.sampleNo}-${measurement.checkSeq}`}>Sample {measurement.sampleNo}, check {measurement.checkSeq}: {measurement.numericValue ?? measurement.resultValue} — <b>{measurement.result}</b></li>)}</ul>
+            {nc.inspectionLot.holds.map((hold) => <div key={hold.id} className={hold.status === "ACTIVE" ? "mt-2 font-medium text-red-700" : "mt-2 text-green-700"}>Hold {hold.status}: {hold.reason}{hold.quantity ? ` (${hold.quantity})` : ""}</div>)}
+          </div>
+        )}
+        {nc.dispositions?.length ? <div className="rounded-md bg-slate-50 p-3"><div className="text-xs uppercase text-slate-400">Disposition</div>{nc.dispositions.map((item) => <div key={item.id}>{item.type}: {item.reason}</div>)}{nc.reworkRequirements?.map((item) => <div key={item.id} className="mt-1 font-medium text-amber-700">Rework {item.status}: {item.quantity}</div>)}</div> : null}
       </div>
     </Modal>
   );
+}
+
+function QualityDispositionModal({ action, onClose, onSubmit, busy }: { action: { nc: NcRow; type: "ACCEPT" | "USE_AS_IS" | "REWORK" | "SCRAP" }; onClose: () => void; onSubmit: (reason: string, quantity?: number) => void; busy: boolean }) {
+  const [reason, setReason] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const needsQuantity = action.type === "SCRAP" || action.type === "REWORK";
+  return <Modal open title={`${action.type} disposition`} onClose={onClose}><div className="space-y-4 text-sm"><p><b>{action.nc.workOrder.woNo}</b> · failed released inspection</p>{action.type === "USE_AS_IS" && <p className="rounded bg-amber-50 p-2 text-amber-800">USE_AS_IS requires the dedicated server-side approval right. An explicit quality release remains required.</p>}{action.type === "REWORK" && <p className="rounded bg-amber-50 p-2 text-amber-800">This creates a controlled pending rework requirement; it does not execute rework.</p>}{action.type === "SCRAP" && <p className="rounded bg-red-50 p-2 text-red-800">Scrap posts one canonical inventory movement for the affected output lot.</p>}{needsQuantity && <div><Label htmlFor="qualityQuantity">Affected quantity</Label><Input id="qualityQuantity" type="number" min="0.001" value={quantity} onChange={(event) => setQuantity(event.target.value)} /></div>}<div><Label htmlFor="qualityReason">Reason / deviation justification</Label><Textarea id="qualityReason" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={busy || !reason.trim() || (needsQuantity && !(Number(quantity) > 0))} onClick={() => onSubmit(reason, needsQuantity ? Number(quantity) : undefined)}>Confirm {action.type}</Button></div></div></Modal>;
+}
+
+function QualityHoldReleaseModal({ nc, onClose, onSubmit, busy }: { nc: NcRow; onClose: () => void; onSubmit: (reason: string) => void; busy: boolean }) {
+  const [reason, setReason] = useState("");
+  return <Modal open title="Explicit quality release" onClose={onClose}><div className="space-y-4"><p className="text-sm">{nc.workOrder.woNo}: server validates the disposition before releasing the hold.</p><div><Label htmlFor="releaseReason">Release reason</Label><Textarea id="releaseReason" rows={3} value={reason} onChange={(event) => setReason(event.target.value)} /></div><div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={busy || !reason.trim()} onClick={() => onSubmit(reason)}>Release</Button></div></div></Modal>;
 }
 
 export function NonConformancesPage() {
@@ -235,6 +266,8 @@ export function NonConformancesPage() {
   const [resolvingNc, setResolvingNc] = useState<NcRow | null>(null);
   const [viewingNc, setViewingNc] = useState<NcRow | null>(null);
   const [pendingDeviationDecision, setPendingDeviationDecision] = useState<{ id: string; action: "approve" | "reject" } | null>(null);
+  const [qualityAction, setQualityAction] = useState<{ nc: NcRow; type: "ACCEPT" | "USE_AS_IS" | "REWORK" | "SCRAP" } | null>(null);
+  const [releasingHold, setReleasingHold] = useState<{ id: string; nc: NcRow } | null>(null);
 
   useInvalidateOn(["nonconformance.updated"], ["/non-conformances"]);
 
@@ -264,6 +297,16 @@ export function NonConformancesPage() {
       setPendingDeviationDecision(null);
     },
     onError: onError("Reddedilemedi"),
+  });
+  const qualityDisposition = useMutation({
+    mutationFn: ({ ncId, type, reason, quantity }: { ncId: string; type: string; reason: string; quantity?: number }) => apiPost(`/quality-execution/ncr/${ncId}/dispositions`, { type, reason, ...(quantity ? { quantity } : {}), idempotencyKey: `ui-disposition-${crypto.randomUUID()}` }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/non-conformances"] }); setQualityAction(null); toast("Kalite disposition kaydedildi", "success"); },
+    onError: onError("Disposition reddedildi"),
+  });
+  const releaseHold = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) => apiPost(`/quality-execution/holds/${id}/release`, { reason, idempotencyKey: `ui-release-${crypto.randomUUID()}` }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/non-conformances"] }); setReleasingHold(null); toast("Kalite hold serbest bırakıldı", "success"); },
+    onError: onError("Kalite release reddedildi"),
   });
 
   const workOrders = useQuery({
@@ -322,6 +365,12 @@ export function NonConformancesPage() {
                     <CheckCircle2 className="h-4 w-4" />
                   </Button>
                 )}
+                {canManage && nc.inspectionLot && nc.status === "OPEN" && !nc.dispositions?.length && (
+                  <>
+                    {(["ACCEPT", "USE_AS_IS", "REWORK", "SCRAP"] as const).map((type) => <Button key={type} variant="ghost" className="px-2 py-1 text-xs" onClick={() => setQualityAction({ nc, type })}>{type}</Button>)}
+                  </>
+                )}
+                {canManage && nc.inspectionLot?.holds.filter((hold) => hold.status === "ACTIVE").map((hold) => <Button key={hold.id} variant="ghost" className="px-2 py-1 text-xs text-green-700" onClick={() => setReleasingHold({ id: hold.id, nc })}>Quality release</Button>)}
                 {canManage && nc.status === "OPEN" && nc.actionType === "DEVIATION" && (
                   <Button
                     variant="ghost"
@@ -368,6 +417,8 @@ export function NonConformancesPage() {
         <ResolveNcModal nc={resolvingNc} onClose={() => setResolvingNc(null)} onResolved={invalidate} />
       )}
       {viewingNc && <NcDetailModal nc={viewingNc} onClose={() => setViewingNc(null)} />}
+      {qualityAction && <QualityDispositionModal action={qualityAction} onClose={() => setQualityAction(null)} onSubmit={(reason, quantity) => qualityDisposition.mutate({ ncId: qualityAction.nc.id, type: qualityAction.type, reason, quantity })} busy={qualityDisposition.isPending} />}
+      {releasingHold && <QualityHoldReleaseModal nc={releasingHold.nc} onClose={() => setReleasingHold(null)} onSubmit={(reason) => releaseHold.mutate({ id: releasingHold.id, reason })} busy={releaseHold.isPending} />}
 
       <ReauthModal
         open={pendingDeviationDecision !== null}

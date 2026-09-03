@@ -3,6 +3,7 @@ import { TenantContextInterceptor } from "./common/interceptors/tenant-context.i
 import { ConfigModule } from "@nestjs/config";
 import { APP_INTERCEPTOR } from "@nestjs/core";
 import { HealthController } from "./health/health.controller";
+import { HealthService } from "./health/health.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuthModule } from "./auth/auth.module";
 import { AuditInterceptor } from "./common/audit.interceptor";
@@ -70,12 +71,21 @@ import { ToolingModule } from "./tooling/tooling.module";
 import { ActionPermissionsModule } from "./action-permissions/action-permissions.module";
 import { HmiModule } from "./hmi/hmi.module";
 import { DowntimeModule } from "./downtime/downtime.module";
+import { EntitlementsV2Module } from "./entitlements-v2/entitlements-v2.module";
+import { validateEnvironment } from "./config/environment.validation";
+import { RequestLoggingInterceptor } from "./common/interceptors/request-logging.interceptor";
+import { UomModule } from "./uom/uom.module";
+import { ProductionCalendarModule } from "./production-calendar/production-calendar.module";
+import { ProductionDefinitionsModule } from "./production-definitions/production-definitions.module";
+import { ProductionMaterialModule } from "./production-material/production-material.module";
+import { QualityExecutionModule } from "./quality-execution/quality-execution.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ["../../.env", ".env"],
+      validate: validateEnvironment,
     }),
     PrismaModule,
     AuthModule,
@@ -143,12 +153,20 @@ import { DowntimeModule } from "./downtime/downtime.module";
     ActionPermissionsModule,
     HmiModule,
     DowntimeModule,
+    EntitlementsV2Module,
+    UomModule,
+    ProductionCalendarModule,
+    ProductionDefinitionsModule,
+    ProductionMaterialModule,
+    QualityExecutionModule,
   ],
   controllers: [HealthController],
   providers: [
+    HealthService,
     // Sıra önemli: TenantContextInterceptor EN DIŞTA olmalı ki AuditInterceptor'ın
     // kendi Prisma yazımı da (auditLog.create) tenant context'i görsün.
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: RequestLoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })

@@ -4,6 +4,8 @@ import {
   updateBomHeaderSchema,
   type CreateBomHeaderDto,
   type UpdateBomHeaderDto,
+  engineeringStatusChangeSchema,
+  type EngineeringStatusChangeDto,
 } from "@ahkmes/shared-types";
 import { BomService } from "./bom.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
@@ -49,6 +51,9 @@ export class BomController {
   ) {
     return this.service.update(user.tenantId, id, dto);
   }
+
+  @Patch(":id/status") @Roles("ADMIN", "PLANNER")
+  status(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(engineeringStatusChangeSchema)) dto: EngineeringStatusChangeDto) { return this.service.setStatus(user.tenantId, user.userId, id, dto); }
 
   @Delete(":id")
   @Roles("ADMIN")

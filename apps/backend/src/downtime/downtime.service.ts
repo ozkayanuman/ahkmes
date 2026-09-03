@@ -9,10 +9,28 @@ import type {
 import { PrismaService } from "../prisma/prisma.service";
 import { OutboxService } from "../outbox/outbox.service";
 
+export type ProductionLossCategory =
+  | "PLANNED_MAINTENANCE"
+  | "UNPLANNED_BREAKDOWN"
+  | "QUALITY_HOLD"
+  | "MATERIAL_SHORTAGE"
+  | "SETUP_CHANGEOVER"
+  | "OPERATOR_RESOURCE_PAUSE"
+  | "OTHER_PLANNED"
+  | "OTHER_UNPLANNED";
+
+/** Preserves the legacy category while giving OEE one deterministic loss bucket. */
+export function resolveProductionLossCategory(reason: {
+  category: "PLANNED" | "UNPLANNED";
+  lossCategory?: ProductionLossCategory | null;
+}): ProductionLossCategory {
+  return reason.lossCategory ?? (reason.category === "PLANNED" ? "OTHER_PLANNED" : "OTHER_UNPLANNED");
+}
+
 interface StartInput {
   reasonId?: string;
   note?: string;
-  source: "ALARM" | "MANUAL";
+  source: "ALARM" | "MANUAL" | "MAINTENANCE";
   triggeredById?: string;
 }
 
@@ -88,7 +106,8 @@ export class DowntimeService {
     if (!machine) throw new NotFoundException("Tezgah bulunamadı");
     if (input.reasonId) await this.findReason(tenantId, input.reasonId);
 
-    const existing = await this.prisma.downtimeEvent.findFirst({ where: { tenantId, machineId, endedAt: null } });
+    const ownership = input.source === "MAINTENANCE" ? "MAINTENANCE" : "MES";
+    const existing = await this.prisma.downtimeEvent.findFirst({ where: { tenantId, machineId, ownership, endedAt: null } });
     if (existing) {
       if (input.source === "MANUAL") throw new ConflictException("Bu tezgahta zaten açık bir duruş kaydı var");
       return existing;
@@ -102,6 +121,7 @@ export class DowntimeService {
           reasonId: input.reasonId,
           note: input.note,
           source: input.source,
+          ownership,
           triggeredById: input.triggeredById,
           workOrderId: machine.activeWorkOrderId,
         },
@@ -172,7 +192,7 @@ export class DowntimeService {
    * döndü" sinyali verince otomatik kapatır — kimse elle kapatmamışsa
    * reasonId null kalır, sonradan classify() ile sınıflandırılabilir. */
   async autoCloseOnResume(tenantId: string, machineId: string) {
-    const open = await this.prisma.downtimeEvent.findFirst({ where: { tenantId, machineId, endedAt: null } });
+    const open = await this.prisma.downtimeEvent.findFirst({ where: { tenantId, machineId, ownership: "MES", endedAt: null } });
     if (!open) return null;
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.downtimeEvent.update({ where: { id: open.id }, data: { endedAt: new Date() } });

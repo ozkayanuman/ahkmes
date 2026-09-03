@@ -120,4 +120,24 @@ describe("M80Adapter (sim sunucusuna karşı entegrasyon)", () => {
       { timeout: 3_000, interval: 25 },
     );
   }, 10_000);
+  it("reports configured program identity separately from unsupported checksum/content capability", async () => {
+    const programItem = { section: 9, subSection: 9 };
+    server = await startM80SimServer({ port: 6835, cycleTimeMs: 10_000, alarmProbability: 0, programIdentityItem: programItem, programIdentity: "P-100-A.NC" });
+    adapter = new M80Adapter({ host: "127.0.0.1", port: 6835, programIdentityItem: programItem });
+    await adapter.connect();
+    const observation = await adapter.readControllerObservation!();
+    expect(observation).toMatchObject({ connectionState: "ONLINE", activeProgramIdentity: "P-100-A.NC", trustLevel: "OBSERVED" });
+    expect(observation.capabilities).toMatchObject({ ACTIVE_PROGRAM_IDENTITY_READ: true, PROGRAM_CHECKSUM_READ: false, PROGRAM_CONTENT_READ: false, REMOTE_START: false });
+  }, 10_000);
+
+  it("refreshes program identity after reconnect instead of trusting a cached value", async () => {
+    const programItem = { section: 9, subSection: 10 };
+    server = await startM80SimServer({ port: 6836, cycleTimeMs: 10_000, alarmProbability: 0, programIdentityItem: programItem, programIdentity: "A.NC" });
+    adapter = new M80Adapter({ host: "127.0.0.1", port: 6836, reconnectDelayMs: 20, pollIntervalMs: 20, programIdentityItem: programItem });
+    await adapter.connect();
+    expect((await adapter.readControllerObservation!()).activeProgramIdentity).toBe("A.NC");
+    server.disconnectClients();
+    server.setProgramIdentity("B.NC");
+    await vi.waitFor(async () => expect((await adapter!.readControllerObservation!()).activeProgramIdentity).toBe("B.NC"), { timeout: 3_000, interval: 25 });
+  }, 10_000);
 });

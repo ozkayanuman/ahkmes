@@ -57,8 +57,8 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET .env dosyasinda tanimli olmali}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@ahkmes.local}
-      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?SEED_ADMIN_PASSWORD .env dosyasinda tanimli olmali}
+      NODE_ENV: ${NODE_ENV:-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS .env dosyasinda tanimli olmali}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
@@ -67,8 +67,10 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-ahkmes-documents}
       MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost}
       MINIO_PUBLIC_PORT: ${MINIO_PUBLIC_PORT:-9000}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
-      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8080}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL .env dosyasinda tanimli olmali}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:?PUBLIC_WEB_URL .env dosyasinda tanimli olmali}
+      APP_VERSION: ${APP_VERSION:-local}
+      BUILD_SHA: ${BUILD_SHA:-unknown}
     ports:
       - "3000:3000"
     depends_on:
@@ -76,6 +78,41 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+
+  migrate:
+    profiles: ["ops"]
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ahkmes}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ahkmes}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["pnpm", "run", "db:migrate"]
+
+  provision:
+    profiles: ["ops"]
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ahkmes}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ahkmes}?schema=public
+      BOOTSTRAP_TENANT_NAME: ${BOOTSTRAP_TENANT_NAME:?BOOTSTRAP_TENANT_NAME is required for provisioning}
+      BOOTSTRAP_TENANT_CODE: ${BOOTSTRAP_TENANT_CODE:?BOOTSTRAP_TENANT_CODE is required for provisioning}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?BOOTSTRAP_ADMIN_EMAIL is required for provisioning}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD is required for provisioning}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:?BOOTSTRAP_ADMIN_NAME is required for provisioning}
+      BOOTSTRAP_PLANT_NAME: ${BOOTSTRAP_PLANT_NAME:?BOOTSTRAP_PLANT_NAME is required for provisioning}
+      BOOTSTRAP_PLANT_CODE: ${BOOTSTRAP_PLANT_CODE:-}
+      BOOTSTRAP_LOCALE: ${BOOTSTRAP_LOCALE:-tr}
+      BOOTSTRAP_TIMEZONE: ${BOOTSTRAP_TIMEZONE:-Europe/Istanbul}
+      BOOTSTRAP_EDITION: ${BOOTSTRAP_EDITION:-PROFESSIONAL}
+      BOOTSTRAP_LEGACY_MODULES: ${BOOTSTRAP_LEGACY_MODULES:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["pnpm", "run", "db:provision"]
 
   web:
     build:

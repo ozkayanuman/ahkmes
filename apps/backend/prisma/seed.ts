@@ -7,6 +7,9 @@ export const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.SEED_MODE !== "demo") {
+    throw new Error("Demo seed is disabled by default. Use SEED_MODE=demo only in a disposable development or test environment; use prisma/provision.ts for customer provisioning.");
+  }
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? "admin@ahkmes.local";
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   if (!adminPassword) {
@@ -47,6 +50,21 @@ async function main() {
       ["HMI_READ", "ADMIN"], ["HMI_READ", "PLANNER"], ["HMI_READ", "FOREMAN"], ["HMI_READ", "OPERATOR"],
       ["HMI_START", "ADMIN"], ["HMI_START", "PLANNER"], ["HMI_START", "FOREMAN"], ["HMI_START", "OPERATOR"],
       ["HMI_COMPLETE", "ADMIN"], ["HMI_COMPLETE", "PLANNER"], ["HMI_COMPLETE", "FOREMAN"], ["HMI_COMPLETE", "OPERATOR"],
+      ["HMI_SETUP", "ADMIN"], ["HMI_SETUP", "PLANNER"], ["HMI_SETUP", "FOREMAN"], ["HMI_SETUP", "OPERATOR"],
+      ["HMI_PAUSE", "ADMIN"], ["HMI_PAUSE", "PLANNER"], ["HMI_PAUSE", "FOREMAN"], ["HMI_PAUSE", "OPERATOR"],
+      ["HMI_RESUME", "ADMIN"], ["HMI_RESUME", "PLANNER"], ["HMI_RESUME", "FOREMAN"], ["HMI_RESUME", "OPERATOR"],
+      ["HMI_REPORT", "ADMIN"], ["HMI_REPORT", "PLANNER"], ["HMI_REPORT", "FOREMAN"], ["HMI_REPORT", "OPERATOR"],
+      ["HMI_HOLD", "ADMIN"], ["HMI_HOLD", "PLANNER"], ["HMI_HOLD", "FOREMAN"], ["HMI_HOLD_RELEASE", "ADMIN"], ["HMI_HOLD_RELEASE", "PLANNER"], ["HMI_HOLD_RELEASE", "FOREMAN"], ["HMI_REWORK", "ADMIN"], ["HMI_REWORK", "PLANNER"], ["HMI_REWORK", "FOREMAN"],
+      ["MRP_READ", "ADMIN"], ["MRP_READ", "PLANNER"], ["MRP_RUN", "ADMIN"], ["MRP_RUN", "PLANNER"],
+      ["MRP_FIRM", "ADMIN"], ["MRP_FIRM", "PLANNER"], ["MRP_CONVERT_MAKE", "ADMIN"], ["MRP_CONVERT_MAKE", "PLANNER"],
+      ["MRP_CONVERT_BUY", "ADMIN"], ["MRP_CONVERT_BUY", "PLANNER"], ["MRP_ADMIN_PARAMETERS", "ADMIN"], ["MRP_ADMIN_PARAMETERS", "PLANNER"],
+      ["CMMS_READ", "ADMIN"], ["CMMS_READ", "PLANNER"], ["CMMS_READ", "FOREMAN"],
+      ["CMMS_REQUEST_CREATE", "ADMIN"], ["CMMS_REQUEST_CREATE", "PLANNER"], ["CMMS_REQUEST_CREATE", "FOREMAN"], ["CMMS_REQUEST_CREATE", "OPERATOR"],
+      ["CMMS_BREAKDOWN_DECLARE", "ADMIN"], ["CMMS_BREAKDOWN_DECLARE", "PLANNER"], ["CMMS_BREAKDOWN_DECLARE", "FOREMAN"], ["CMMS_BREAKDOWN_DECLARE", "OPERATOR"],
+      ["CMMS_WO_PLAN", "ADMIN"], ["CMMS_WO_PLAN", "PLANNER"], ["CMMS_WO_EXECUTE", "ADMIN"], ["CMMS_WO_EXECUTE", "PLANNER"], ["CMMS_WO_EXECUTE", "FOREMAN"],
+      ["CMMS_ASSIGN_TECHNICIAN", "ADMIN"], ["CMMS_ASSIGN_TECHNICIAN", "PLANNER"], ["CMMS_ASSIGN_TECHNICIAN", "FOREMAN"],
+      ["CMMS_SPARE_ISSUE", "ADMIN"], ["CMMS_SPARE_ISSUE", "PLANNER"], ["CMMS_SPARE_ISSUE", "FOREMAN"],
+      ["CMMS_PM_ADMIN", "ADMIN"], ["CMMS_PM_ADMIN", "PLANNER"], ["CMMS_RETURN_TO_SERVICE", "ADMIN"], ["CMMS_RETURN_TO_SERVICE", "FOREMAN"], ["CMMS_CODE_ADMIN", "ADMIN"],
   ];
   for (const [action, role] of toolingRoleGrants) {
     const exists = await prisma.actionPermissionGrant.findFirst({ where: { tenantId: DEFAULT_TENANT_ID, action, role } });

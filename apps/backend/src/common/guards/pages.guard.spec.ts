@@ -1,4 +1,6 @@
 import { PagesGuard } from "./pages.guard";
+import { PAGES_KEY } from "../decorators/require-page.decorator";
+import { PRODUCT_MODULES_KEY } from "../decorators/require-product-module.decorator";
 
 describe("PagesGuard module entitlement policy", () => {
   const contextFor = (user: unknown) => ({
@@ -7,8 +9,14 @@ describe("PagesGuard module entitlement policy", () => {
     switchToHttp: () => ({ getRequest: () => ({ user }) }),
   }) as any;
 
-  function build(required = ["inspections"] as any) {
-    const reflector = { getAllAndOverride: jest.fn().mockReturnValue(required) };
+  function build(required = ["inspections"] as any, explicitModules?: any) {
+    const reflector = {
+      getAllAndOverride: jest.fn((key: string) => {
+        if (key === PAGES_KEY) return required;
+        if (key === PRODUCT_MODULES_KEY) return explicitModules;
+        return undefined;
+      }),
+    };
     const prisma = {
       tenantModuleEntitlement: { findMany: jest.fn().mockResolvedValue([]) },
       tenant: { findUniqueOrThrow: jest.fn().mockResolvedValue({ edition: "ENTERPRISE" }) },

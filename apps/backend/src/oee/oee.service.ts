@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { MachineStatusEvent } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { OeeCalculationService, type OeeCalculationRequest } from "./oee-calculation.service";
 
 interface DayBucket {
   date: string;
@@ -36,7 +37,14 @@ function alarmDurations(events: MachineStatusEvent[]) {
 
 @Injectable()
 export class OeeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly calculation: OeeCalculationService,
+  ) {}
+
+  calculate(request: OeeCalculationRequest) {
+    return this.calculation.calculate(request);
+  }
 
   /** Günlük OEE bileşenlerini (quality/performance/availability) ve toplam duruş süresini döner. */
   async trend(tenantId: string, days: number) {

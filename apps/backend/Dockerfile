@@ -2,7 +2,7 @@
 FROM node:20-alpine
 
 # Prisma engine'leri Alpine'de libssl ister
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl bash gzip postgresql16-client
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
@@ -17,6 +17,7 @@ RUN pnpm install --frozen-lockfile --filter @ahkmes/backend...
 
 COPY packages/shared-types packages/shared-types
 COPY apps/backend apps/backend
+COPY scripts scripts
 
 RUN pnpm --filter @ahkmes/shared-types build \
   && pnpm --filter @ahkmes/backend exec prisma generate \
@@ -26,4 +27,4 @@ WORKDIR /app/apps/backend
 EXPOSE 3000
 
 # Açılışta migration + seed (idempotent upsert), sonra uygulama
-CMD ["sh", "-c", "pnpm exec prisma migrate deploy && pnpm exec prisma db seed && node dist/main.js"]
+CMD ["node", "dist/main.js"]

@@ -20,6 +20,7 @@ interface RecipeStepRow {
   parameterValue: string | null;
   unit: string | null;
   standardMinutes: number | null;
+  idealCycleTimeSec: number | null;
   instructionHtml: string | null;
 }
 interface RecipeRow {
@@ -38,6 +39,7 @@ interface StepInput {
   parameterValue: string;
   unit: string;
   standardMinutes: string;
+  idealCycleTimeSec: string;
   instructionHtml: string;
 }
 
@@ -48,6 +50,7 @@ const emptyStep = (seq: number): StepInput => ({
   parameterValue: "",
   unit: "",
   standardMinutes: "",
+  idealCycleTimeSec: "",
   instructionHtml: "",
 });
 
@@ -84,6 +87,7 @@ export function RecipesPage() {
         ...(s.parameterValue ? { parameterValue: s.parameterValue } : {}),
         ...(s.unit ? { unit: s.unit } : {}),
         ...(s.standardMinutes ? { standardMinutes: Number(s.standardMinutes) } : {}),
+        ...(s.idealCycleTimeSec ? { idealCycleTimeSec: Number(s.idealCycleTimeSec) } : {}),
         ...(s.instructionHtml ? { instructionHtml: s.instructionHtml } : {}),
       }));
       if (editingId) {
@@ -126,6 +130,7 @@ export function RecipesPage() {
         parameterValue: s.parameterValue ?? "",
         unit: s.unit ?? "",
         standardMinutes: s.standardMinutes != null ? String(s.standardMinutes) : "",
+        idealCycleTimeSec: s.idealCycleTimeSec != null ? String(s.idealCycleTimeSec) : "",
         instructionHtml: s.instructionHtml ?? "",
       })),
     );
@@ -236,7 +241,7 @@ export function RecipesPage() {
             <div className="space-y-4">
               {steps.map((s, idx) => (
                 <div key={idx} className="rounded-lg border border-slate-100 p-3">
-                  <div className="grid grid-cols-[2rem_1fr_1fr_1fr_5rem_6rem_2rem] items-center gap-2">
+                  <div className="grid grid-cols-[2rem_1fr_1fr_1fr_5rem_7rem_7rem_2rem] items-center gap-2">
                     <span className="text-sm text-slate-500">{s.seq}</span>
                     <Input placeholder="Adım adı" required value={s.name} onChange={(e) => updateStep(idx, { name: e.target.value })} />
                     <Input
@@ -256,6 +261,14 @@ export function RecipesPage() {
                       placeholder="Standart süre (dk)"
                       value={s.standardMinutes}
                       onChange={(e) => updateStep(idx, { standardMinutes: e.target.value })}
+                    />
+                    <Input
+                      type="number"
+                      min="0.000001"
+                      step="any"
+                      placeholder="Ideal cycle (sn/adet)"
+                      value={s.idealCycleTimeSec}
+                      onChange={(e) => updateStep(idx, { idealCycleTimeSec: e.target.value })}
                     />
                     <button
                       type="button"

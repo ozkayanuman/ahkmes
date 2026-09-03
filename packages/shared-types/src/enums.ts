@@ -8,12 +8,19 @@ export type QuoteStatus = z.infer<typeof QuoteStatusSchema>;
 
 export const WorkOrderStatusSchema = z.enum([
   "PLANNED",
+  "RELEASED",
   "WAITING_MATERIAL",
   "IN_PRODUCTION",
   "COMPLETED",
   "CANCELLED",
 ]);
 export type WorkOrderStatus = z.infer<typeof WorkOrderStatusSchema>;
+
+export const EngineeringStatusSchema = z.enum(["DRAFT", "RELEASED", "OBSOLETE", "LEGACY_UNVERIFIED"]);
+export type EngineeringStatus = z.infer<typeof EngineeringStatusSchema>;
+
+export const UomDimensionSchema = z.enum(["COUNT", "MASS", "LENGTH", "AREA", "VOLUME", "TIME"]);
+export type UomDimension = z.infer<typeof UomDimensionSchema>;
 
 export const WorkOrderOperationStatusSchema = z.enum([
   "PENDING",
@@ -68,6 +75,10 @@ export type CycleCountStatus = z.infer<typeof CycleCountStatusSchema>;
 
 export const InspectionResultSchema = z.enum(["PASS", "FAIL"]);
 export type InspectionResult = z.infer<typeof InspectionResultSchema>;
+export const QualityCharacteristicTypeSchema = z.enum(["NUMERIC", "BOOLEAN", "QUALITATIVE"]);
+export const QualitySamplingMethodSchema = z.enum(["HUNDRED_PERCENT", "FIXED_COUNT"]);
+export const InspectionPointSchema = z.enum(["INCOMING", "IN_PROCESS", "FINAL"]);
+export const QualityDispositionTypeSchema = z.enum(["ACCEPT", "USE_AS_IS", "REWORK", "SCRAP"]);
 
 export const CapaStatusSchema = z.enum(["DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "CLOSED"]);
 export type CapaStatus = z.infer<typeof CapaStatusSchema>;
@@ -75,8 +86,11 @@ export type CapaStatus = z.infer<typeof CapaStatusSchema>;
 export const MaintenanceOrderTypeSchema = z.enum(["PREVENTIVE", "CORRECTIVE"]);
 export type MaintenanceOrderType = z.infer<typeof MaintenanceOrderTypeSchema>;
 
-export const MaintenanceOrderStatusSchema = z.enum(["PLANNED", "IN_PROGRESS", "COMPLETED", "CANCELLED"]);
+export const MaintenanceOrderStatusSchema = z.enum(["DRAFT", "PLANNED", "RELEASED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"]);
 export type MaintenanceOrderStatus = z.infer<typeof MaintenanceOrderStatusSchema>;
+export const MaintenancePrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]);
+export const MachineMaintenanceStateSchema = z.enum(["AVAILABLE", "MAINTENANCE_DUE", "PLANNED_MAINTENANCE", "BREAKDOWN", "OUT_OF_SERVICE"]);
+export const MaintenanceCodeKindSchema = z.enum(["FAILURE", "CAUSE", "REMEDY"]);
 
 export const ProposalStatusSchema = z.enum([
   "DRAFT",
@@ -86,6 +100,18 @@ export const ProposalStatusSchema = z.enum([
   "CONVERTED",
 ]);
 export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
+
+// ---- CNC-V1-03R daily MRP ----
+export const MrpPlanningPolicySchema = z.enum(["MAKE", "BUY", "MAKE_OR_BUY"]);
+export type MrpPlanningPolicy = z.infer<typeof MrpPlanningPolicySchema>;
+export const MrpLotSizingRuleSchema = z.enum(["LOT_FOR_LOT", "MINIMUM_QUANTITY", "ORDER_MULTIPLE", "FIXED_LOT_SIZE"]);
+export type MrpLotSizingRule = z.infer<typeof MrpLotSizingRuleSchema>;
+export const MrpProposalStatusSchema = z.enum(["PROPOSED", "FIRMED", "CONVERTED", "CANCELLED", "SUPERSEDED"]);
+export type MrpProposalStatus = z.infer<typeof MrpProposalStatusSchema>;
+export const MrpExceptionTypeSchema = z.enum(["SHORTAGE", "RESCHEDULE_IN", "RESCHEDULE_OUT", "CANCEL", "QUANTITY_EXCESS", "QUANTITY_SHORTAGE", "MISSING_POLICY"]);
+export type MrpExceptionType = z.infer<typeof MrpExceptionTypeSchema>;
+export const MrpExceptionSeveritySchema = z.enum(["CRITICAL", "WARNING", "INFO"]);
+export type MrpExceptionSeverity = z.infer<typeof MrpExceptionSeveritySchema>;
 
 export const MaterialTypeSchema = z.enum(["RAW", "CONSUMABLE"]);
 export type MaterialType = z.infer<typeof MaterialTypeSchema>;
@@ -102,7 +128,7 @@ export type AuditAction = z.infer<typeof AuditActionSchema>;
 export const DocumentTypeSchema = z.enum(["STEP", "WORK_INSTRUCTION", "OTHER"]);
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
 
-export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration", "lot", "recipe-step"]);
+export const DocumentEntityTypeSchema = z.enum(["part", "work-order", "calibration", "lot", "recipe-step", "machine", "maintenance-request", "maintenance-breakdown", "maintenance-order"]);
 export type DocumentEntityType = z.infer<typeof DocumentEntityTypeSchema>;
 
 export const NcProgramStatusSchema = z.enum(["DRAFT", "REVIEW", "APPROVED", "PUBLISHED", "SUPERSEDED", "ARCHIVED"]);
@@ -124,6 +150,32 @@ export type MachineTagDataType = z.infer<typeof MachineTagDataTypeSchema>;
 export const MachineConnectorTypeSchema = z.enum(["MANUAL", "OPC_UA", "M80"]);
 export type MachineConnectorType = z.infer<typeof MachineConnectorTypeSchema>;
 
+// ---- CNC-V1-05 controller qualification ----
+export const ControllerCapabilitySchema = z.enum([
+  "CONNECTIVITY",
+  "MACHINE_STATE_READ",
+  "ACTIVE_PROGRAM_IDENTITY_READ",
+  "PROGRAM_CONTENT_READ",
+  "PROGRAM_CHECKSUM_READ",
+  "CYCLE_STATE_READ",
+  "ALARM_READ",
+  "FEED_OVERRIDE_READ",
+  "SPINDLE_STATE_READ",
+  "PART_COUNTER_READ",
+  "PROGRAM_TRANSFER",
+  "REMOTE_START",
+]);
+export type ControllerCapability = z.infer<typeof ControllerCapabilitySchema>;
+
+export const ControllerObservationTrustSchema = z.enum(["SIMULATED", "CONFIGURED", "OBSERVED", "CONTROLLER_VERIFIED"]);
+export type ControllerObservationTrust = z.infer<typeof ControllerObservationTrustSchema>;
+export const ControllerConnectionStateSchema = z.enum(["UNKNOWN", "CONNECTING", "ONLINE", "DEGRADED", "OFFLINE"]);
+export type ControllerConnectionState = z.infer<typeof ControllerConnectionStateSchema>;
+export const ControllerMachineStateSchema = z.enum(["UNKNOWN", "IDLE", "READY", "RUNNING", "FEED_HOLD", "ALARM", "STOPPED", "OFFLINE"]);
+export type ControllerMachineState = z.infer<typeof ControllerMachineStateSchema>;
+export const ControllerProgramVerificationSchema = z.enum(["MATCH", "MISMATCH", "UNVERIFIED", "STALE", "UNSUPPORTED"]);
+export type ControllerProgramVerification = z.infer<typeof ControllerProgramVerificationSchema>;
+
 // ---- Non-Conformance (kalite modülü, v0.9) ----
 export const NonConformanceStatusSchema = z.enum(["OPEN", "RESOLVED", "PENDING_DEVIATION_APPROVAL"]);
 export type NonConformanceStatus = z.infer<typeof NonConformanceStatusSchema>;
@@ -140,6 +192,17 @@ export type AlarmSeverity = z.infer<typeof AlarmSeveritySchema>;
 
 export const DowntimeReasonCategorySchema = z.enum(["PLANNED", "UNPLANNED"]);
 export type DowntimeReasonCategory = z.infer<typeof DowntimeReasonCategorySchema>;
+export const ProductionLossCategorySchema = z.enum([
+  "PLANNED_MAINTENANCE",
+  "UNPLANNED_BREAKDOWN",
+  "QUALITY_HOLD",
+  "MATERIAL_SHORTAGE",
+  "SETUP_CHANGEOVER",
+  "OPERATOR_RESOURCE_PAUSE",
+  "OTHER_PLANNED",
+  "OTHER_UNPLANNED",
+]);
+export type ProductionLossCategory = z.infer<typeof ProductionLossCategorySchema>;
 export const DowntimeEventSourceSchema = z.enum(["ALARM", "MANUAL"]);
 export type DowntimeEventSource = z.infer<typeof DowntimeEventSourceSchema>;
 

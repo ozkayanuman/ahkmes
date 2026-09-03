@@ -134,6 +134,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/maintenance-orders", label: "Bakım Emirleri", icon: Factory, page: "maintenance-orders" },
       { to: "/energy", label: "Enerji İzleme", icon: Zap, page: "energy" },
       { to: "/recipes", label: "Reçeteler", icon: ListOrdered, page: "recipes" },
+      { to: "/engineering-master-data", label: "Üretim Tanımları", icon: ListOrdered, page: "recipes" },
+      { to: "/production-standards", label: "Ãœretim StandartlarÄ±", icon: CalendarDays, page: "hierarchy" },
       { to: "/spc", label: "SPC", icon: FlaskConical, page: "spc" },
       { to: "/alarms", label: "Alarmlar", icon: Siren, page: "alarms" },
       { to: "/genealogy", label: "Genealogy", icon: Network, page: "genealogy" },
