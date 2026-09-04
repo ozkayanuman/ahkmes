@@ -9,7 +9,7 @@ The pre-implementation audit found three independent legacy calculation paths:
 
 - `OeeService` daily trend and downtime Pareto (replaced by canonical projections);
 - `WorkOrdersService.oee()`;
-- `ShiftReportService`;
+- `ShiftReportService` (replaced by canonical plant-calendar projections);
 - `DigitalTwinService.metricsByMachine()`.
 
 They are not trustworthy OEE authorities. They treat `ProductionRun` wall-clock
