@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { CalendarClock, Printer } from "lucide-react";
 import { useState } from "react";
 import { apiGet } from "../lib/api";
-import { Button, Card, Input } from "../components/ui";
+import { Button, Card, Input, Label, Select } from "../components/ui";
 
 interface ShiftSummary {
-  shift: number;
+  shift: string;
   label: string;
   start: string;
   end: string;
@@ -39,10 +39,13 @@ function pct(v: number | null) {
  * bileşenleri ve toplam duruş süresi. Vardiya yönetimi CRUD'u bu sürümde yok. */
 export function ShiftReportPage() {
   const [date, setDate] = useState(todayIso());
+  const [plantId, setPlantId] = useState("");
+  const plants = useQuery({ queryKey: ["/plants"], queryFn: () => apiGet<{ id: string; name: string }[]>("/plants") });
 
   const query = useQuery({
-    queryKey: ["/shift-report", date],
-    queryFn: () => apiGet<ShiftSummary[]>(`/shift-report?date=${date}`),
+    queryKey: ["/shift-report", plantId, date],
+    queryFn: () => apiGet<ShiftSummary[]>(`/shift-report?${new URLSearchParams({ plantId, date, asOf: new Date().toISOString() })}`),
+    enabled: Boolean(plantId),
   });
 
   return (
@@ -54,7 +57,8 @@ export function ShiftReportPage() {
           </span>
           <h1 className="text-2xl font-bold">Vardiya Raporu</h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-end gap-2">
+          <div className="w-48"><Label htmlFor="shift-report-plant">Tesis</Label><Select id="shift-report-plant" value={plantId} onChange={(e) => setPlantId(e.target.value)}><option value="">Tesis seçin</option>{(plants.data ?? []).map((plant) => <option key={plant.id} value={plant.id}>{plant.name}</option>)}</Select></div>
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="max-w-[180px]" />
           <Button variant="outline" onClick={() => window.print()}>
             <Printer className="h-4 w-4" /> Yazdır / PDF
