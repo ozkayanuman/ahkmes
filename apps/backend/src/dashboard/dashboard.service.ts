@@ -2,6 +2,17 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { OeeService } from "../oee/oee.service";
 
+function todayContext(tenantId: string, plantId: string) {
+  const asOf = new Date();
+  return {
+    tenantId,
+    plantId,
+    from: new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate())),
+    to: asOf,
+    asOf,
+  };
+}
+
 @Injectable()
 export class DashboardService {
   constructor(
@@ -12,11 +23,12 @@ export class DashboardService {
   /** Tüm sayfalarda sabit üst şeritte gösterilen hafif özet — bugünkü OEE,
    * açık uygunsuzluk sayısı ve o an ALARM durumundaki makine sayısı. */
   async statusBar(tenantId: string) {
-    const [trend, openNonConformanceCount, activeAlarmCount] = await Promise.all([
-      this.oee.trend(tenantId, 1),
+    const [plants, openNonConformanceCount, activeAlarmCount] = await Promise.all([
+      this.prisma.plant.findMany({ where: { tenantId }, select: { id: true } }),
       this.prisma.nonConformance.count({ where: { tenantId, status: "OPEN" } }),
       this.prisma.machine.count({ where: { tenantId, lastStatus: "ALARM" } }),
     ]);
+    const trend = plants.length === 1 ? await this.oee.trend(todayContext(tenantId, plants[0].id)) : [];
     const today = trend[trend.length - 1];
     return {
       oeeToday: today?.oee ?? null,
@@ -26,7 +38,7 @@ export class DashboardService {
   }
 
   async summary(tenantId: string) {
-    const [woGroups, activeWorkOrders, pendingQuotes, minStockMaterials, recentRuns, openNonConformanceCount] =
+    const [woGroups, activeWorkOrders, pendingQuotes, minStockMaterials, recentRuns, openNonConformanceCount, plants] =
       await Promise.all([
         this.prisma.workOrder.groupBy({
           by: ["status"],
@@ -64,6 +76,7 @@ export class DashboardService {
           take: 5,
         }),
         this.prisma.nonConformance.count({ where: { tenantId, status: "OPEN" } }),
+        this.prisma.plant.findMany({ where: { tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
       ]);
 
     const workOrderCounts: Record<string, number> = {};
@@ -80,6 +93,7 @@ export class DashboardService {
       criticalStock,
       recentRuns,
       openNonConformanceCount,
+      plants,
     };
   }
 }

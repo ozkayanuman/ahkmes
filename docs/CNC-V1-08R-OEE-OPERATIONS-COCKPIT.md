@@ -7,7 +7,7 @@ Architectural decision: one canonical, on-demand calculation core; no persisted 
 
 The pre-implementation audit found three independent legacy calculation paths:
 
-- `OeeService` daily trend and downtime Pareto;
+- `OeeService` daily trend and downtime Pareto (replaced by canonical projections);
 - `WorkOrdersService.oee()`;
 - `ShiftReportService`;
 - `DigitalTwinService.metricsByMachine()`.
@@ -42,6 +42,9 @@ Every calculation is scoped by tenant, plant, UTC range, optional machine,
 work order, operation or shift, and a single `asOf` instant. Database-backed
 multi-read calculations run in a PostgreSQL `REPEATABLE READ` transaction.
 Every open interval is capped at the same `asOf`; source rows are not mutated.
+The trend and loss-Pareto endpoints require the same explicit plant, range and
+cutoff context. The dashboard does not aggregate an unspecified tenant-wide
+plant set: an operator selects the plant before it requests either projection.
 
 The calculation result contains component values, input quantities, normalized
 time buckets, source facts/provenance, issues and a data-quality status. `0` is

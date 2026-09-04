@@ -61,6 +61,7 @@ export type CanonicalOeeCalculation = {
   plannedTime: ReturnType<typeof resolvePlannedProductionTime>;
   timeline: ReturnType<typeof normalizeOeeTimeline>;
   metrics: OeeMetrics;
+  sources: OeeSourceInterval[];
 };
 
 export type OeeCalculationRequest = {
@@ -212,16 +213,17 @@ export function calculateOeeFromCanonicalSources(input: CanonicalOeeCalculationI
       });
     }
   }
+  const sources = [
+    ...executionEventsToIntervals(input.executionEvents),
+    ...downtimeIntervals,
+    ...qualityHoldIntervals,
+    ...plannedExclusionSources,
+  ];
   const timeline = normalizeOeeTimeline({
     from: input.from,
     to: input.to,
     asOf: input.asOf,
-    sources: [
-      ...executionEventsToIntervals(input.executionEvents),
-      ...downtimeIntervals,
-      ...qualityHoldIntervals,
-      ...plannedExclusionSources,
-    ],
+    sources,
   });
   const idealCycleByOperation = new Map(input.operations.map((operation) => [operation.id, operation.idealCycleTimeSec]));
 
@@ -247,6 +249,7 @@ export function calculateOeeFromCanonicalSources(input: CanonicalOeeCalculationI
   return {
     plannedTime,
     timeline,
+    sources,
     metrics: calculateOeeMetrics({
       plannedProductionTimeSeconds: plannedTime.plannedProductionTimeSeconds,
       runTimeSeconds: timeline.durationByBucket.RUNNING,

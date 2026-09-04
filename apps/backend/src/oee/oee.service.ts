@@ -1,134 +1,112 @@
 import { Injectable } from "@nestjs/common";
-import type { MachineStatusEvent } from "@prisma/client";
-import { PrismaService } from "../prisma/prisma.service";
-import { OeeCalculationService, type OeeCalculationRequest } from "./oee-calculation.service";
+import {
+  OeeCalculationService,
+  type OeeCalculationRequest,
+} from "./oee-calculation.service";
+import type { OeeSourceInterval, OeeTimeBucket } from "./oee.types";
 
-interface DayBucket {
+export interface DayBucket {
   date: string;
   goodCount: number;
   scrapCount: number;
   runtimeSeconds: number;
-  idealSeconds: number;
+  quality: number | null;
+  performance: number | null;
+  availability: number | null;
+  oee: number | null;
   downtimeSeconds: number;
 }
 
-/** ALARM olayından, aynı makinede sıradaki olaya (yoksa "şu an"a) kadar geçen süreyi
- * duruş (downtime) olarak sayar — geçmişten türetilen gerçek değer, tahmini/sahte değil. */
-function alarmDurations(events: MachineStatusEvent[]) {
-  const byMachine = new Map<string, MachineStatusEvent[]>();
-  for (const ev of events) {
-    const list = byMachine.get(ev.machineId) ?? [];
-    list.push(ev);
-    byMachine.set(ev.machineId, list);
-  }
-  const durations: { start: Date; seconds: number; reason: string }[] = [];
-  for (const list of byMachine.values()) {
-    for (let i = 0; i < list.length; i++) {
-      const ev = list[i];
-      if (ev.type !== "ALARM") continue;
-      const next = list[i + 1];
-      const end = next ? next.occurredAt : new Date();
-      const seconds = Math.max(0, (end.getTime() - ev.occurredAt.getTime()) / 1000);
-      durations.push({ start: ev.occurredAt, seconds, reason: ev.message ?? "Bilinmeyen" });
-    }
-  }
-  return durations;
+const LOSS_BUCKETS = new Set<OeeTimeBucket>([
+  "PLANNED_MAINTENANCE",
+  "UNPLANNED_BREAKDOWN",
+  "QUALITY_HOLD",
+  "MATERIAL_SHORTAGE",
+  "SETUP_CHANGEOVER",
+  "OPERATOR_RESOURCE_PAUSE",
+  "OTHER_PLANNED",
+  "OTHER_UNPLANNED",
+]);
+
+function startOfUtcDay(value: Date): Date {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
 }
 
+function dayWindows(request: OeeCalculationRequest): { date: string; from: Date; to: Date }[] {
+  const cutoff = new Date(Math.min(request.to.getTime(), request.asOf.getTime()));
+  const windows: { date: string; from: Date; to: Date }[] = [];
+  let from = new Date(request.from);
+  while (from < cutoff) {
+    const nextDay = startOfUtcDay(from);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+    const to = new Date(Math.min(nextDay.getTime(), cutoff.getTime()));
+    windows.push({ date: from.toISOString().slice(0, 10), from, to });
+    from = to;
+  }
+  return windows;
+}
+
+function lossSeconds(durationByBucket: Record<OeeTimeBucket, number>): number {
+  return [...LOSS_BUCKETS].reduce((sum, bucket) => sum + (durationByBucket[bucket] ?? 0), 0);
+}
+
+function provenanceLabel(source: OeeSourceInterval | undefined, bucket: OeeTimeBucket): string {
+  const provenance = source?.provenance;
+  if (provenance) {
+    for (const key of ["reasonLabel", "reasonCode", "reason", "source"]) {
+      const value = provenance[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+  }
+  return bucket;
+}
+
+/** Compatibility projections backed exclusively by canonical OEE calculations. */
 @Injectable()
 export class OeeService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly calculation: OeeCalculationService,
-  ) {}
+  constructor(private readonly calculation: OeeCalculationService) {}
 
   calculate(request: OeeCalculationRequest) {
     return this.calculation.calculate(request);
   }
 
-  /** Günlük OEE bileşenlerini (quality/performance/availability) ve toplam duruş süresini döner. */
-  async trend(tenantId: string, days: number) {
-    const since = new Date(Date.now() - days * 24 * 3600 * 1000);
-
-    const runs = await this.prisma.productionRun.findMany({
-      where: { tenantId, startedAt: { gte: since } },
-      include: { workOrder: { include: { part: { select: { idealCycleTimeSec: true } } } } },
-    });
-    const events = await this.prisma.machineStatusEvent.findMany({
-      where: { tenantId, occurredAt: { gte: since } },
-      orderBy: { occurredAt: "asc" },
-    });
-
-    const buckets = new Map<string, DayBucket>();
-    const bucketFor = (date: string) => {
-      let b = buckets.get(date);
-      if (!b) {
-        b = { date, goodCount: 0, scrapCount: 0, runtimeSeconds: 0, idealSeconds: 0, downtimeSeconds: 0 };
-        buckets.set(date, b);
-      }
-      return b;
-    };
-
-    for (const run of runs) {
-      const day = run.startedAt.toISOString().slice(0, 10);
-      const b = bucketFor(day);
-      b.goodCount += run.goodCount;
-      b.scrapCount += run.scrapCount;
-      const end = run.endedAt ?? new Date();
-      b.runtimeSeconds += Math.max(0, (end.getTime() - run.startedAt.getTime()) / 1000);
-      const ideal = run.workOrder.part.idealCycleTimeSec ? Number(run.workOrder.part.idealCycleTimeSec) : null;
-      if (ideal) b.idealSeconds += ideal * run.goodCount;
-    }
-
-    for (const d of alarmDurations(events)) {
-      const day = d.start.toISOString().slice(0, 10);
-      bucketFor(day).downtimeSeconds += d.seconds;
-    }
-
-    return Array.from(buckets.values())
-      .sort((a, b) => a.date.localeCompare(b.date))
-      .map((b) => {
-        const total = b.goodCount + b.scrapCount;
-        const quality = total > 0 ? b.goodCount / total : null;
-        const performance =
-          b.idealSeconds > 0 && b.runtimeSeconds > 0 ? Math.min(1, b.idealSeconds / b.runtimeSeconds) : null;
-        const availability =
-          b.runtimeSeconds > 0 ? Math.max(0, Math.min(1, 1 - b.downtimeSeconds / b.runtimeSeconds)) : null;
-        const oee =
-          quality !== null && performance !== null && availability !== null
-            ? quality * performance * availability
-            : null;
-        return {
-          date: b.date,
-          goodCount: b.goodCount,
-          scrapCount: b.scrapCount,
-          quality,
-          performance,
-          availability,
-          oee,
-          downtimeSeconds: Math.round(b.downtimeSeconds),
-        };
-      });
+  /** Daily projection from one caller-supplied canonical plant/range/cutoff context. */
+  async trend(request: OeeCalculationRequest): Promise<DayBucket[]> {
+    return Promise.all(dayWindows(request).map(async (window) => {
+      const calculation = await this.calculation.calculate({ ...request, from: window.from, to: window.to });
+      const facts = calculation.metrics.facts;
+      return {
+        date: window.date,
+        goodCount: facts.goodCount,
+        scrapCount: facts.scrapCount,
+        runtimeSeconds: facts.runTimeSeconds,
+        quality: calculation.metrics.quality.value,
+        performance: calculation.metrics.performance.value,
+        availability: calculation.metrics.availability.value,
+        oee: calculation.metrics.oee.value,
+        downtimeSeconds: lossSeconds(calculation.timeline.durationByBucket),
+      };
+    }));
   }
 
-  /** Duruş nedenlerini toplam süreye göre azalan sırayla döner (Pareto analizi). */
-  async downtimePareto(tenantId: string, days: number) {
-    const since = new Date(Date.now() - days * 24 * 3600 * 1000);
-    const events = await this.prisma.machineStatusEvent.findMany({
-      where: { tenantId, occurredAt: { gte: since } },
-      orderBy: { occurredAt: "asc" },
-    });
+  /** Loss Pareto projected from canonical normalized source attribution. */
+  async downtimePareto(request: OeeCalculationRequest) {
+    const calculation = await this.calculation.calculate(request);
+    const byReason = new Map<string, { totalSeconds: number; sourceIds: Set<string> }>();
 
-    const byReason = new Map<string, { reason: string; totalSeconds: number; count: number }>();
-    for (const d of alarmDurations(events)) {
-      const entry = byReason.get(d.reason) ?? { reason: d.reason, totalSeconds: 0, count: 0 };
-      entry.totalSeconds += d.seconds;
-      entry.count += 1;
-      byReason.set(d.reason, entry);
+    const sourceById = new Map(calculation.sources.map((source) => [source.id, source]));
+    for (const segment of calculation.timeline.segments) {
+      if (!LOSS_BUCKETS.has(segment.bucket)) continue;
+      const sourceId = segment.sourceIds.find((id) => sourceById.get(id)?.bucket === segment.bucket) ?? `bucket:${segment.bucket}`;
+      const reason = provenanceLabel(sourceById.get(sourceId), segment.bucket);
+      const current = byReason.get(reason) ?? { totalSeconds: 0, sourceIds: new Set<string>() };
+      current.totalSeconds += segment.durationSeconds;
+      current.sourceIds.add(sourceId);
+      byReason.set(reason, current);
     }
 
-    return Array.from(byReason.values())
-      .sort((a, b) => b.totalSeconds - a.totalSeconds)
-      .map((r) => ({ ...r, totalSeconds: Math.round(r.totalSeconds) }));
+    return [...byReason.entries()]
+      .map(([reason, value]) => ({ reason, totalSeconds: Math.round(value.totalSeconds), count: value.sourceIds.size }))
+      .sort((left, right) => right.totalSeconds - left.totalSeconds || left.reason.localeCompare(right.reason));
   }
 }

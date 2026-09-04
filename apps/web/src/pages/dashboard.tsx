@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
@@ -16,7 +17,7 @@ import { apiGet } from "../lib/api";
 import { fmtDate, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { QUOTE_STATUS, StatusBadge, WO_STATUS } from "../components/status";
-import { Card, Table } from "../components/ui";
+import { Card, Label, Select, Table } from "../components/ui";
 import { DowntimeParetoChart, OeeTrendChart } from "../components/oee-charts";
 
 interface OeeTrendPoint {
@@ -73,6 +74,7 @@ interface DashboardData {
     operator: { name: string };
   }[];
   openNonConformanceCount: number;
+  plants: { id: string; name: string }[];
 }
 
 const KPI_CONFIG = [
@@ -136,6 +138,7 @@ function EmptyRow({ colSpan, icon: Icon, text }: { colSpan: number; icon: typeof
 }
 
 export function DashboardPage() {
+  const [plantId, setPlantId] = useState("");
   useInvalidateOn(
     [
       "workorder.updated",
@@ -151,13 +154,21 @@ export function DashboardPage() {
     queryKey: ["/dashboard"],
     queryFn: () => apiGet<DashboardData>("/dashboard"),
   });
+  const oeeContext = useMemo(() => {
+    if (!plantId) return null;
+    const asOf = new Date();
+    const from = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate() - 13));
+    return new URLSearchParams({ plantId, from: from.toISOString(), to: asOf.toISOString(), asOf: asOf.toISOString() }).toString();
+  }, [plantId]);
   const oeeTrend = useQuery({
-    queryKey: ["/oee/trend"],
-    queryFn: () => apiGet<OeeTrendPoint[]>("/oee/trend?days=14"),
+    queryKey: ["/oee/trend", oeeContext],
+    queryFn: () => apiGet<OeeTrendPoint[]>(`/oee/trend?${oeeContext}`),
+    enabled: oeeContext !== null,
   });
   const downtimePareto = useQuery({
-    queryKey: ["/oee/downtime-pareto"],
-    queryFn: () => apiGet<DowntimeReason[]>("/oee/downtime-pareto?days=14"),
+    queryKey: ["/oee/downtime-pareto", oeeContext],
+    queryFn: () => apiGet<DowntimeReason[]>(`/oee/downtime-pareto?${oeeContext}`),
+    enabled: oeeContext !== null,
   });
 
   if (query.isLoading) return <p className="text-slate-500">Yükleniyor…</p>;
@@ -206,10 +217,23 @@ export function DashboardPage() {
         </Link>
       </div>
 
+      <Card className="mb-6 flex flex-wrap items-end gap-3 py-4">
+        <div className="w-full max-w-sm">
+          <Label htmlFor="oee-plant">OEE tesisi</Label>
+          <Select id="oee-plant" value={plantId} onChange={(event) => setPlantId(event.target.value)}>
+            <option value="">Tesis seçin</option>
+            {d.plants.map((plant) => <option key={plant.id} value={plant.id}>{plant.name}</option>)}
+          </Select>
+        </div>
+        <p className="pb-2 text-sm text-slate-500">Trend ve Pareto, seçilen tesisin son 14 günlük açık hesap bağlamıyla gösterilir.</p>
+      </Card>
+
       <div className="mb-6 grid gap-6 xl:grid-cols-2">
         <Card>
           <PanelHeader icon={Gauge} title="OEE Trend (Son 14 Gün)" to="/work-orders" />
-          {oeeTrend.isLoading ? (
+          {!oeeContext ? (
+            <p className="py-8 text-center text-sm text-slate-400">OEE için tesis seçin.</p>
+          ) : oeeTrend.isLoading ? (
             <p className="py-8 text-center text-sm text-slate-400">Yükleniyor…</p>
           ) : (
             <OeeTrendChart data={oeeTrend.data ?? []} />
@@ -217,7 +241,9 @@ export function DashboardPage() {
         </Card>
         <Card>
           <PanelHeader icon={ShieldAlert} title="Duruş Nedenleri (Pareto)" to="/machines" />
-          {downtimePareto.isLoading ? (
+          {!oeeContext ? (
+            <p className="py-8 text-center text-sm text-slate-400">OEE için tesis seçin.</p>
+          ) : downtimePareto.isLoading ? (
             <p className="py-8 text-center text-sm text-slate-400">Yükleniyor…</p>
           ) : (
             <DowntimeParetoChart data={downtimePareto.data ?? []} />

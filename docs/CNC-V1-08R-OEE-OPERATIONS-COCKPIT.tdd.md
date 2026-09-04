@@ -21,8 +21,8 @@ Status: RED/GREEN implementation in progress.
 
 ## Evidence log
 
-Evidence will be appended after each executed RED/GREEN cycle. No commit is
-created because the user explicitly prohibited commits.
+Evidence is appended after each executed RED/GREEN cycle, with checkpoint
+commits preserving the test-first history.
 
 | Task | Command | RED evidence | GREEN evidence | Status |
 |---|---|---|---|---|
@@ -40,6 +40,8 @@ created because the user explicitly prohibited commits.
 | MES execution interval mapping | `pnpm --filter @ahkmes/backend run test -- execution-intervals.spec.ts --runInBand --silent` | TS2307: execution interval mapper did not exist; expected compile-time RED | 5/5 PASS; pause/resume, hold reasons, setup, open states and rework-time mapping | GREEN |
 | Loss classification and provenance | `pnpm --filter @ahkmes/backend run test -- downtime.service.spec.ts --runInBand` | TS2305: `resolveProductionLossCategory` export did not exist | 5/5 PASS; an explicit nullable OEE loss mapping is preserved, while legacy `PLANNED`/`UNPLANNED` records deterministically fall back to `OTHER_PLANNED`/`OTHER_UNPLANNED`. Migration is additive and performs no backfill. | GREEN |
 | Legacy OEE adapters (Task 5a) | `pnpm --filter @ahkmes/backend run test -- oee.service.spec.ts oee.controller.spec.ts work-orders.oee.spec.ts --runInBand`; `$env:E2E_TEST_ARGS = 'cnc-v1-08r.e2e-spec.ts'; docker compose --project-name ahkmes-oee-adapter-proof --file docker-compose.e2e.yml up --build --abort-on-container-exit --exit-code-from e2e` | Initial test fixture omitted required `AuthUser` fields, so it was corrected before valid execution; no RED claim is made for this adapter-only slice. | Unit: 3 suites / 4 tests PASS. PostgreSQL: 4/4 PASS (58.581s); explicit tenant/plant/range/asOf is required by `GET /oee`, and the general and work-order adapters return identical canonical metrics for the same scope/cutoff while preserving legacy aliases. | PARTIAL |
+| Canonical trend and loss Pareto projections (Task 5b) | `pnpm --filter @ahkmes/backend run test -- oee.service.spec.ts oee-calculation.service.spec.ts oee.controller.spec.ts work-orders.oee.spec.ts --runInBand`; `$env:E2E_TEST_ARGS = 'oee-trend.e2e-spec.ts'; docker compose --project-name ahkmes-oee-projection-proof --file docker-compose.e2e.yml up -d --build` | New canonical projection expectations initially failed against the legacy mutable-run/alarm implementation; the first fixture correction exposed missing canonical fact fields before GREEN. | Unit: 4 suites / 16 tests PASS. PostgreSQL: 2/2 PASS (61.142s); the dashboard-compatible daily trend uses canonical plan/execution/report/downtime facts, while Pareto assigns normalized loss time to structured provenance. No `ProductionRun` wall-clock, `MachineStatusEvent` or alarm-to-now calculation remains in `OeeService`. | GREEN |
+| Explicit projection context and dashboard plant scope (Task 5c) | `pnpm exec jest src/oee/oee.controller.spec.ts --runInBand --no-cache --verbose`; `pnpm exec jest src/oee/oee.service.spec.ts --runInBand --no-cache --verbose`; `pnpm exec vitest run src/pages/dashboard.test.tsx --environment jsdom --pool threads --poolOptions.threads.singleThread`; `$env:E2E_TEST_ARGS = 'oee-trend.e2e-spec.ts'; docker compose --project-name ahkmes-oee-explicit-context --file docker-compose.e2e.yml up -d` | Controller/service tests first produced the expected TS2554 compile-time RED because the legacy `days` signatures did not accept the explicit context. The dashboard test then failed because the plant selector was absent. | Unit: controller 3/3 PASS and service 3/3 PASS. UI: 1/1 PASS. PostgreSQL: 2/2 PASS (55.625s). Trend and Pareto require tenant/plant/from/to/asOf, daily windows retain that cutoff, and dashboard requests start only after an operator chooses a plant. | GREEN |
 | Cockpit UI | Focused Vitest | Pending | Pending | NOT_RUN |
 | Release matrix | Full commands from epic | Pending | Pending | NOT_RUN |
 
@@ -49,5 +51,9 @@ Targeted coverage was measured for planned production time: 100% statements,
 88.88% branches, 100% functions and 100% lines. The canonical calculation
 focused suite (10/10), OEE/calendar/downtime/quality-hold interval-regression suite (41/41),
 Task 5a adapter suite (4/4) and backend typecheck also pass.
-No full-epic coverage, CMMS/MRP source integration, authorization, cockpit
+The Task 5c focused Jest coverage command ran successfully but reported 0% because
+this repository's Jest `rootDir` excludes the requested source paths from its
+coverage collector; no Task 5c percentage claim is made. The controller/service,
+dashboard component and PostgreSQL endpoint checks above are the current evidence.
+No full-epic coverage, CMMS/MRP source integration, authorization, broader cockpit
 or release behavior is claimed until its corresponding GREEN evidence is recorded.
