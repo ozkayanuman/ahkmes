@@ -126,6 +126,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/machines", label: "Tezgahlar", icon: Factory, page: "machines" },
       { to: "/hierarchy", label: "Hiyerarşi", icon: GitBranch, page: "hierarchy" },
       { to: "/digital-twin", label: "Digital Twin", icon: Map, page: "digital-twin" },
+      { to: "/oee-cockpit", label: "OEE Cockpit", icon: Gauge, page: "shift-report" },
       { to: "/automation-gateway", label: "Automation Gateway", icon: Radio, page: "automation-gateway" },
       { to: "/non-conformances", label: "Kalite", icon: ShieldAlert, page: "non-conformances" },
       { to: "/inspections", label: "Muayene", icon: ShieldAlert, page: "inspections" },

@@ -65,6 +65,7 @@ async function main() {
       ["CMMS_ASSIGN_TECHNICIAN", "ADMIN"], ["CMMS_ASSIGN_TECHNICIAN", "PLANNER"], ["CMMS_ASSIGN_TECHNICIAN", "FOREMAN"],
       ["CMMS_SPARE_ISSUE", "ADMIN"], ["CMMS_SPARE_ISSUE", "PLANNER"], ["CMMS_SPARE_ISSUE", "FOREMAN"],
       ["CMMS_PM_ADMIN", "ADMIN"], ["CMMS_PM_ADMIN", "PLANNER"], ["CMMS_RETURN_TO_SERVICE", "ADMIN"], ["CMMS_RETURN_TO_SERVICE", "FOREMAN"], ["CMMS_CODE_ADMIN", "ADMIN"],
+      ["OEE_READ", "ADMIN"], ["OEE_READ", "PLANNER"], ["OEE_READ", "FOREMAN"], ["OEE_READ", "OPERATOR"], ["OEE_LOSS_REASON_ADMIN", "ADMIN"],
   ];
   for (const [action, role] of toolingRoleGrants) {
     const exists = await prisma.actionPermissionGrant.findFirst({ where: { tenantId: DEFAULT_TENANT_ID, action, role } });

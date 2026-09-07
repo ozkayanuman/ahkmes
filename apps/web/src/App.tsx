@@ -60,6 +60,7 @@ import { ToolingPage } from "./pages/tooling";
 import { HmiOperationsPage } from "./pages/hmi-operations";
 import { EngineeringMasterDataPage } from "./pages/engineering-master-data";
 import { ProductionStandardsPage } from "./pages/production-standards";
+import { OeeCockpitPage } from "./pages/oee-cockpit";
 
 export function App() {
   return (
@@ -172,6 +173,7 @@ export function App() {
         <Route path="/reports" element={<PageGuard page="reports"><ReportsPage /></PageGuard>} />
         <Route path="/webhooks" element={<PageGuard page="webhooks"><WebhooksPage /></PageGuard>} />
         <Route path="/shift-report" element={<PageGuard page="shift-report"><ShiftReportPage /></PageGuard>} />
+        <Route path="/oee-cockpit" element={<PageGuard page="shift-report"><OeeCockpitPage /></PageGuard>} />
         <Route path="/labor" element={<PageGuard page="labor"><LaborPage /></PageGuard>} />
       </Route>
     </Routes>

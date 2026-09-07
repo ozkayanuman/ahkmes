@@ -5,75 +5,67 @@ function buildService(overrides: any = {}) {
   const prisma: any = {
     machine: { findMany: jest.fn().mockResolvedValue([]), findFirst: jest.fn(), update: jest.fn() },
     machineConnection: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn(), delete: jest.fn(), findFirst: jest.fn() },
-    productionRun: { findMany: jest.fn().mockResolvedValue([]) },
-    machineStatusEvent: { findMany: jest.fn().mockResolvedValue([]), groupBy: jest.fn().mockResolvedValue([]) },
+    machineStatusEvent: { groupBy: jest.fn().mockResolvedValue([]) },
     energyReading: { groupBy: jest.fn().mockResolvedValue([]) },
     ...overrides,
   };
-  const service = new DigitalTwinService(prisma as any);
-  return { service, prisma };
+  const calculation = {
+    calculate: jest.fn().mockResolvedValue({
+      metrics: { facts: { goodCount: 8, scrapCount: 2 }, oee: { value: 0.64 } },
+    }),
+  };
+  const service = new DigitalTwinService(prisma as any, calculation as any);
+  return { service, prisma, calculation };
 }
 
+const context = {
+  plantId: "p1",
+  from: new Date("2026-08-26T08:00:00Z"),
+  to: new Date("2026-08-26T12:00:00Z"),
+  asOf: new Date("2026-08-26T12:00:00Z"),
+};
+
 describe("DigitalTwinService.layout", () => {
-  it("makine listesine bugünkü OEE/enerji/açık alarm metriklerini ekler", async () => {
-    const { service, prisma } = buildService();
+  it("adds canonical OEE while retaining energy and open-alarm presentation facts", async () => {
+    const { service, prisma, calculation } = buildService();
     prisma.machine.findMany.mockResolvedValue([
-      { id: "m1", name: "CNC-1", model: "X", controller: null, isActive: true, lastStatus: null, lastEventAt: null, posX: 0, posY: 0, runtimeHours: "150.5", activeWorkOrder: null },
-    ]);
-    prisma.productionRun.findMany.mockResolvedValue([
-      {
-        machineId: "m1",
-        goodCount: 8,
-        scrapCount: 2,
-        startedAt: new Date(Date.now() - 3600_000),
-        endedAt: new Date(),
-        workOrder: { part: { idealCycleTimeSec: 360 } }, // 8*360=2880s ideal vs 3600s runtime -> performance 0.8
-      },
+      { id: "m1", name: "CNC-1", model: "X", controller: null, isActive: true, plantId: "p1", lastStatus: null, lastEventAt: null, posX: 0, posY: 0, runtimeHours: "150.5", activeWorkOrder: { id: "wo-1", woNo: "WO-1", status: "IN_PROGRESS" } },
     ]);
     prisma.energyReading.groupBy.mockResolvedValue([{ machineId: "m1", _sum: { kwh: 12.5 } }]);
     prisma.machineStatusEvent.groupBy.mockResolvedValue([{ machineId: "m1", _count: { _all: 2 } }]);
 
-    const result = await service.layout("t1");
+    const result = await service.layout("t1", context);
+    const machine = result.machines[0] as unknown as { runtimeHours: number; goodCountToday: number; scrapCountToday: number; energyTodayKwh: number; openAlarmCount: number; oeeToday: number | null };
 
-    const m = result.machines[0] as unknown as {
-      runtimeHours: number;
-      goodCountToday: number;
-      scrapCountToday: number;
-      energyTodayKwh: number;
-      openAlarmCount: number;
-      oeeToday: number | null;
-    };
-    expect(m.runtimeHours).toBe(150.5);
-    expect(m.goodCountToday).toBe(8);
-    expect(m.scrapCountToday).toBe(2);
-    expect(m.energyTodayKwh).toBe(12.5);
-    expect(m.openAlarmCount).toBe(2);
-    expect(m.oeeToday).not.toBeNull();
-    // quality 0.8 * performance 0.8 * availability 1 = 0.64
-    expect(m.oeeToday).toBeCloseTo(0.64, 2);
+    expect(machine).toMatchObject({ runtimeHours: 150.5, goodCountToday: 8, scrapCountToday: 2, energyTodayKwh: 12.5, openAlarmCount: 2, oeeToday: 0.64 });
+    expect(calculation.calculate).toHaveBeenCalledWith({ tenantId: "t1", ...context, workOrderId: "wo-1" });
   });
 
-  it("bugün üretim koşusu yoksa oeeToday null, sayaçlar sıfır döner", async () => {
-    const { service, prisma } = buildService();
+  it("keeps zero counts distinct from unavailable OEE when a machine has no active work order", async () => {
+    const { service, prisma, calculation } = buildService();
     prisma.machine.findMany.mockResolvedValue([
-      { id: "m1", name: "CNC-1", model: "X", controller: null, isActive: true, lastStatus: null, lastEventAt: null, posX: 0, posY: 0, runtimeHours: "0", activeWorkOrder: null },
+      { id: "m1", name: "CNC-1", model: "X", controller: null, isActive: true, plantId: "p1", lastStatus: null, lastEventAt: null, posX: 0, posY: 0, runtimeHours: "0", activeWorkOrder: null },
     ]);
 
-    const result = await service.layout("t1");
-    const m = result.machines[0] as unknown as { oeeToday: number | null; energyTodayKwh: number; openAlarmCount: number };
-
-    expect(m.oeeToday).toBeNull();
-    expect(m.energyTodayKwh).toBe(0);
-    expect(m.openAlarmCount).toBe(0);
+    const result = await service.layout("t1", context);
+    expect(result.machines[0]).toMatchObject({ oeeToday: null, goodCountToday: 0, scrapCountToday: 0, energyTodayKwh: 0, openAlarmCount: 0 });
+    expect(calculation.calculate).not.toHaveBeenCalled();
   });
 
-  it("hiç makine yoksa boş dizi döner, ekstra sorgu atılmaz", async () => {
+  it("calculates a shared active work order only once", async () => {
+    const { service, prisma, calculation } = buildService();
+    prisma.machine.findMany.mockResolvedValue(["m1", "m2"].map((id) => ({
+      id, name: id, model: "X", controller: null, isActive: true, plantId: "p1", lastStatus: null, lastEventAt: null, posX: 0, posY: 0, runtimeHours: "0", activeWorkOrder: { id: "wo-1", woNo: "WO-1", status: "IN_PROGRESS" },
+    })));
+
+    await service.layout("t1", context);
+    expect(calculation.calculate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not issue dependent queries when the plant has no machines", async () => {
     const { service, prisma } = buildService();
-    prisma.machine.findMany.mockResolvedValue([]);
-
-    const result = await service.layout("t1");
-
+    const result = await service.layout("t1", context);
     expect(result.machines).toEqual([]);
-    expect(prisma.productionRun.findMany).not.toHaveBeenCalled();
+    expect(prisma.energyReading.groupBy).not.toHaveBeenCalled();
   });
 });

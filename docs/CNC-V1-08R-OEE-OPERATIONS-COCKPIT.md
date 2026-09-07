@@ -1,6 +1,6 @@
 # CNC-V1-08R — Trustworthy OEE and Operations Cockpit
 
-Status: IMPLEMENTATION IN PROGRESS
+Status: FUNCTIONAL_PARTIAL
 Architectural decision: one canonical, on-demand calculation core; no persisted OEE snapshots.
 
 ## Takeover audit
@@ -146,6 +146,23 @@ controller facts are optional. Existing ProductModule and
 TenantModuleEntitlement behavior remains authoritative; Entitlements V2 is not
 connected. Server endpoints use the legacy authority plus OEE action
 permissions. PRODUCT-ARCH-005 is outside this epic.
+
+## Operations cockpit delivery
+
+`GET /oee/cockpit` requires `plantId`, `from`, `to` and `asOf`. It returns a
+tenant-scoped canonical plant summary, per-active-work-order machine
+projection, source/timeline provenance, and read-only maintenance, quality-hold
+and MRP-exception blockers. The React `/oee-cockpit` page sends that explicit
+scope, renders unavailable KPIs as unavailable (never zero), exposes the
+data-quality state and refreshes its projection every 30 seconds.
+
+Digital Twin now requires the same explicit OEE context and obtains OEE only
+from `OeeCalculationService`; its energy and open-alarm fields remain
+presentation facts. OEE/cockpit and the Digital Twin OEE projection require
+`OEE_READ`. Downtime-loss-reason writes require
+`OEE_LOSS_REASON_ADMIN`. CMMS/MRP records are read-only blocker context: an
+open maintenance order or material exception does not create an OEE loss
+interval without timestamped `DowntimeEvent` evidence.
 
 ## Validation contract
 

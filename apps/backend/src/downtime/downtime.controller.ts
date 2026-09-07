@@ -20,13 +20,15 @@ import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { ActionPermissionsGuard } from "../common/guards/action-permissions.guard";
+import { RequireActionPermissions } from "../common/decorators/require-action-permission.decorator";
 
 /** "alarms" sayfa entitlement'ı yeniden kullanılır — Downtime/Andon, mevcut
  * Alarm Management ile aynı canonical modül (QMS_INSPECTION) altında, kendi
  * page-key/catalog genişletmesi gerektirmez (bkz. product-catalog.ts). */
 @Controller("downtime")
 @RequirePage("alarms")
-@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard, ActionPermissionsGuard)
 export class DowntimeController {
   constructor(private readonly service: DowntimeService) {}
 
@@ -43,6 +45,7 @@ export class DowntimeController {
 
   @Post("reasons")
   @Roles("ADMIN", "PLANNER", "FOREMAN")
+  @RequireActionPermissions("OEE_LOSS_REASON_ADMIN")
   createReason(
     @CurrentUser() user: AuthUser,
     @Body(new ZodValidationPipe(createDowntimeReasonSchema)) dto: CreateDowntimeReasonDto,
@@ -52,6 +55,7 @@ export class DowntimeController {
 
   @Patch("reasons/:id")
   @Roles("ADMIN", "PLANNER", "FOREMAN")
+  @RequireActionPermissions("OEE_LOSS_REASON_ADMIN")
   updateReason(
     @CurrentUser() user: AuthUser,
     @Param("id") id: string,

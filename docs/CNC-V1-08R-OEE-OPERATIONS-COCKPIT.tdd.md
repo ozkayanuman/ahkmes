@@ -1,6 +1,7 @@
 # CNC-V1-08R OEE and Operations Cockpit — TDD evidence
 
-Status: RED/GREEN implementation in progress.
+Status: FUNCTIONAL_PARTIAL. Focused implementation evidence is green; the full
+release matrix and benchmark evidence remain open.
 
 ## Source plan
 
@@ -58,3 +59,16 @@ coverage collector; no Task 5c percentage claim is made. The controller/service,
 dashboard component and PostgreSQL endpoint checks above are the current evidence.
 No full-epic coverage, CMMS/MRP source integration, authorization, broader cockpit
 or release behavior is claimed until its corresponding GREEN evidence is recorded.
+
+## Current completion evidence
+
+| Task | GREEN evidence | Status |
+|---|---|---|
+| Digital Twin canonical OEE | `digital-twin.service.spec.ts` proves explicit context, canonical work-order calculation and duplicate-work-order de-duplication; controller metadata requires `OEE_READ`. | GREEN (focused) |
+| OEE authorization | `action-permissions.service.spec.ts`, `oee.controller.spec.ts` and `downtime.controller.spec.ts` prove `OEE_READ` and `OEE_LOSS_REASON_ADMIN` metadata. The focused backend run passed 6 suites / 13 tests. | GREEN (focused) |
+| Cockpit read API | `oee-cockpit.service.spec.ts` proves tenant/plant canonical summary plus optional CMMS, quality and MRP blocker facts, without inventing time loss. | GREEN (unit) |
+| Cockpit UI | `oee-cockpit.test.tsx` covers explicit plant/time request and unavailable-vs-zero rendering; web typecheck passes. | GREEN (focused) |
+| Release matrix | The full 50-machine benchmark, backup/restore rehearsal, all V1 E2E matrix and captured post-change PostgreSQL result remain required. | PARTIAL |
+
+CMMS/MRP records in the cockpit are intentionally read-only context. Only
+timestamped structured downtime facts participate in canonical OEE duration.

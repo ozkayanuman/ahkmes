@@ -1,5 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import { OeeController } from "./oee.controller";
+import { ACTION_PERMISSIONS_KEY } from "../common/decorators/require-action-permission.decorator";
+import { PAGES_KEY } from "../common/decorators/require-page.decorator";
 
 const user = {
   userId: "user-1",
@@ -15,6 +17,10 @@ const user = {
 };
 
 describe("OeeController", () => {
+  it("requires both the MES page boundary and the explicit OEE read action", () => {
+    expect(Reflect.getMetadata(ACTION_PERMISSIONS_KEY, OeeController)).toEqual(["OEE_READ"]);
+    expect(Reflect.getMetadata(PAGES_KEY, OeeController)).toEqual(["shift-report"]);
+  });
   it("requires an explicit plant, range and cutoff before delegating to the canonical authority", async () => {
     const service = { calculate: jest.fn().mockResolvedValue({ metrics: {} }) };
     const controller = new OeeController(service as never);
@@ -28,6 +34,15 @@ describe("OeeController", () => {
       to: new Date("2026-08-26T09:00:00.000Z"),
       asOf: new Date("2026-08-26T09:00:00.000Z"),
     });
+  });
+
+  it("delegates the cockpit projection with the same explicit tenant-scoped context", async () => {
+    const cockpit = { read: jest.fn().mockResolvedValue({ summary: {} }) };
+    const controller = new OeeController({ calculate: jest.fn() } as never, cockpit as never);
+
+    await controller.cockpitRead(user, "plant-1", "2026-08-26T05:00:00.000Z", "2026-08-26T09:00:00.000Z", "2026-08-26T09:00:00.000Z");
+
+    expect(cockpit.read).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "tenant-1", plantId: "plant-1" }));
   });
 
   it("rejects a calculation request without a complete explicit context", () => {
