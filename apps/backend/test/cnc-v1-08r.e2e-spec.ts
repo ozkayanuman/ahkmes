@@ -231,4 +231,44 @@ describe("CNC-V1-08R canonical OEE calculation (PostgreSQL e2e)", () => {
     expect(unmapped.lossCategory).toBeNull();
     expect(resolveProductionLossCategory(unmapped)).toBe("OTHER_UNPLANNED");
   });
+
+  it("measures canonical calculation across 50 representative machine work orders without asserting an invented SLA", async () => {
+    const tenantId = `cnc-v1-08r-benchmark-${stamp}`;
+    const actorId = `benchmark-actor-${stamp}`;
+    const plantId = `benchmark-plant-${stamp}`;
+    const partId = `benchmark-part-${stamp}`;
+    await prisma.tenant.create({ data: { id: tenantId, name: "OEE benchmark", timezone: "Europe/Istanbul" } });
+    await prisma.user.create({ data: { id: actorId, tenantId, email: `benchmark-${stamp}@test.local`, name: "Benchmark", passwordHash: "test", role: "ADMIN" } });
+    await prisma.plant.create({ data: { id: plantId, tenantId, name: "Benchmark plant", timezone: "Europe/Istanbul" } });
+    await prisma.part.create({ data: { id: partId, tenantId, partNo: `BENCH-${stamp}`, revision: "A", name: "Benchmark part", unit: "EA" } });
+    const calendar = await prisma.plantProductionCalendar.create({ data: { tenantId, plantId, name: "Benchmark calendar", timezone: "Europe/Istanbul", weeklyWorkingDays: [3] } });
+    await prisma.productionShift.create({ data: { tenantId, plantId, calendarId: calendar.id, code: "DAY", name: "Day", startMinute: 8 * 60, endMinute: 12 * 60 } });
+
+    const rows = Array.from({ length: 50 }, (_, index) => ({
+      machineId: `benchmark-machine-${stamp}-${index}`,
+      workOrderId: `benchmark-wo-${stamp}-${index}`,
+      operationId: `benchmark-operation-${stamp}-${index}`,
+      runId: `benchmark-run-${stamp}-${index}`,
+    }));
+    await prisma.machine.createMany({ data: rows.map((row, index) => ({ id: row.machineId, tenantId, plantId, name: `Benchmark CNC ${index + 1}`, model: "Test" })) });
+    await prisma.workOrder.createMany({ data: rows.map((row, index) => ({
+      id: row.workOrderId, tenantId, woNo: `BENCH-WO-${stamp}-${index}`, partId, plantId, machineId: row.machineId,
+      quantity: 100, dueDate: at("2026-08-27T00:00:00.000Z"), plannedStartDate: at("2026-08-26T05:00:00.000Z"), plannedEndDate: at("2026-08-26T09:00:00.000Z"), createdAt: at("2026-08-01T00:00:00.000Z"),
+    })) });
+    await prisma.workOrderOperation.createMany({ data: rows.map((row) => ({ id: row.operationId, tenantId, workOrderId: row.workOrderId, seq: 10, name: "OP10", idealCycleTimeSec: 120 })) });
+    await prisma.productionRun.createMany({ data: rows.map((row) => ({ id: row.runId, tenantId, workOrderId: row.workOrderId, operationId: row.operationId, operatorId: actorId, startedAt: at("2026-08-26T05:00:00.000Z"), endedAt: at("2026-08-26T09:00:00.000Z") })) });
+    await prisma.productionExecutionEvent.createMany({ data: rows.flatMap((row) => [
+      { tenantId, workOrderId: row.workOrderId, operationId: row.operationId, productionRunId: row.runId, type: "START", idempotencyKey: `benchmark-start-${row.operationId}`, actorId, createdAt: at("2026-08-26T05:00:00.000Z") },
+      { tenantId, workOrderId: row.workOrderId, operationId: row.operationId, productionRunId: row.runId, type: "COMPLETE", idempotencyKey: `benchmark-complete-${row.operationId}`, actorId, createdAt: at("2026-08-26T09:00:00.000Z") },
+    ]) });
+    await prisma.productionReport.createMany({ data: rows.map((row) => ({ tenantId, workOrderId: row.workOrderId, operationId: row.operationId, productionRunId: row.runId, goodQty: 100, scrapQty: 0, reworkQty: 0, idempotencyKey: `benchmark-report-${row.operationId}`, reportedById: actorId, createdAt: at("2026-08-26T08:59:00.000Z") })) });
+
+    const startedAt = performance.now();
+    const result = await calculation.calculate({ tenantId, plantId, from: at("2026-08-26T05:00:00.000Z"), to: at("2026-08-26T09:00:00.000Z"), asOf: at("2026-08-26T09:00:00.000Z") });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.metrics.facts.goodCount).toBe(5_000);
+    expect(Number.isFinite(elapsedMs)).toBe(true);
+    console.info(`OEE_50_MACHINE_BENCHMARK_MS=${elapsedMs.toFixed(2)}`);
+  });
 });

@@ -68,7 +68,8 @@ or release behavior is claimed until its corresponding GREEN evidence is recorde
 | OEE authorization | `action-permissions.service.spec.ts`, `oee.controller.spec.ts` and `downtime.controller.spec.ts` prove `OEE_READ` and `OEE_LOSS_REASON_ADMIN` metadata. The focused backend run passed 6 suites / 13 tests. | GREEN (focused) |
 | Cockpit read API | `oee-cockpit.service.spec.ts` proves tenant/plant canonical summary plus optional CMMS, quality and MRP blocker facts, without inventing time loss. | GREEN (unit) |
 | Cockpit UI | `oee-cockpit.test.tsx` covers explicit plant/time request and unavailable-vs-zero rendering; web typecheck passes. | GREEN (focused) |
-| Release matrix | The full 50-machine benchmark, backup/restore rehearsal, all V1 E2E matrix and captured post-change PostgreSQL result remain required. | PARTIAL |
+| 50-machine OEE benchmark | `cnc-v1-08r.e2e-spec.ts` now seeds 50 machines/work orders with immutable operations, execution events and reports, then logs the measured canonical calculation duration without asserting an SLA. The isolated E2E command could not start on 2026-09-07 because Docker Desktop's `dockerDesktopLinuxEngine` named pipe was unavailable. | BLOCKED_ENVIRONMENT |
+| Release matrix | The full 50-machine benchmark execution, backup/restore rehearsal, all V1 E2E matrix and captured post-change PostgreSQL result remain required. | PARTIAL |
 
 CMMS/MRP records in the cockpit are intentionally read-only context. Only
 timestamped structured downtime facts participate in canonical OEE duration.
