@@ -439,4 +439,134 @@ export class OeeCalculationService {
       timeout: 60_000,
     });
   }
+
+  /**
+   * Produces work-order projections from one repeatable-read snapshot. This is
+   * intentionally separate from plant aggregation: per-work-order schedule
+   * intervals must not be summed to derive a plant-level OEE denominator.
+   */
+  async calculateForWorkOrders(
+    request: OeeCalculationRequest,
+    workOrderIds: readonly string[],
+  ): Promise<Map<string, CanonicalOeeCalculation>> {
+    const ids = [...new Set(workOrderIds)];
+    if (ids.length === 0) return new Map();
+    const cutoff = new Date(Math.min(request.to.getTime(), request.asOf.getTime()));
+
+    return this.prisma.$transaction(async (transaction) => {
+      const db = transaction as any;
+      const workOrders = await db.workOrder.findMany({
+        where: {
+          tenantId: request.tenantId,
+          plantId: request.plantId,
+          id: { in: ids },
+          createdAt: { lte: cutoff },
+          plannedStartDate: { not: null, lt: cutoff },
+          plannedEndDate: { not: null, gt: request.from },
+        },
+        select: {
+          id: true,
+          plannedStartDate: true,
+          plannedEndDate: true,
+          operations: { select: { id: true, idealCycleTimeSec: true } },
+        },
+      });
+      await this.synchronization?.reached("SNAPSHOT_ESTABLISHED");
+      const operationIds = workOrders.flatMap((workOrder: { operations: { id: string }[] }) => workOrder.operations.map((operation) => operation.id));
+      const loadedWorkOrderIds = workOrders.map((workOrder: { id: string }) => workOrder.id);
+      const [executionEvents, reports, downtimeEvents, qualityHolds] = await Promise.all([
+        db.productionExecutionEvent.findMany({
+          where: { tenantId: request.tenantId, operationId: { in: operationIds }, createdAt: { lte: cutoff } },
+          select: { id: true, operationId: true, type: true, reasonCode: true, createdAt: true },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        }),
+        db.productionReport.findMany({
+          where: { tenantId: request.tenantId, operationId: { in: operationIds }, createdAt: { lte: cutoff } },
+          select: { id: true, operationId: true, goodQty: true, scrapQty: true, reworkQty: true },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        }),
+        db.downtimeEvent.findMany({
+          where: {
+            tenantId: request.tenantId,
+            workOrderId: { in: loadedWorkOrderIds },
+            createdAt: { lte: cutoff },
+            startedAt: { lt: cutoff },
+            OR: [{ endedAt: null }, { endedAt: { gt: request.from } }],
+          },
+          select: {
+            id: true, workOrderId: true, startedAt: true, endedAt: true, source: true, ownership: true,
+            maintenanceCategory: true,
+            reason: { select: { id: true, code: true, label: true, category: true, lossCategory: true } },
+          },
+          orderBy: [{ startedAt: "asc" }, { id: "asc" }],
+        }),
+        db.qualityHold.findMany({
+          where: {
+            tenantId: request.tenantId,
+            workOrderId: { in: loadedWorkOrderIds },
+            createdAt: { lte: cutoff },
+            OR: [{ releasedAt: null }, { releasedAt: { gt: request.from } }],
+          },
+          select: {
+            id: true, workOrderId: true, operationId: true, lotId: true, inspectionLotId: true, quantity: true,
+            reason: true, source: true, status: true, createdAt: true, releasedAt: true,
+          },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        }),
+      ]);
+      const calendarWindows = (await Promise.all(
+        utcDateKeysIncludingAdjacentDays(request.from, cutoff).map((productionDate) =>
+          this.productionCalendar.shiftWindowsForProductionDate(request.tenantId, request.plantId, productionDate, transaction as never),
+        ),
+      )).flat() as CalendarWindow[];
+      const shiftIntervals = calendarWindows.flatMap((shift, index) =>
+        shift.start && shift.end ? [{ id: `${shift.id}:${index}`, start: shift.start, end: shift.end }] : [],
+      );
+      const scheduledExclusions = calendarWindows.flatMap((shift, shiftIndex) =>
+        shift.breaks.flatMap((item, breakIndex) =>
+          item.isValidWithinShift && item.start && item.end
+            ? [{ id: `${item.id}:${shiftIndex}:${breakIndex}`, start: item.start, end: item.end }]
+            : [],
+        ),
+      );
+      const calculateOne = (scopedWorkOrders: readonly any[]): CanonicalOeeCalculation => {
+        const scopedWorkOrderIds = new Set(scopedWorkOrders.map((workOrder) => workOrder.id));
+        const scopedOperations = scopedWorkOrders.flatMap((workOrder) => workOrder.operations);
+        const scopedOperationIds = new Set(scopedOperations.map((operation: { id: string }) => operation.id));
+        return calculateOeeFromCanonicalSources({
+          from: request.from,
+          to: request.to,
+          asOf: request.asOf,
+          scheduleIntervals: scopedWorkOrders.flatMap((workOrder) =>
+            workOrder.plannedStartDate && workOrder.plannedEndDate
+              ? [{ id: workOrder.id, start: workOrder.plannedStartDate, end: workOrder.plannedEndDate }]
+              : [],
+          ),
+          shiftIntervals,
+          scheduledExclusions,
+          plannedDowntime: [],
+          operations: scopedOperations.map((operation: { id: string; idealCycleTimeSec: unknown }) => ({
+            id: operation.id,
+            idealCycleTimeSec: operation.idealCycleTimeSec === null ? null : numeric(operation.idealCycleTimeSec),
+          })),
+          executionEvents: executionEvents.filter((event: { operationId: string }) => scopedOperationIds.has(event.operationId)).map((event: { id: string; operationId: string; type: string; reasonCode: string | null; createdAt: Date }) => ({
+            id: event.id, operationId: event.operationId, eventType: event.type as OeeExecutionEvent["eventType"], reasonCode: event.reasonCode, createdAt: event.createdAt,
+          })),
+          reports: reports.filter((report: { operationId: string }) => scopedOperationIds.has(report.operationId)).map((report: { id: string; operationId: string; goodQty: unknown; scrapQty: unknown; reworkQty: unknown }) => ({
+            id: report.id, operationId: report.operationId, goodQty: numeric(report.goodQty), scrapQty: numeric(report.scrapQty), reworkQty: numeric(report.reworkQty),
+          })),
+          downtimeIntervals: downtimeEventsToIntervals(downtimeEvents.filter((event: { workOrderId: string }) => scopedWorkOrderIds.has(event.workOrderId)) as OeeDowntimeEvent[]),
+          qualityHoldIntervals: qualityHoldsToIntervals(qualityHolds.filter((hold: { workOrderId: string }) => scopedWorkOrderIds.has(hold.workOrderId)) as OeeQualityHold[]),
+        });
+      };
+
+      const byWorkOrder = new Map<string, CanonicalOeeCalculation>(workOrders.map((workOrder: any): readonly [string, CanonicalOeeCalculation] => [workOrder.id, calculateOne([workOrder])]));
+      const emptyCalculation = calculateOne([]);
+      return new Map<string, CanonicalOeeCalculation>(ids.map((id) => [id, byWorkOrder.get(id) ?? emptyCalculation] as const));
+    }, {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      maxWait: 5_000,
+      timeout: 60_000,
+    });
+  }
 }

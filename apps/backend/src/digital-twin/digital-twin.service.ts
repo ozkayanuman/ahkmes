@@ -83,10 +83,8 @@ export class DigitalTwinService {
     context: TwinCalculationContext,
   ): Promise<Map<string, MachineMetrics>> {
     const workOrderIds = [...new Set(machines.flatMap((machine) => machine.activeWorkOrder ? [machine.activeWorkOrder.id] : []))];
-    const calculations = new Map(await Promise.all(workOrderIds.map(async (workOrderId) => [
-      workOrderId,
-      await this.calculation.calculate({ tenantId, ...context, workOrderId }),
-    ] as const)));
+    if (workOrderIds.length === 0) return new Map();
+    const calculations = await this.calculation.calculateForWorkOrders({ tenantId, ...context }, workOrderIds);
 
     return new Map(machines.map((machine) => {
       const report = machine.activeWorkOrder ? calculations.get(machine.activeWorkOrder.id) : undefined;

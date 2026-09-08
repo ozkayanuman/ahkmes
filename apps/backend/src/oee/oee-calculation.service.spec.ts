@@ -129,6 +129,35 @@ describe("calculateOeeFromCanonicalSources", () => {
 });
 
 describe("OeeCalculationService", () => {
+  it("loads multiple work-order projections from one snapshot without repeating source reads", async () => {
+    const at = (value: string) => new Date(value);
+    const tx = {
+      workOrder: { findMany: jest.fn().mockResolvedValue([
+        { id: "wo-1", plannedStartDate: at("2026-08-26T08:00:00.000Z"), plannedEndDate: at("2026-08-26T12:00:00.000Z"), operations: [{ id: "op-1", idealCycleTimeSec: 60 }] },
+        { id: "wo-2", plannedStartDate: at("2026-08-26T08:00:00.000Z"), plannedEndDate: at("2026-08-26T12:00:00.000Z"), operations: [{ id: "op-2", idealCycleTimeSec: 60 }] },
+      ]) },
+      productionExecutionEvent: { findMany: jest.fn().mockResolvedValue([]) },
+      productionReport: { findMany: jest.fn().mockResolvedValue([]) },
+      downtimeEvent: { findMany: jest.fn().mockResolvedValue([]) },
+      qualityHold: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const prisma = { $transaction: jest.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)) };
+    const calendar = { shiftWindowsForProductionDate: jest.fn().mockResolvedValue([{
+      id: "shift-1", start: at("2026-08-26T08:00:00.000Z"), end: at("2026-08-26T12:00:00.000Z"), breaks: [],
+    }]) };
+    const service = new OeeCalculationService(prisma as never, calendar as never);
+    const request = { tenantId: "tenant-1", plantId: "plant-1", from: at("2026-08-26T08:00:00.000Z"), to: at("2026-08-26T12:00:00.000Z"), asOf: at("2026-08-26T12:00:00.000Z") };
+
+    const result = await service.calculateForWorkOrders(request, ["wo-1", "wo-2"]);
+
+    expect([...result.keys()]).toEqual(["wo-1", "wo-2"]);
+    expect(tx.workOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: { in: ["wo-1", "wo-2"] } }) }));
+    expect(tx.productionExecutionEvent.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.productionReport.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.downtimeEvent.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.qualityHold.findMany).toHaveBeenCalledTimes(1);
+  });
+
   it("loads canonical plan, calendar, execution and report facts inside one repeatable-read snapshot", async () => {
     const at = (value: string) => new Date(value);
     const tx = {

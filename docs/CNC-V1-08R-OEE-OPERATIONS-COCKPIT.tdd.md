@@ -65,6 +65,7 @@ or release behavior is claimed until its corresponding GREEN evidence is recorde
 | Task | GREEN evidence | Status |
 |---|---|---|
 | Digital Twin canonical OEE | `digital-twin.service.spec.ts` proves explicit context, canonical work-order calculation and duplicate-work-order de-duplication; controller metadata requires `OEE_READ`. | GREEN (focused) |
+| Batched machine OEE projections | `OeeCalculationService.calculateForWorkOrders()` loads selected work orders, execution events, reports, downtime and quality holds once in one `REPEATABLE READ` snapshot, then derives each work-order projection in memory. Cockpit and Digital Twin both consume this batch path; focused backend run: 3 suites / 16 tests PASS. | GREEN (focused) |
 | OEE authorization | `action-permissions.service.spec.ts`, `oee.controller.spec.ts` and `downtime.controller.spec.ts` prove `OEE_READ` and `OEE_LOSS_REASON_ADMIN` metadata. The focused backend run passed 6 suites / 13 tests. | GREEN (focused) |
 | Cockpit read API | `oee-cockpit.service.spec.ts` proves tenant/plant canonical summary plus optional CMMS, quality and MRP blocker facts, without inventing time loss. | GREEN (unit) |
 | Cockpit UI | `oee-cockpit.test.tsx` covers explicit plant/time request and unavailable-vs-zero rendering; web typecheck passes. | GREEN (focused) |

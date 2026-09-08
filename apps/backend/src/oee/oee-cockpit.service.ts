@@ -47,10 +47,7 @@ export class OeeCockpitService {
       ids.push(machine.id);
       machineByWorkOrder.set(machine.activeWorkOrder.id, ids);
     }
-    const byWorkOrder = new Map(await Promise.all([...machineByWorkOrder.keys()].map(async (workOrderId) => [
-      workOrderId,
-      await this.calculation.calculate({ ...request, workOrderId }),
-    ] as const)));
+    const byWorkOrder = await this.calculation.calculateForWorkOrders(request, [...machineByWorkOrder.keys()]);
 
     const maintenanceByMachine = groupIds(maintenanceOrders, (item) => item.machineId);
     return {

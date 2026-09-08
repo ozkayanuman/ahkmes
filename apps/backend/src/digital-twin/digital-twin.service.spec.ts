@@ -13,6 +13,9 @@ function buildService(overrides: any = {}) {
     calculate: jest.fn().mockResolvedValue({
       metrics: { facts: { goodCount: 8, scrapCount: 2 }, oee: { value: 0.64 } },
     }),
+    calculateForWorkOrders: jest.fn().mockResolvedValue(new Map([["wo-1", {
+      metrics: { facts: { goodCount: 8, scrapCount: 2 }, oee: { value: 0.64 } },
+    }]])),
   };
   const service = new DigitalTwinService(prisma as any, calculation as any);
   return { service, prisma, calculation };
@@ -38,7 +41,7 @@ describe("DigitalTwinService.layout", () => {
     const machine = result.machines[0] as unknown as { runtimeHours: number; goodCountToday: number; scrapCountToday: number; energyTodayKwh: number; openAlarmCount: number; oeeToday: number | null };
 
     expect(machine).toMatchObject({ runtimeHours: 150.5, goodCountToday: 8, scrapCountToday: 2, energyTodayKwh: 12.5, openAlarmCount: 2, oeeToday: 0.64 });
-    expect(calculation.calculate).toHaveBeenCalledWith({ tenantId: "t1", ...context, workOrderId: "wo-1" });
+    expect(calculation.calculateForWorkOrders).toHaveBeenCalledWith({ tenantId: "t1", ...context }, ["wo-1"]);
   });
 
   it("keeps zero counts distinct from unavailable OEE when a machine has no active work order", async () => {
@@ -49,7 +52,7 @@ describe("DigitalTwinService.layout", () => {
 
     const result = await service.layout("t1", context);
     expect(result.machines[0]).toMatchObject({ oeeToday: null, goodCountToday: 0, scrapCountToday: 0, energyTodayKwh: 0, openAlarmCount: 0 });
-    expect(calculation.calculate).not.toHaveBeenCalled();
+    expect(calculation.calculateForWorkOrders).not.toHaveBeenCalled();
   });
 
   it("calculates a shared active work order only once", async () => {
@@ -59,7 +62,7 @@ describe("DigitalTwinService.layout", () => {
     })));
 
     await service.layout("t1", context);
-    expect(calculation.calculate).toHaveBeenCalledTimes(1);
+    expect(calculation.calculateForWorkOrders).toHaveBeenCalledTimes(1);
   });
 
   it("does not issue dependent queries when the plant has no machines", async () => {
