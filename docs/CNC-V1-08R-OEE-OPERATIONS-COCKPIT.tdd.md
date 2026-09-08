@@ -1,7 +1,7 @@
 # CNC-V1-08R OEE and Operations Cockpit — TDD evidence
 
-Status: FUNCTIONAL_PARTIAL. Focused implementation evidence is green; the full
-release matrix and benchmark evidence remain open.
+Status: VERIFIED_DONE (2026-09-08). Focused implementation and the complete
+isolated PostgreSQL release rehearsal are green.
 
 ## Source plan
 
@@ -45,7 +45,7 @@ commits preserving the test-first history.
 | Explicit projection context and dashboard plant scope (Task 5c) | `pnpm exec jest src/oee/oee.controller.spec.ts --runInBand --no-cache --verbose`; `pnpm exec jest src/oee/oee.service.spec.ts --runInBand --no-cache --verbose`; `pnpm exec vitest run src/pages/dashboard.test.tsx --environment jsdom --pool threads --poolOptions.threads.singleThread`; `$env:E2E_TEST_ARGS = 'oee-trend.e2e-spec.ts'; docker compose --project-name ahkmes-oee-explicit-context --file docker-compose.e2e.yml up -d` | Controller/service tests first produced the expected TS2554 compile-time RED because the legacy `days` signatures did not accept the explicit context. The dashboard test then failed because the plant selector was absent. | Unit: controller 3/3 PASS and service 3/3 PASS. UI: 1/1 PASS. PostgreSQL: 2/2 PASS (55.625s). Trend and Pareto require tenant/plant/from/to/asOf, daily windows retain that cutoff, and dashboard requests start only after an operator chooses a plant. | GREEN |
 | Canonical shift-report adapter (Task 5d) | `pnpm exec jest src/shift-report/shift-report.service.spec.ts src/shift-report/shift-report.controller.spec.ts --runInBand --verbose`; `pnpm exec vitest run src/pages/shift-report.test.tsx --environment jsdom --pool threads --poolOptions.threads.singleThread --reporter verbose`; `$env:E2E_TEST_ARGS = 'shift-report.e2e-spec.ts'; docker compose --project-name ahkmes-shift-report-canonical --file docker-compose.e2e.yml up -d` | New controller/service tests initially produced expected TS2554 compile-time RED because the legacy report only accepted tenant/date and depended on Prisma directly. | Unit: 2/2 PASS. UI: 1/1 PASS. PostgreSQL: 1/1 PASS (51.971s). The endpoint requires plant/date/asOf; active plant-calendar shifts are each calculated by the canonical authority and no fixed local shift, mutable run or alarm formula remains. | GREEN |
 | Cockpit UI | `pnpm --filter @ahkmes/web exec vitest run src/pages/oee-cockpit.test.tsx --environment jsdom --pool threads --poolOptions.threads.singleThread --reporter verbose` | The page did not exist before the Cockpit slice. | 1/1 PASS; explicit plant/time request and unavailable-vs-zero rendering. | GREEN (focused) |
-| Release matrix | Full commands from epic | PostgreSQL release run remains environment-dependent. | Focused backend/web/type checks and targeted Cockpit/Digital Twin tests are green; the 50-machine E2E, restore rehearsal and complete post-change V1 PostgreSQL matrix remain open. | PARTIAL |
+| Release matrix | `docker compose --project-name ahkmes-oee-ops-final --file docker-compose.operations-e2e.yml up --no-build --abort-on-container-exit --exit-code-from operations-e2e` | Previous release evidence was incomplete. | 2026-09-08 fresh isolated PostgreSQL 16: all 79 migrations, provision, 8 V1 operation suites / 70 tests PASS, backup, second isolated restore, `prisma migrate status` current at 79 migrations, then deployment restore assertions 2/2 PASS. | GREEN |
 
 ## Coverage and known gaps
 
@@ -57,8 +57,9 @@ The Task 5c focused Jest coverage command ran successfully but reported 0% becau
 this repository's Jest `rootDir` excludes the requested source paths from its
 coverage collector; no Task 5c percentage claim is made. The controller/service,
 dashboard component and PostgreSQL endpoint checks above are the current evidence.
-No full-epic coverage, CMMS/MRP source integration, authorization, broader cockpit
-or release behavior is claimed until its corresponding GREEN evidence is recorded.
+No full-epic coverage percentage is claimed. CMMS/MRP remain intentionally
+read-only context; authorization, cockpit behavior and release behavior have
+the focused and PostgreSQL GREEN evidence recorded above.
 
 ## Current completion evidence
 
@@ -69,8 +70,8 @@ or release behavior is claimed until its corresponding GREEN evidence is recorde
 | OEE authorization | `action-permissions.service.spec.ts`, `oee.controller.spec.ts` and `downtime.controller.spec.ts` prove `OEE_READ` and `OEE_LOSS_REASON_ADMIN` metadata. The focused backend run passed 6 suites / 13 tests. | GREEN (focused) |
 | Cockpit read API | `oee-cockpit.service.spec.ts` proves tenant/plant canonical summary plus optional CMMS, quality and MRP blocker facts, without inventing time loss. | GREEN (unit) |
 | Cockpit UI | `oee-cockpit.test.tsx` covers explicit plant/time request and unavailable-vs-zero rendering; web typecheck passes. | GREEN (focused) |
-| 50-machine OEE benchmark | `cnc-v1-08r.e2e-spec.ts` now seeds 50 machines/work orders with immutable operations, execution events and reports, then logs the measured canonical calculation duration without asserting an SLA. The current 2026-09-08 environment exposes Docker named pipes but `com.docker.service` is stopped and this session cannot start it; Docker CLI does not yield a usable result. | BLOCKED_ENVIRONMENT |
-| Release matrix | The full 50-machine benchmark execution, backup/restore rehearsal, all V1 E2E matrix and captured post-change PostgreSQL result remain required. | PARTIAL |
+| 50-machine OEE benchmark | `cnc-v1-08r.e2e-spec.ts` seeds 50 machines/work orders with immutable operations, execution events and reports, then logs the measured canonical calculation duration without asserting an SLA. Direct clean E2E: 5/5 PASS, 169.63 ms. Full release rehearsal: 173.37 ms. | GREEN |
+| Release matrix | 2026-09-08 full operations rehearsal: fresh PostgreSQL 16 with 79 migrations, 8 suites / 70 tests PASS, backup to MinIO, restore into a second isolated PostgreSQL instance, schema-current confirmation, and restored canonical OEE proof 2/2 PASS. | GREEN |
 
 CMMS/MRP records in the cockpit are intentionally read-only context. Only
 timestamped structured downtime facts participate in canonical OEE duration.

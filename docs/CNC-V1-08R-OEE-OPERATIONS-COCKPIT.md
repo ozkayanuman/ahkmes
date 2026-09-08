@@ -1,6 +1,6 @@
 # CNC-V1-08R — Trustworthy OEE and Operations Cockpit
 
-Status: FUNCTIONAL_PARTIAL
+Status: VERIFIED_DONE (2026-09-08)
 Architectural decision: one canonical, on-demand calculation core; no persisted OEE snapshots.
 
 ## Takeover audit
@@ -172,3 +172,15 @@ the twenty explicitly identified high-risk cases, tenant/plant isolation,
 consistent snapshots, optional CMMS/controller operation and non-mutation of
 CMMS/QMS/MRP facts. Actual RED/GREEN and release evidence is recorded in the
 companion TDD document.
+
+## Release verification
+
+On 2026-09-08 the release rehearsal built a fresh isolated PostgreSQL 16
+environment with all 79 migrations, provisioned its tenant, and passed the
+complete V1 operations matrix: 8 suites / 70 tests. The included fifty-machine
+canonical OEE projection completed in 173.37 ms. The same run then created a
+backup, restored it into a second isolated PostgreSQL instance, confirmed that
+the restored schema was current at 79 migrations, and passed 2/2 restore
+assertions. The additional restored-data assertion proves that immutable OEE
+source evidence survives the backup and that the canonical calculation still
+returns the expected result. This is release evidence, not a production SLO.

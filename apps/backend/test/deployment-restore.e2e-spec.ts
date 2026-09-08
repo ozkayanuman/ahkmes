@@ -2,17 +2,20 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
+import { OeeCalculationService } from "../src/oee/oee-calculation.service";
 import { PrismaService } from "../src/prisma/prisma.service";
 
 describe("CNC-V1-00 restored deployment verification", () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let calculation: OeeCalculationService;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
     prisma = app.get(PrismaService);
+    calculation = app.get(OeeCalculationService);
   });
   afterAll(async () => app.close());
 
@@ -66,5 +69,33 @@ describe("CNC-V1-00 restored deployment verification", () => {
     expect(controllerObservation).toBeTruthy();
     expect(controllerObservation!.machine.tenantId).toBe(controllerObservation!.tenantId);
     expect((await request(app.getHttpServer()).get("/health/ready").expect(200)).body).toEqual(expect.objectContaining({ status: "ok" }));
+  });
+
+  it("preserves canonical OEE source evidence and recalculates it after isolated restore", async () => {
+    const workOrder = await prisma.workOrder.findFirst({
+      where: { woNo: { startsWith: "OEE-WO-" } },
+      select: { tenantId: true, plantId: true, id: true },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(workOrder).toBeTruthy();
+    const plantId = workOrder!.plantId;
+    if (!plantId) throw new Error("Restored canonical OEE work order has no plant");
+
+    const result = await calculation.calculate({
+      tenantId: workOrder!.tenantId,
+      plantId,
+      workOrderId: workOrder!.id,
+      from: new Date("2026-08-26T05:00:00.000Z"),
+      to: new Date("2026-08-26T09:00:00.000Z"),
+      asOf: new Date("2026-08-26T09:00:00.000Z"),
+    });
+
+    expect(await prisma.productionExecutionEvent.count({ where: { workOrderId: workOrder!.id } })).toBeGreaterThanOrEqual(4);
+    expect(await prisma.productionReport.count({ where: { workOrderId: workOrder!.id } })).toBeGreaterThanOrEqual(3);
+    expect(await prisma.downtimeEvent.count({ where: { workOrderId: workOrder!.id, reason: { lossCategory: "UNPLANNED_BREAKDOWN" } } })).toBe(1);
+    expect(await prisma.qualityHold.count({ where: { workOrderId: workOrder!.id } })).toBe(1);
+    expect(result.metrics.facts.goodCount).toBe(700);
+    expect(result.timeline.durationByBucket.UNPLANNED_BREAKDOWN).toBe(30 * 60);
+    expect(result.timeline.durationByBucket.QUALITY_HOLD).toBe(15 * 60);
   });
 });
