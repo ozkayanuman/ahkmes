@@ -54,6 +54,13 @@ import { ReportsPage } from "./pages/reports";
 import { PermissionGroupsPage } from "./pages/permission-groups";
 import { PageGuard } from "./components/page-guard";
 import { LaunchpadPage } from "./pages/launchpad";
+import { CopilotPage } from "./pages/copilot";
+import { PlatformModulesPage } from "./pages/platform-modules";
+import { ToolingPage } from "./pages/tooling";
+import { HmiOperationsPage } from "./pages/hmi-operations";
+import { EngineeringMasterDataPage } from "./pages/engineering-master-data";
+import { ProductionStandardsPage } from "./pages/production-standards";
+import { OeeCockpitPage } from "./pages/oee-cockpit";
 
 export function App() {
   return (
@@ -64,6 +71,7 @@ export function App() {
       <Route path="/andon" element={<AndonPage />} />
       <Route element={<AppLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/copilot" element={<PageGuard page="copilot"><CopilotPage /></PageGuard>} />
         <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
         <Route path="/leads" element={<PageGuard page="leads"><LeadsPage /></PageGuard>} />
         <Route path="/service-tickets" element={<PageGuard page="service-tickets"><ServiceTicketsPage /></PageGuard>} />
@@ -105,6 +113,8 @@ export function App() {
           }
         />
         <Route path="/production" element={<PageGuard page="production"><ProductionPage /></PageGuard>} />
+        <Route path="/hmi/operations" element={<PageGuard page="hmi-operations"><HmiOperationsPage /></PageGuard>} />
+        <Route path="/tooling" element={<PageGuard page="tooling"><ToolingPage /></PageGuard>} />
         <Route path="/parts" element={<PageGuard page="parts"><PartsPage /></PageGuard>} />
         <Route path="/suppliers" element={<PageGuard page="suppliers"><SuppliersPage /></PageGuard>} />
         <Route path="/materials" element={<PageGuard page="materials"><MaterialsPage /></PageGuard>} />
@@ -128,6 +138,8 @@ export function App() {
         <Route path="/maintenance-orders" element={<PageGuard page="maintenance-orders"><MaintenanceOrdersPage /></PageGuard>} />
         <Route path="/energy" element={<PageGuard page="energy"><EnergyPage /></PageGuard>} />
         <Route path="/recipes" element={<PageGuard page="recipes"><RecipesPage /></PageGuard>} />
+        <Route path="/engineering-master-data" element={<PageGuard page="recipes"><EngineeringMasterDataPage /></PageGuard>} />
+        <Route path="/production-standards" element={<PageGuard page="hierarchy"><ProductionStandardsPage /></PageGuard>} />
         <Route path="/spc" element={<PageGuard page="spc"><SpcPage /></PageGuard>} />
         <Route path="/alarms" element={<PageGuard page="alarms"><AlarmsPage /></PageGuard>} />
         <Route path="/ar" element={<PageGuard page="ar"><ArPage /></PageGuard>} />
@@ -157,9 +169,11 @@ export function App() {
         <Route path="/users" element={<UsersPage />} />
         <Route path="/permission-groups" element={<PermissionGroupsPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
+        <Route path="/platform/modules" element={<PageGuard page="platform-modules"><PlatformModulesPage /></PageGuard>} />
         <Route path="/reports" element={<PageGuard page="reports"><ReportsPage /></PageGuard>} />
         <Route path="/webhooks" element={<PageGuard page="webhooks"><WebhooksPage /></PageGuard>} />
         <Route path="/shift-report" element={<PageGuard page="shift-report"><ShiftReportPage /></PageGuard>} />
+        <Route path="/oee-cockpit" element={<PageGuard page="shift-report"><OeeCockpitPage /></PageGuard>} />
         <Route path="/labor" element={<PageGuard page="labor"><LaborPage /></PageGuard>} />
       </Route>
     </Routes>

@@ -16,6 +16,8 @@ interface MachineOption {
   name: string;
   connectorType: ConnectorType;
   connectorConfig: Record<string, unknown> | null;
+  controllerVerificationRequired: boolean;
+  controllerFreshnessSeconds: number;
 }
 
 const CONNECTOR_LABEL: Record<ConnectorType, string> = {
@@ -32,14 +34,18 @@ function ConnectionSettingsCard({ machine }: { machine: MachineOption }) {
   const [config, setConfig] = useState<Record<string, string>>(
     (machine.connectorConfig as Record<string, string>) ?? {},
   );
+  const [controllerVerificationRequired, setControllerVerificationRequired] = useState(machine.controllerVerificationRequired);
+  const [controllerFreshnessSeconds, setControllerFreshnessSeconds] = useState(String(machine.controllerFreshnessSeconds));
 
   useEffect(() => {
     setConnectorType(machine.connectorType);
     setConfig((machine.connectorConfig as Record<string, string>) ?? {});
+    setControllerVerificationRequired(machine.controllerVerificationRequired);
+    setControllerFreshnessSeconds(String(machine.controllerFreshnessSeconds));
   }, [machine.id, machine.connectorType, machine.connectorConfig]);
 
   const save = useMutation({
-    mutationFn: () => apiPatch(`/machines/${machine.id}`, { connectorType, connectorConfig: config }),
+    mutationFn: () => apiPatch(`/machines/${machine.id}`, { connectorType, connectorConfig: config, controllerVerificationRequired, controllerFreshnessSeconds: Number(controllerFreshnessSeconds) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/machines"] }),
     onError: () => toast("Bağlantı ayarları kaydedilemedi", "error"),
   });
@@ -90,6 +96,10 @@ function ConnectionSettingsCard({ machine }: { machine: MachineOption }) {
               />
             </div>
             <div>
+              <Label htmlFor="programIdentityAddress">Program identity address</Label>
+              <Input id="programIdentityAddress" placeholder="section:subSection:char" value={config.programIdentityAddress ?? ""} onChange={(e) => setConfig((c) => ({ ...c, programIdentityAddress: e.target.value }))} />
+            </div>
+            <div>
               <Label htmlFor="port">Port</Label>
               <Input
                 id="port"
@@ -101,6 +111,7 @@ function ConnectionSettingsCard({ machine }: { machine: MachineOption }) {
           </>
         )}
       </div>
+      {connectorType === "M80" && <div className="mt-4 grid gap-3 rounded border border-amber-200 bg-amber-50 p-3 md:grid-cols-2"><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={controllerVerificationRequired} onChange={(e) => setControllerVerificationRequired(e.target.checked)} /> Require fresh controller NC identity before MES start/resume</label><div><Label htmlFor="controllerFreshnessSeconds">Freshness seconds</Label><Input id="controllerFreshnessSeconds" type="number" min="5" max="3600" value={controllerFreshnessSeconds} onChange={(e) => setControllerFreshnessSeconds(e.target.value)} /></div><p className="text-xs text-amber-900 md:col-span-2">Enable only after the read-only controller variable has been field validated. Program checksum/content readback is not supported by the M80 adapter.</p></div>}
       <div className="mt-3 flex justify-end">
         <Button disabled={save.isPending} onClick={() => save.mutate()}>
           Kaydet

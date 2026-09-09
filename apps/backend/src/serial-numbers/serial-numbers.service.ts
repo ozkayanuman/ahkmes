@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
+import { Lot, Prisma } from "@prisma/client";
 import type { CreateSerialNumberDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -42,10 +42,13 @@ export class SerialNumbersService {
     }
   }
 
+  private static readonly MAX_TRACE_DEPTH = 10;
+
   /**
    * Lot'un backward-trace'iyle aynı desen (bkz. lots.service.ts): seri numarası
    * hep bir "mamul birimi" olduğundan sadece geri izlenebilirlik anlamlı — bu
-   * birimi üreten iş emri + o iş emrinin tükettiği malzeme lotları.
+   * birimi üreten iş emri + o iş emrinin tükettiği lotlar. Faz K 3: tüketilen bir
+   * PART lotu kendi backward zincirine recursive iner (alt montajın alt montajı).
    */
   async trace(tenantId: string, id: string) {
     const serial = await this.findOne(tenantId, id);
@@ -58,13 +61,71 @@ export class SerialNumbersService {
         woNo: true,
         status: true,
         part: { select: { id: true, partNo: true, name: true } },
+        // Faz K: itemType/itemId polimorfik — isim çözümlemesi frontend'de yapılır.
         consumptions: {
           where: { lotId: { not: null } },
-          include: { material: { select: { id: true, code: true, name: true } }, lot: true },
+          include: { lot: true },
         },
       },
     });
-    return { serial, producedByWorkOrder: workOrder };
+    if (!workOrder) return { serial, producedByWorkOrder: null };
+
+    const consumptions = await Promise.all(
+      workOrder.consumptions.map(async (c) => ({
+        ...c,
+        backward:
+          c.lot && c.lot.itemType === "PART"
+            ? await this.traceBackward(tenantId, c.lot, 1, new Set([c.lot.id]))
+            : null,
+      })),
+    );
+    return { serial, producedByWorkOrder: { ...workOrder, consumptions } };
+  }
+
+  /** lots.service.ts'teki traceBackward ile aynı desen (kasıtlı olarak modüller
+   * arası bağımlılık kurulmadı — her iki servis de bu izlenebilirlik akışını
+   * kendi başına, tek bir Prisma sorgu zincirinden yürütür). */
+  private async traceBackward(
+    tenantId: string,
+    lot: Lot,
+    depth: number,
+    visited: Set<string>,
+  ): Promise<{ producedByWorkOrders: unknown[] }> {
+    if (depth >= SerialNumbersService.MAX_TRACE_DEPTH) return { producedByWorkOrders: [] };
+
+    const finishedEntries = await this.prisma.finishedGoodsEntry.findMany({
+      where: { tenantId, lotId: lot.id },
+      include: {
+        workOrder: {
+          select: {
+            id: true,
+            woNo: true,
+            status: true,
+            consumptions: {
+              where: { lotId: { not: null } },
+              include: { lot: true },
+            },
+          },
+        },
+      },
+    });
+
+    const producedByWorkOrders = await Promise.all(
+      finishedEntries.map(async (e) => ({
+        entry: { id: e.id, quantity: e.quantity, date: e.date },
+        workOrder: { id: e.workOrder.id, woNo: e.workOrder.woNo, status: e.workOrder.status },
+        consumedLots: await Promise.all(
+          e.workOrder.consumptions.map(async (c) => ({
+            ...c,
+            backward:
+              c.lot && c.lot.itemType === "PART" && !visited.has(c.lot.id)
+                ? await this.traceBackward(tenantId, c.lot, depth + 1, new Set(visited).add(c.lot.id))
+                : null,
+          })),
+        ),
+      })),
+    );
+    return { producedByWorkOrders };
   }
 
   /** Barkod/QR tarama ile arama — lots.service.ts scanByCode ile aynı desen. */

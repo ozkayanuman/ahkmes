@@ -11,9 +11,9 @@ function buildService(overrides: any = {}) {
     ...overrides,
   };
   prisma.$transaction = jest.fn((cb: any) => cb(prisma));
-  const realtime = { emitToTenant: jest.fn() };
-  const service = new ApService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const outbox = { record: jest.fn() };
+  const service = new ApService(prisma as any, outbox as any);
+  return { service, prisma, outbox };
 }
 
 describe("ApService.createInvoice", () => {

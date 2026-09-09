@@ -35,6 +35,11 @@ export class MinioService implements OnModuleInit {
     if (!exists) await this.client.makeBucket(this.bucket);
   }
 
+  /** A non-mutating dependency check used by the backend readiness endpoint. */
+  async isReady(): Promise<boolean> {
+    return this.client.bucketExists(this.bucket).catch(() => false);
+  }
+
   putObject(storageKey: string, buffer: Buffer, mimeType: string) {
     return this.client.putObject(this.bucket, storageKey, buffer, buffer.length, {
       "Content-Type": mimeType,

@@ -1,13 +1,14 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { PurchaseOrderStatus } from "@prisma/client";
+import { InventoryMovementType, Prisma, PurchaseOrderStatus } from "@prisma/client";
 import type {
   CreatePurchaseOrderDto,
   ReceivePurchaseOrderDto,
   UpdatePurchaseOrderDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
+import { InventoryService } from "../inventory/inventory.service";
 
 // RECEIVED durumuna sadece receive endpoint'i geçirir
 const TRANSITIONS: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
@@ -21,7 +22,9 @@ const PO_INCLUDE = {
   supplier: { select: { id: true, name: true } },
   lines: {
     include: {
-      material: { select: { id: true, code: true, name: true, unit: true, stockQty: true } },
+      material: {
+        select: { id: true, code: true, name: true, unit: true, stockQty: true, lotTrackingRequired: true },
+      },
     },
     orderBy: { createdAt: "asc" as const },
   },
@@ -31,7 +34,8 @@ const PO_INCLUDE = {
 export class PurchasingService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: PurchaseOrderStatus, q?: string) {
@@ -63,44 +67,38 @@ export class PurchasingService {
   }
 
   async create(tenantId: string, userId: string, dto: CreatePurchaseOrderDto) {
-    const supplier = await this.prisma.supplier.findFirst({
-      where: { id: dto.supplierId, tenantId },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const po = await this.createInTransaction(tx, tenantId, userId, dto);
+      await this.outbox.record(tx, tenantId, "purchaseorder", po.id, "purchaseorder.updated", { id: po.id });
+      return po;
     });
+    return created;
+  }
+
+  /** MRP gibi üst command'lerin PO ve karar kayıtlarını aynı transaction'a alması için. */
+  async createInTransaction(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    userId: string,
+    dto: CreatePurchaseOrderDto,
+  ) {
+    const supplier = await tx.supplier.findFirst({ where: { id: dto.supplierId, tenantId } });
     if (!supplier) throw new NotFoundException("Tedarikçi bulunamadı");
     const materialIds = dto.lines.map((l) => l.materialId);
-    const materials = await this.prisma.material.findMany({
-      where: { id: { in: materialIds }, tenantId },
-    });
+    const materials = await tx.material.findMany({ where: { id: { in: materialIds }, tenantId } });
     if (materials.length !== new Set(materialIds).size) {
       throw new NotFoundException("Malzeme bulunamadı");
     }
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const poNo = await nextDocNo(tx, "purchaseOrder", "poNo", "SAT");
-      return tx.purchaseOrder.create({
-        data: {
-          tenantId,
-          poNo,
-          supplierId: dto.supplierId,
-          currency: dto.currency,
-          orderDate: dto.orderDate,
-          expectedDate: dto.expectedDate,
-          notes: dto.notes,
-          createdById: userId,
-          lines: {
-            create: dto.lines.map((l) => ({
-              tenantId,
-              materialId: l.materialId,
-              quantity: l.quantity,
-              unitPrice: l.unitPrice,
-            })),
-          },
-        },
-        include: PO_INCLUDE,
-      });
+    const poNo = await nextDocNo(tx, "purchaseOrder", "poNo", "SAT");
+    return tx.purchaseOrder.create({
+      data: {
+        tenantId, poNo, supplierId: dto.supplierId, currency: dto.currency, orderDate: dto.orderDate,
+        expectedDate: dto.expectedDate, notes: dto.notes, createdById: userId,
+        lines: { create: dto.lines.map((l) => ({ tenantId, materialId: l.materialId, quantity: l.quantity, unitPrice: l.unitPrice })) },
+      },
+      include: PO_INCLUDE,
     });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id: created.id });
-    return created;
   }
 
   async update(tenantId: string, id: string, dto: UpdatePurchaseOrderDto) {
@@ -108,12 +106,15 @@ export class PurchasingService {
     if (po.status === "RECEIVED" || po.status === "CANCELLED") {
       throw new ConflictException("Tamamlanmış/iptal edilmiş sipariş düzenlenemez");
     }
-    const updated = await this.prisma.purchaseOrder.update({
-      where: { id },
-      data: dto,
-      include: PO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.purchaseOrder.update({
+        where: { id },
+        data: dto,
+        include: PO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id });
     return updated;
   }
 
@@ -125,24 +126,33 @@ export class PurchasingService {
     if (status === "CANCELLED" && po.lines.some((l) => Number(l.receivedQty) > 0)) {
       throw new ConflictException("Kısmi teslim alınmış sipariş iptal edilemez");
     }
-    const updated = await this.prisma.purchaseOrder.update({
-      where: { id },
-      data: { status },
-      include: PO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.purchaseOrder.update({
+        where: { id },
+        data: { status },
+        include: PO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id, status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id, status });
     return updated;
   }
 
   /**
-   * Satır bazlı teslim alma: receivedQty artar, Material.stockQty aynı
-   * transaction'da artar; tüm satırlar tamamsa PO RECEIVED olur.
+   * Satır bazlı teslim alma: immutable hareket, bin bakiyesi ve toplam stok
+   * projeksiyonu aynı transaction'da güncellenir; tüm satırlar tamamsa PO RECEIVED olur.
    */
-  async receive(tenantId: string, id: string, dto: ReceivePurchaseOrderDto) {
+  async receive(tenantId: string, userId: string, id: string, dto: ReceivePurchaseOrderDto) {
     const updated = await this.prisma.$transaction(async (tx) => {
       const po = await tx.purchaseOrder.findFirst({
         where: { id, tenantId },
-        include: { lines: true },
+        include: {
+          lines: {
+            include: {
+              material: { select: { id: true, code: true, lotTrackingRequired: true } },
+            },
+          },
+        },
       });
       if (!po) throw new NotFoundException("Satınalma emri bulunamadı");
       if (po.status !== "ORDERED" && po.status !== "IN_TRANSIT") {
@@ -158,13 +168,34 @@ export class PurchasingService {
             `Fazla teslim reddedildi: sipariş ${Number(line.quantity)}, toplam teslim ${newReceived}`,
           );
         }
+        if (line.material.lotTrackingRequired && !item.lotId) {
+          throw new ConflictException(`Lot takibi zorunlu ${line.material.code} malzemesi için lot seçimi gerekir`);
+        }
+        if (item.lotId) {
+          const lot = await tx.lot.findFirst({
+            where: { id: item.lotId, tenantId, itemType: "MATERIAL", itemId: line.materialId },
+          });
+          if (!lot) throw new NotFoundException("Lot bulunamadı veya sipariş malzemesine ait değil");
+          if (lot.acceptanceStatus !== "ACCEPTED") {
+            throw new ConflictException("Satın alma tesliminde sadece kabul edilmiş malzeme lotu stoğa alınabilir");
+          }
+        }
         await tx.purchaseOrderLine.update({
           where: { id: line.id },
           data: { receivedQty: { increment: item.receivedQty } },
         });
-        await tx.material.update({
-          where: { id: line.materialId },
-          data: { stockQty: { increment: item.receivedQty } },
+        await this.inventory.record(tx, {
+          tenantId,
+          itemType: "MATERIAL",
+          itemId: line.materialId,
+          quantityDelta: item.receivedQty,
+          movementType: InventoryMovementType.PURCHASE_RECEIPT,
+          sourceType: "PURCHASE_ORDER",
+          sourceId: po.id,
+          sourceLineId: line.id,
+          binId: item.binId,
+          lotId: item.lotId,
+          createdById: userId,
         });
       }
 
@@ -172,17 +203,18 @@ export class PurchasingService {
         where: { purchaseOrderId: id },
       });
       const allReceived = freshLines.every((l) => Number(l.receivedQty) >= Number(l.quantity));
-      return tx.purchaseOrder.update({
+      const result = await tx.purchaseOrder.update({
         where: { id },
         data: allReceived ? { status: "RECEIVED" } : {},
         include: PO_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "stock.updated", {
+        lineIds: dto.lines.map((l) => l.lineId),
+      });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id, status: result.status });
+      return result;
     });
 
-    this.realtime.emitToTenant(tenantId, "stock.updated", {
-      lineIds: dto.lines.map((l) => l.lineId),
-    });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id, status: updated.status });
     return updated;
   }
 
@@ -191,8 +223,11 @@ export class PurchasingService {
     if (po.status === "RECEIVED" || po.lines.some((l) => Number(l.receivedQty) > 0)) {
       throw new ConflictException("Teslim alınmış sipariş silinemez");
     }
-    const deleted = await this.prisma.purchaseOrder.delete({ where: { id } });
-    this.realtime.emitToTenant(tenantId, "purchaseorder.updated", { id, deleted: true });
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      const removed = await tx.purchaseOrder.delete({ where: { id } });
+      await this.outbox.record(tx, tenantId, "purchaseorder", id, "purchaseorder.updated", { id, deleted: true });
+      return removed;
+    });
     return deleted;
   }
 }

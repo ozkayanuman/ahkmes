@@ -8,6 +8,16 @@ interface WorkOrderOption {
   id: string;
   woNo: string;
 }
+interface MaterialOption {
+  id: string;
+  code: string;
+  name: string;
+}
+interface PartOption {
+  id: string;
+  partNo: string;
+  name: string;
+}
 
 interface GenealogyData {
   workOrder: { id: string; woNo: string; status: string; quantity: string };
@@ -17,10 +27,11 @@ interface GenealogyData {
   backward: {
     materialsConsumed: {
       id: string;
+      itemType: "MATERIAL" | "PART";
+      itemId: string;
       type: string;
       quantity: string;
       date: string;
-      material: { code: string; name: string };
     }[];
   };
   forward: {
@@ -76,6 +87,14 @@ export function GenealogyPage() {
     queryKey: ["/work-orders"],
     queryFn: () => apiGet<WorkOrderOption[]>("/work-orders"),
   });
+  const materialOptions = useQuery({
+    queryKey: ["/materials"],
+    queryFn: () => apiGet<MaterialOption[]>("/materials"),
+  });
+  const partOptions = useQuery({
+    queryKey: ["/parts"],
+    queryFn: () => apiGet<PartOption[]>("/parts"),
+  });
 
   const genealogy = useQuery({
     queryKey: ["/work-orders", workOrderId, "genealogy"],
@@ -84,6 +103,16 @@ export function GenealogyPage() {
   });
 
   const g = genealogy.data;
+  const materialById = new Map((materialOptions.data ?? []).map((m) => [m.id, m]));
+  const partById = new Map((partOptions.data ?? []).map((p) => [p.id, p]));
+  function itemLabel(c: { itemType: "MATERIAL" | "PART"; itemId: string }) {
+    if (c.itemType === "MATERIAL") {
+      const m = materialById.get(c.itemId);
+      return m ? `${m.code} — ${m.name}` : c.itemId;
+    }
+    const p = partById.get(c.itemId);
+    return p ? `${p.partNo} — ${p.name}` : c.itemId;
+  }
 
   const materials = g?.backward.materialsConsumed ?? [];
   const runs = g?.forward.productionRuns ?? [];
@@ -158,8 +187,7 @@ export function GenealogyPage() {
           )}
           {materials.map((c, i) => (
             <NodeBox key={c.id} x={COL_X.material} y={materialY(i)} w={NODE_W} className="border-amber-200 bg-amber-50">
-              <div className="font-semibold text-slate-700">{c.material.code}</div>
-              <div className="text-slate-500">{c.material.name}</div>
+              <div className="font-semibold text-slate-700">{itemLabel(c)}</div>
               <div className="mt-0.5 text-slate-400">
                 {fmtQty(c.quantity)} · {c.type === "CONSUMED" ? "tüketildi" : "rezerve"}
               </div>

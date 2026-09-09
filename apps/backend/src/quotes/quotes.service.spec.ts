@@ -9,11 +9,11 @@ function buildService(overrides: any = {}) {
     $transaction: jest.fn(),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const salesOrders = { createFromQuote: jest.fn().mockResolvedValue({ id: "so1", soNo: "SIP-2026-0001" }) };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new QuotesService(prisma as any, realtime as any, salesOrders as any);
-  return { service, prisma, realtime, salesOrders };
+  const service = new QuotesService(prisma as any, salesOrders as any, outbox as any);
+  return { service, prisma, outbox, salesOrders };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,7 +48,7 @@ describe("QuotesService.convert", () => {
   });
 
   it("SalesOrder üretir ve zaten dönüştürülmüş satırları skippedLineIds'e koyar", async () => {
-    const { service, prisma, salesOrders, realtime } = buildService();
+    const { service, prisma, salesOrders } = buildService();
     prisma.quote.findFirst.mockResolvedValue(
       quoteFixture({
         lines: [
@@ -84,7 +84,6 @@ describe("QuotesService.convert", () => {
     );
     expect(result.salesOrder.id).toBe("so1");
     expect(result.skippedLineIds).toEqual(["l2"]);
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "salesorder.updated", { id: "so1" });
   });
 
   it("tüm satırlar zaten dönüştürülmüşse hata fırlatır ve SalesOrder üretilmez", async () => {

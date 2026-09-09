@@ -1,0 +1,5 @@
+-- CreateEnum
+CREATE TYPE "ProductEdition" AS ENUM ('FOUNDATION', 'ESSENTIALS', 'PROFESSIONAL', 'ENTERPRISE');
+
+-- AlterTable
+ALTER TABLE "Tenant" ADD COLUMN "edition" "ProductEdition" NOT NULL DEFAULT 'ENTERPRISE';

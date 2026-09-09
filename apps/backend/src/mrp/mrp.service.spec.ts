@@ -4,6 +4,8 @@ import { MrpService } from "./mrp.service";
 function buildPrismaMock(overrides: any = {}) {
   return {
     workOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    machine: { findMany: jest.fn().mockResolvedValue([]) },
+    workOrderOperation: { findMany: jest.fn().mockResolvedValue([]) },
     material: { findMany: jest.fn().mockResolvedValue([]) },
     partStock: { findMany: jest.fn().mockResolvedValue([]) },
     bomHeader: { findMany: jest.fn().mockResolvedValue([]) },
@@ -38,19 +40,24 @@ function buildTxMock() {
 }
 
 function buildService(prisma: ReturnType<typeof buildPrismaMock>) {
-  const realtime = { emitToTenant: jest.fn() };
+  if (!prisma.$transaction.getMockImplementation()) prisma.$transaction.mockImplementation((cb: (tx: typeof prisma) => unknown) => cb(prisma));
+  const outbox = { record: jest.fn() };
   const notifications = { notifyRoles: jest.fn().mockResolvedValue(undefined) };
   const approvals = {
     request: jest.fn().mockResolvedValue({ id: "ar1" }),
     approve: jest.fn().mockResolvedValue({}),
     reject: jest.fn().mockResolvedValue({}),
+    notifyDecision: jest.fn().mockResolvedValue(undefined),
   };
-  const purchasing = { create: jest.fn().mockResolvedValue({ id: "po1" }) };
-  const workOrders = { create: jest.fn().mockResolvedValue({ id: "wo-new" }) };
+  const purchasing = { create: jest.fn().mockResolvedValue({ id: "po1" }), createInTransaction: jest.fn().mockResolvedValue({ id: "po1" }) };
+  const workOrders = { create: jest.fn().mockResolvedValue({ id: "wo-new" }), createInTransaction: jest.fn().mockResolvedValue({ id: "wo-new" }) };
+  const auth = {
+    reauthenticate: jest.fn().mockResolvedValue({ userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") }),
+  };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new MrpService(prisma as any, realtime as any, notifications as any, approvals as any, purchasing as any, workOrders as any);
-  return { service, prisma, realtime, notifications, approvals, purchasing, workOrders };
+  const service = new MrpService(prisma as any, notifications as any, approvals as any, purchasing as any, workOrders as any, auth as any, outbox as any);
+  return { service, prisma, outbox, notifications, approvals, purchasing, workOrders, auth };
 }
 
 describe("MrpService.run", () => {
@@ -63,7 +70,7 @@ describe("MrpService.run", () => {
       material: { findMany: jest.fn().mockResolvedValue([{ id: "m1", stockQty: "5", minStock: null }]) },
       bomHeader: {
         findMany: jest.fn().mockResolvedValue([
-          { id: "bom1", partId: "p1", lines: [{ materialId: "m1", qtyPer: "2", scrapPct: null }] },
+          { id: "bom1", partId: "p1", lines: [{ itemType: "MATERIAL", itemId: "m1", qtyPer: "2", scrapPct: null }] },
         ]),
       },
       $transaction: jest.fn((cb) => cb(tx)),
@@ -145,6 +152,55 @@ describe("MrpService.run", () => {
     expect(result.productionProposals).toEqual([]);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it("Çok seviyeli BOM: alt montaj ihtiyacı kendi stoğuna karşı netlenir ve altındaki malzemeye kadar recursive patlar", async () => {
+    const tx = buildTxMock();
+    const prisma = buildPrismaMock({
+      workOrder: {
+        findMany: jest.fn().mockResolvedValue([{ id: "wo1", partId: "a", quantity: "5", dueDate: new Date("2026-08-01") }]),
+      },
+      material: { findMany: jest.fn().mockResolvedValue([{ id: "m1", stockQty: "1", minStock: null }]) },
+      partStock: { findMany: jest.fn().mockResolvedValue([{ partId: "sub1", qty: "3" }]) },
+      bomHeader: {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        findMany: jest.fn().mockImplementation(({ where }: any) => {
+          const ids: string[] = where.partId.in;
+          const boms = [];
+          if (ids.includes("a")) {
+            boms.push({ id: "bom-a", partId: "a", lines: [{ itemType: "PART", itemId: "sub1", qtyPer: "2", scrapPct: null }] });
+          }
+          if (ids.includes("sub1")) {
+            boms.push({ id: "bom-sub1", partId: "sub1", lines: [{ itemType: "MATERIAL", itemId: "m1", qtyPer: "3", scrapPct: null }] });
+          }
+          return Promise.resolve(boms);
+        }),
+      },
+      $transaction: jest.fn((cb) => cb(tx)),
+    });
+    const { service } = buildService(prisma);
+
+    const result = await service.run("t1", "u1");
+
+    // Alt montaj (sub1) brüt ihtiyacı = 5(WO) * 2(qtyPer) = 10; kendi stoğu 3 → net shortfall 7
+    // → yeni bir üretim önerisi olarak kaydedilir (onaylanınca WorkOrder'a dönüşecek).
+    expect(tx.productionProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ partId: "sub1", qty: 7 }) }),
+    );
+    // sub1'in kendi BOM'u SADECE net shortfall (7) kadar patlatılır: 7*3(qtyPer)=21 m1 ihtiyacı;
+    // m1 stoğu 1 → net satınalma ihtiyacı 20.
+    expect(tx.purchaseProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lines: { create: [expect.objectContaining({ materialId: "m1", qty: 20 })] },
+        }),
+      }),
+    );
+    // Üst parça "a" için PartStock yok → mevcut (LLC=0) davranış: WO'nun tam miktarı üretim önerisi.
+    expect(tx.productionProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ partId: "a", qty: 5 }) }),
+    );
+    expect(result.productionProposals).toHaveLength(2);
+  });
 });
 
 describe("MrpService.decidePurchaseProposal", () => {
@@ -169,10 +225,14 @@ describe("MrpService.decidePurchaseProposal", () => {
     });
     const { service, approvals, purchasing } = buildService(prisma);
 
-    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, "sup1");
+    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, "sup1", "Sifre123!");
 
-    expect(approvals.approve).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", undefined);
-    expect(purchasing.create).toHaveBeenCalledWith(
+    expect(approvals.approve).toHaveBeenCalledWith(
+      "t1", "ar1", "u1", "PLANNER", undefined, prisma, false,
+      { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
+    );
+    expect(purchasing.createInTransaction).toHaveBeenCalledWith(
+      prisma,
       "t1",
       "u1",
       expect.objectContaining({
@@ -194,8 +254,8 @@ describe("MrpService.decidePurchaseProposal", () => {
     });
     const { service, purchasing } = buildService(prisma);
 
-    await expect(service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve")).rejects.toThrow();
-    expect(purchasing.create).not.toHaveBeenCalled();
+    await expect(service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "approve", undefined, undefined, "Sifre123!")).rejects.toThrow();
+    expect(purchasing.createInTransaction).not.toHaveBeenCalled();
   });
 
   it("reject: öneri reddedilir, PurchaseOrder oluşturulmaz", async () => {
@@ -208,10 +268,13 @@ describe("MrpService.decidePurchaseProposal", () => {
     });
     const { service, approvals, purchasing } = buildService(prisma);
 
-    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "reject", "uygun değil");
+    const updated = await service.decidePurchaseProposal("t1", "pp1", "u1", "PLANNER", "reject", "uygun değil", undefined, "Sifre123!");
 
-    expect(approvals.reject).toHaveBeenCalledWith("t1", "ar1", "u1", "PLANNER", "uygun değil");
-    expect(purchasing.create).not.toHaveBeenCalled();
+    expect(approvals.reject).toHaveBeenCalledWith(
+      "t1", "ar1", "u1", "PLANNER", "uygun değil", prisma, false,
+      { userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") },
+    );
+    expect(purchasing.createInTransaction).not.toHaveBeenCalled();
     expect(updated.status).toBe("REJECTED");
   });
 });
@@ -228,14 +291,37 @@ describe("MrpService.decideProductionProposal", () => {
     });
     const { service, workOrders } = buildService(prisma);
 
-    const updated = await service.decideProductionProposal("t1", "prp1", "u1", "PLANNER", "approve");
+    const updated = await service.decideProductionProposal("t1", "prp1", "u1", "PLANNER", "approve", undefined, "Sifre123!");
 
-    expect(workOrders.create).toHaveBeenCalledWith("t1", {
+    expect(workOrders.createInTransaction).toHaveBeenCalledWith(prisma, "t1", {
       partId: "p1",
       quantity: 10,
       dueDate: proposal.dueDate,
       priority: 5,
     });
     expect(updated.status).toBe("CONVERTED");
+  });
+});
+
+describe("MrpService.capacityReadiness", () => {
+  it("atanmamış ve bloke operasyonları finite schedule uydurmadan görünür kılar", async () => {
+    const dueDate = new Date("2026-08-15T00:00:00.000Z");
+    const prisma = buildPrismaMock({
+      machine: { findMany: jest.fn().mockResolvedValue([{ id: "m1", name: "MCV-5500" }]) },
+      workOrderOperation: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: "op1", name: "Kaba işleme", seq: 10, status: "PENDING", machineId: "m1", workOrder: { id: "wo1", woNo: "WO-1", dueDate, priority: 4 } },
+          { id: "op2", name: "Final kontrol", seq: 20, status: "BLOCKED", machineId: null, workOrder: { id: "wo1", woNo: "WO-1", dueDate, priority: 4 } },
+        ]),
+      },
+    });
+    const { service } = buildService(prisma);
+
+    const result = await service.capacityReadiness("t1");
+
+    expect(result.readyForFiniteScheduling).toBe(false);
+    expect(result.summary).toMatchObject({ activeOperationCount: 2, assignedOperationCount: 1, unassignedOperationCount: 1, blockedOperationCount: 1 });
+    expect(result.machines[0]).toMatchObject({ id: "m1", operationCount: 1, workOrderCount: 1 });
+    expect(result.unassignedOperations[0]).toMatchObject({ id: "op2", status: "BLOCKED" });
   });
 });

@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import type { CreateSpcCharacteristicDto, CreateSpcMeasurementDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { NonConformanceService } from "../non-conformance/non-conformance.service";
 
 const CHAR_INCLUDE = {
@@ -23,8 +23,8 @@ const MEASUREMENT_INCLUDE = {
 export class SpcService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly nonConformance: NonConformanceService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findCharacteristics(tenantId: string, partId?: string) {
@@ -77,17 +77,24 @@ export class SpcService {
     const lsl = characteristic.lslLower ? new Prisma.Decimal(characteristic.lslLower) : null;
     const inSpec = usl === null && lsl === null ? null : (usl === null || value.lte(usl)) && (lsl === null || value.gte(lsl));
 
-    const created = await this.prisma.spcMeasurement.create({
-      data: {
-        tenantId,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const measurement = await tx.spcMeasurement.create({
+        data: {
+          tenantId,
+          characteristicId: dto.characteristicId,
+          workOrderId: dto.workOrderId,
+          value,
+          inSpec,
+          measuredById: userId,
+          measuredAt: dto.measuredAt ?? new Date(),
+        },
+        include: MEASUREMENT_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "spc", measurement.id, "spc.measurement.created", {
         characteristicId: dto.characteristicId,
-        workOrderId: dto.workOrderId,
-        value,
         inSpec,
-        measuredById: userId,
-        measuredAt: dto.measuredAt ?? new Date(),
-      },
-      include: MEASUREMENT_INCLUDE,
+      });
+      return measurement;
     });
 
     if (inSpec === false && dto.workOrderId) {
@@ -99,10 +106,6 @@ export class SpcService {
       });
     }
 
-    this.realtime.emitToTenant(tenantId, "spc.measurement.created", {
-      characteristicId: dto.characteristicId,
-      inSpec,
-    });
     return created;
   }
 

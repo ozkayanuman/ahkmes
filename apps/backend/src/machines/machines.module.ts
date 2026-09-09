@@ -3,10 +3,13 @@ import { MachinesController, MachineTelemetryController } from "./machines.contr
 import { MachinesService } from "./machines.service";
 import { MachineKeyGuard } from "../common/guards/machine-key.guard";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { DowntimeModule } from "../downtime/downtime.module";
+import { MachineMaintenanceAvailabilityService } from "./machine-maintenance-availability.service";
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, DowntimeModule],
   controllers: [MachinesController, MachineTelemetryController],
-  providers: [MachinesService, MachineKeyGuard],
+  providers: [MachinesService, MachineKeyGuard, MachineMaintenanceAvailabilityService],
+  exports: [MachineMaintenanceAvailabilityService],
 })
 export class MachinesModule {}

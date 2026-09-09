@@ -7,10 +7,19 @@ import { useAuth } from "../lib/auth";
 import { fmtDate, fmtMoney, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { PO_STATUS, StatusBadge } from "../components/status";
-import { Button, Card, Input, Table } from "../components/ui";
+import { Button, Card, Input, Select, Table } from "../components/ui";
 import { useConfirm } from "../components/confirm-dialog";
 import { useToast } from "../components/toast";
 import type { PoRow } from "./purchase-orders";
+
+interface BinOption { id: string; code: string; warehouse: { name: string } }
+interface LotOption {
+  id: string;
+  lotNo: string;
+  itemType: "MATERIAL" | "PART";
+  itemId: string;
+  acceptanceStatus: "PENDING" | "ACCEPTED" | "QUARANTINED" | "REJECTED";
+}
 
 export function PurchaseOrderDetailPage() {
   const { id = "" } = useParams();
@@ -22,12 +31,24 @@ export function PurchaseOrderDetailPage() {
 
   // satır id -> teslim alınacak miktar (input değeri)
   const [receiveQty, setReceiveQty] = useState<Record<string, string>>({});
+  const [receiveLotId, setReceiveLotId] = useState<Record<string, string>>({});
+  const [receiveBinId, setReceiveBinId] = useState("");
 
   useInvalidateOn(["purchaseorder.updated", "stock.updated"], ["/purchase-orders", "/materials"]);
 
   const query = useQuery({
     queryKey: ["/purchase-orders", id],
     queryFn: () => apiGet<PoRow>(`/purchase-orders/${id}`),
+  });
+  const bins = useQuery({
+    queryKey: ["/bins"],
+    queryFn: () => apiGet<BinOption[]>("/bins"),
+    enabled: canReceive,
+  });
+  const lots = useQuery({
+    queryKey: ["/lots", "MATERIAL"],
+    queryFn: () => apiGet<LotOption[]>("/lots?itemType=MATERIAL"),
+    enabled: canReceive,
   });
 
   const toast = useToast();
@@ -52,12 +73,19 @@ export function PurchaseOrderDetailPage() {
     mutationFn: () => {
       const lines = Object.entries(receiveQty)
         .filter(([, v]) => Number(v) > 0)
-        .map(([lineId, v]) => ({ lineId, receivedQty: Number(v) }));
+        .map(([lineId, v]) => ({
+          lineId,
+          receivedQty: Number(v),
+          ...(receiveBinId ? { binId: receiveBinId } : {}),
+          ...(receiveLotId[lineId] ? { lotId: receiveLotId[lineId] } : {}),
+        }));
       return apiPost(`/purchase-orders/${id}/receive`, { lines });
     },
     onSuccess: () => {
       invalidate();
       setReceiveQty({});
+      setReceiveLotId({});
+      setReceiveBinId("");
     },
     onError,
   });
@@ -153,6 +181,15 @@ export function PurchaseOrderDetailPage() {
           </Button>
         )}
       </div>
+      {canReceive && receivable && (
+        <div className="mb-3 max-w-sm">
+          <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="receiveBin">Teslim alma rafı</label>
+          <Select id="receiveBin" value={receiveBinId} onChange={(e) => setReceiveBinId(e.target.value)}>
+            <option value="">Atanmamış stok</option>
+            {(Array.isArray(bins.data) ? bins.data : []).map((b) => <option key={b.id} value={b.id}>{b.warehouse.name} / {b.code}</option>)}
+          </Select>
+        </div>
+      )}
       <Table
         headers={[
           "Malzeme",
@@ -161,7 +198,7 @@ export function PurchaseOrderDetailPage() {
           "Teslim Alınan",
           "Kalan",
           "Stok",
-          ...(canReceive && receivable ? ["Teslim Miktarı"] : []),
+          ...(canReceive && receivable ? ["Lot", "Teslim Miktarı"] : []),
         ]}
       >
         {po.lines.map((l) => {
@@ -178,6 +215,27 @@ export function PurchaseOrderDetailPage() {
               <td className="px-4 py-3">{fmtQty(l.receivedQty)}</td>
               <td className="px-4 py-3">{fmtQty(remaining)}</td>
               <td className="px-4 py-3">{fmtQty(l.material.stockQty)}</td>
+              {canReceive && receivable && (
+                <td className="px-4 py-3">
+                  <Select
+                    className="min-w-40"
+                    disabled={remaining <= 0}
+                    value={receiveLotId[l.id] ?? ""}
+                    onChange={(e) => setReceiveLotId({ ...receiveLotId, [l.id]: e.target.value })}
+                  >
+                    <option value="">
+                      {l.material.lotTrackingRequired ? "Lot zorunlu" : "Lotsuz teslim"}
+                    </option>
+                    {(Array.isArray(lots.data) ? lots.data : [])
+                      .filter((lot) => lot.itemId === l.material.id)
+                      .map((lot) => (
+                        <option key={lot.id} value={lot.id} disabled={lot.acceptanceStatus !== "ACCEPTED"}>
+                          {lot.lotNo} ({lot.acceptanceStatus === "ACCEPTED" ? "Kabul" : lot.acceptanceStatus})
+                        </option>
+                      ))}
+                  </Select>
+                </td>
+              )}
               {canReceive && receivable && (
                 <td className="px-4 py-3">
                   <Input

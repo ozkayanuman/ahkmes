@@ -200,6 +200,7 @@ export function MachinesPage() {
           { name: "isActive", label: "Aktif", type: "checkbox" },
           { name: "pmIntervalHours", label: "Öngörülü Bakım Aralığı (saat)", type: "number" },
           { name: "hourlyRate", label: "Saatlik Makine Maliyeti", type: "number" },
+          { name: "dailyCapacityMinutes", label: "Günlük Kapasite (dakika)", type: "number" },
         ]}
         rowActions={(row) => (
           <div className="flex gap-1">

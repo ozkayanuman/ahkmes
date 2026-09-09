@@ -1,9 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma, SalesOrderStatus } from "@prisma/client";
-import type { ReleaseSalesOrderDto } from "@ahkmes/shared-types";
+import type { AssignSalesOrderFulfillmentPlantDto, ReleaseSalesOrderDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
+import { WorkOrdersService } from "../work-orders/work-orders.service";
 
 // OPEN → CLOSED | CANCELLED; CLOSED/CANCELLED terminal
 const TRANSITIONS: Record<SalesOrderStatus, SalesOrderStatus[]> = {
@@ -14,6 +15,7 @@ const TRANSITIONS: Record<SalesOrderStatus, SalesOrderStatus[]> = {
 
 const LINE_INCLUDE = {
   part: { select: { id: true, partNo: true, revision: true, name: true } },
+  fulfillmentPlant: { select: { id: true, name: true, code: true } },
   workOrders: { select: { id: true, woNo: true, status: true } },
 } as const;
 
@@ -37,7 +39,8 @@ interface QuoteLineForConversion {
 export class SalesOrdersService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly workOrders: WorkOrdersService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: SalesOrderStatus, q?: string) {
@@ -75,7 +78,7 @@ export class SalesOrdersService {
   ) {
     return this.prisma.$transaction(async (tx) => {
       const soNo = await nextDocNo(tx, "salesOrder", "soNo", "SIP");
-      return tx.salesOrder.create({
+      const salesOrder = await tx.salesOrder.create({
         data: {
           tenantId,
           soNo,
@@ -97,6 +100,8 @@ export class SalesOrdersService {
         },
         include: SO_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "salesorder", salesOrder.id, "salesorder.updated", { id: salesOrder.id });
+      return salesOrder;
     });
   }
 
@@ -108,13 +113,48 @@ export class SalesOrdersService {
     if (status === "CANCELLED" && so.lines.some((l) => Number(l.shippedQty) > 0)) {
       throw new ConflictException("Kısmen sevk edilmiş sipariş iptal edilemez");
     }
-    const updated = await this.prisma.salesOrder.update({
-      where: { id },
-      data: { status },
-      include: SO_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.salesOrder.update({
+        where: { id },
+        data: { status },
+        include: SO_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "salesorder", id, "salesorder.updated", { id, status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id, status });
     return updated;
+  }
+
+  /**
+   * Assigns the one explicit V1 planning/fulfillment plant owned by a sales
+   * line. Assignment is idempotent but cannot be silently moved to a different
+   * plant after it becomes plannable.
+   */
+  async assignFulfillmentPlant(
+    tenantId: string,
+    userId: string,
+    salesOrderId: string,
+    lineId: string,
+    dto: AssignSalesOrderFulfillmentPlantDto,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const plant = await tx.plant.findFirst({ where: { id: dto.plantId, tenantId }, select: { id: true } });
+      if (!plant) throw new NotFoundException("Plant was not found");
+      await tx.$queryRaw`SELECT "id" FROM "SalesOrderLine" WHERE "id" = ${lineId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      const line = await tx.salesOrderLine.findFirst({
+        where: { id: lineId, tenantId, salesOrderId },
+        include: { salesOrder: { select: { status: true } }, workOrders: { select: { id: true } } },
+      });
+      if (!line) throw new NotFoundException("Sales order line was not found");
+      if (line.salesOrder.status !== "OPEN") throw new ConflictException("Only an OPEN sales order line can receive a fulfillment plant");
+      if (line.workOrders.length) throw new ConflictException("A sales line with a work order can no longer change fulfillment provenance");
+      if (line.fulfillmentPlantId === dto.plantId) return line;
+      if (line.fulfillmentPlantId) throw new ConflictException("Sales order line fulfillment plant is already assigned");
+      const updated = await tx.salesOrderLine.update({ where: { id: line.id }, data: { fulfillmentPlantId: dto.plantId } });
+      await tx.auditLog.create({ data: { tenantId, userId, entity: "sales-order-line", entityId: line.id, action: "UPDATE", before: { fulfillmentPlantId: null, planningStatus: "NEEDS_PLANT_ASSIGNMENT" }, after: { fulfillmentPlantId: dto.plantId, planningStatus: "PLANNABLE" } } });
+      await this.outbox.record(tx, tenantId, "salesorder", salesOrderId, "salesorder.updated", { id: salesOrderId, lineId, fulfillmentPlantId: dto.plantId });
+      return updated;
+    });
   }
 
   /** Seçilen (veya tüm) SalesOrderLine'ları üretime alır — her satırdan (henüz
@@ -133,28 +173,28 @@ export class SalesOrdersService {
     if (releasable.length === 0) {
       throw new ConflictException("Seçilen satırlar zaten üretime alınmış");
     }
+    const unassigned = releasable.filter((line) => !line.fulfillmentPlantId);
+    if (unassigned.length) throw new ConflictException("Sales order lines need an explicit fulfillment plant before production release");
 
     const workOrders = await this.prisma.$transaction(async (tx) => {
       const created = [];
       for (const line of releasable) {
+        const remainingQuantity = new Prisma.Decimal(line.quantity).sub(line.shippedQty);
+        if (remainingQuantity.lte(0)) continue;
         const woNo = await nextDocNo(tx, "workOrder", "woNo", "IE");
-        created.push(
-          await tx.workOrder.create({
-            data: {
-              tenantId,
-              woNo,
-              salesOrderLineId: line.id,
-              partId: line.part.id,
-              quantity: line.quantity,
-              dueDate: line.dueDate,
-            },
-          }),
-        );
+        created.push(await this.workOrders.createWithRoute(tx, tenantId, {
+          woNo,
+          salesOrderLineId: line.id,
+          partId: line.part.id,
+          plantId: line.fulfillmentPlantId!,
+          quantity: remainingQuantity,
+          dueDate: line.dueDate,
+        }));
       }
+      await this.outbox.record(tx, tenantId, "salesorder", id, "workorder.updated", { ids: created.map((w) => w.id) });
       return created;
     });
 
-    this.realtime.emitToTenant(tenantId, "workorder.updated", { ids: workOrders.map((w) => w.id) });
     return {
       workOrders,
       skippedLineIds: targetLines.filter((l) => l.workOrders.length > 0).map((l) => l.id),

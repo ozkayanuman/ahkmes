@@ -1,5 +1,5 @@
 import net from "node:net";
-import type { MachineAdapter, MachineEvent, TagReading } from "./adapter.interface";
+import type { ControllerConnectionState, ControllerObservation, MachineAdapter, MachineEvent, TagReading } from "./adapter.interface";
 import {
   DataType,
   decodeCharValue,
@@ -28,11 +28,17 @@ export interface M80AdapterConfig {
   port: number;
   systemNo?: number;
   pollIntervalMs?: number;
+  /** Okuma bağlantısı beklenmedik biçimde kapanırsa yeniden bağlanma gecikmesi. */
+  reconnectDelayMs?: number;
   /** Section/subSection numaraları placeholder'dır — gerçek M80 "Custom API Variables
    * List" dokümanı (BNP-C3072-xxx) netleşince buradan (veya config'den) güncellenmeli. */
   cycleStatusItem?: M80ItemAddress;
   partCountItem?: M80ItemAddress;
   alarmMessageItem?: M80ItemAddress;
+  /** Explicit Custom API program variable. It is absent until the customer
+   * supplies a controller-specific read-only address. */
+  programIdentityItem?: M80ItemAddress;
+  requestTimeoutMs?: number;
   /** Automation Gateway: web'de tanımlanan, elle girilen tag listesi — M80'de
    * otomatik keşif yok (Custom API Variables List elimizde olmadığı için). */
   tags?: M80TagConfig[];
@@ -41,6 +47,7 @@ export interface M80AdapterConfig {
 const DEFAULTS = {
   systemNo: 1,
   pollIntervalMs: 500,
+  reconnectDelayMs: 2_000,
   cycleStatusItem: DEFAULT_ITEM_ADDRESSES.cycleStatus,
   partCountItem: DEFAULT_ITEM_ADDRESSES.partCount,
   alarmMessageItem: DEFAULT_ITEM_ADDRESSES.alarmMessage,
@@ -63,6 +70,8 @@ const ALARM = 2;
 export class M80Adapter implements MachineAdapter {
   private socket: net.Socket | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopped = false;
   private listeners: ((event: MachineEvent) => void)[] = [];
   private recvBuffer = Buffer.alloc(0);
   private nextRequestId = 1;
@@ -74,33 +83,59 @@ export class M80Adapter implements MachineAdapter {
 
   private readonly systemNo: number;
   private readonly pollIntervalMs: number;
+  private readonly reconnectDelayMs: number;
   private readonly cycleStatusItem: M80ItemAddress;
   private readonly partCountItem: M80ItemAddress;
   private readonly alarmMessageItem: M80ItemAddress;
+  private readonly programIdentityItem: M80ItemAddress | undefined;
+  private readonly requestTimeoutMs: number;
+  private connectionGeneration = 0;
+  private connectionListeners: ((state: ControllerConnectionState, detail?: string) => void)[] = [];
 
   constructor(private readonly config: M80AdapterConfig) {
     this.systemNo = config.systemNo ?? DEFAULTS.systemNo;
     this.pollIntervalMs = config.pollIntervalMs ?? DEFAULTS.pollIntervalMs;
+    this.reconnectDelayMs = config.reconnectDelayMs ?? DEFAULTS.reconnectDelayMs;
     this.cycleStatusItem = config.cycleStatusItem ?? DEFAULTS.cycleStatusItem;
     this.partCountItem = config.partCountItem ?? DEFAULTS.partCountItem;
     this.alarmMessageItem = config.alarmMessageItem ?? DEFAULTS.alarmMessageItem;
+    this.programIdentityItem = config.programIdentityItem;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? 3_000;
   }
 
   async connect(): Promise<void> {
+    this.stopped = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.connectionChanged("CONNECTING");
+    await this.openSocket();
+    this.startPolling();
+  }
+
+  private async openSocket(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       const socket = net.createConnection({ host: this.config.host, port: this.config.port });
-      socket.once("connect", () => resolve());
+      socket.once("connect", () => { this.connectionGeneration += 1; this.connectionChanged("ONLINE"); resolve(); });
       socket.once("error", (err) => reject(err));
       socket.on("data", (chunk) => this.onData(chunk));
+      // İlk bağlantı hatası `once` dinleyicisiyle connect() çağrısına döner;
+      // sonraki socket hataları ise close olayıyla kontrollü reconnect'e gider.
+      socket.on("error", () => undefined);
+      socket.on("close", () => this.handleSocketClosed(socket));
       this.socket = socket;
     });
+  }
 
+  private startPolling() {
     this.pollTimer = setInterval(() => void this.poll(), this.pollIntervalMs);
   }
 
   async disconnect(): Promise<void> {
+    this.stopped = true;
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = null;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     for (const { reject } of this.pending.values()) reject(new Error("Bağlantı kapatıldı"));
     this.pending.clear();
     await new Promise<void>((resolve) => {
@@ -108,10 +143,45 @@ export class M80Adapter implements MachineAdapter {
       this.socket.end(() => resolve());
     }).catch(() => undefined);
     this.socket = null;
+    this.connectionChanged("OFFLINE", "connector stopped");
+  }
+
+  private handleSocketClosed(socket: net.Socket) {
+    if (this.socket !== socket) return;
+    this.socket = null;
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
+    for (const { reject } of this.pending.values()) reject(new Error("M80 bağlantısı kesildi"));
+    this.pending.clear();
+    this.connectionChanged("OFFLINE", "socket closed");
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect() {
+    if (this.stopped || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.reconnect();
+    }, this.reconnectDelayMs);
+  }
+
+  private async reconnect() {
+    if (this.stopped || this.socket) return;
+    try {
+      await this.openSocket();
+      this.startPolling();
+    } catch {
+      this.socket = null;
+      this.scheduleReconnect();
+    }
   }
 
   onEvent(cb: (event: MachineEvent) => void): void {
     this.listeners.push(cb);
+  }
+
+  onConnectionState(cb: (state: ControllerConnectionState, detail?: string) => void): void {
+    this.connectionListeners.push(cb);
   }
 
   /** Automation Gateway: sadece config'de elle tanımlı tag'leri okur (keşif yok). */
@@ -131,9 +201,61 @@ export class M80Adapter implements MachineAdapter {
     return readings;
   }
 
+  async readControllerObservation(): Promise<ControllerObservation> {
+    if (!this.socket) return this.observation("OFFLINE", "OFFLINE", { error: "socket-not-connected" });
+    try {
+      const reads: Promise<Buffer>[] = [
+        this.readItem(this.cycleStatusItem, DataType.LONG),
+        this.readItem(this.partCountItem, DataType.LONG),
+        this.readItem(this.alarmMessageItem, DataType.CHAR),
+      ];
+      if (this.programIdentityItem) reads.push(this.readItem(this.programIdentityItem, DataType.CHAR));
+      const [cycleStatusRaw, partCountRaw, alarmMessageRaw, programRaw] = await Promise.all(reads);
+      const cycleStatus = decodeLongValue(cycleStatusRaw);
+      const partCounter = decodeLongValue(partCountRaw);
+      const alarmText = decodeCharValue(alarmMessageRaw) || null;
+      const activeProgramIdentity = programRaw ? decodeCharValue(programRaw).trim() || null : null;
+      const machineState = cycleStatus === RUNNING ? "RUNNING" : cycleStatus === ALARM ? "ALARM" : cycleStatus === IDLE ? "IDLE" : "UNKNOWN";
+      return this.observation("ONLINE", machineState, { cycleStatus, partCounter, alarmText, activeProgramIdentity });
+    } catch (error) {
+      return this.observation("DEGRADED", "UNKNOWN", { error: error instanceof Error ? error.message : "M80 read failed" });
+    }
+  }
+
   private emit(type: MachineEvent["type"], payload?: Record<string, unknown>) {
     const event: MachineEvent = { type, timestamp: new Date().toISOString(), payload };
     for (const cb of this.listeners) cb(event);
+  }
+
+  private observation(connectionState: ControllerObservation["connectionState"], machineState: ControllerObservation["machineState"], raw: Record<string, unknown>): ControllerObservation {
+    return {
+      connectionState,
+      machineState,
+      trustLevel: "OBSERVED",
+      connectionGeneration: this.connectionGeneration,
+      activeProgramIdentity: typeof raw.activeProgramIdentity === "string" ? raw.activeProgramIdentity : null,
+      alarmText: typeof raw.alarmText === "string" ? raw.alarmText : null,
+      partCounter: typeof raw.partCounter === "number" ? raw.partCounter : null,
+      capabilities: {
+        CONNECTIVITY: true,
+        MACHINE_STATE_READ: true,
+        CYCLE_STATE_READ: true,
+        ALARM_READ: true,
+        PART_COUNTER_READ: true,
+        ACTIVE_PROGRAM_IDENTITY_READ: Boolean(this.programIdentityItem),
+        PROGRAM_CONTENT_READ: false,
+        PROGRAM_CHECKSUM_READ: false,
+        FEED_OVERRIDE_READ: false,
+        SPINDLE_STATE_READ: false,
+        PROGRAM_TRANSFER: false,
+        REMOTE_START: false,
+      },
+      raw,
+    };
+  }
+
+  private connectionChanged(state: ControllerConnectionState, detail?: string) {
+    for (const listener of this.connectionListeners) listener(state, detail);
   }
 
   private onData(chunk: Buffer) {
@@ -169,10 +291,17 @@ export class M80Adapter implements MachineAdapter {
     });
 
     return new Promise<Buffer>((resolve, reject) => {
-      this.pending.set(requestId, { resolve, reject });
+      const timeout = setTimeout(() => {
+        if (this.pending.delete(requestId)) reject(new Error("M80 read timeout"));
+      }, this.requestTimeoutMs);
+      this.pending.set(requestId, {
+        resolve: (data) => { clearTimeout(timeout); resolve(data); },
+        reject: (error) => { clearTimeout(timeout); reject(error); },
+      });
       this.socket?.write(frame, (err) => {
         if (err) {
           this.pending.delete(requestId);
+          clearTimeout(timeout);
           reject(err);
         }
       });
@@ -181,15 +310,12 @@ export class M80Adapter implements MachineAdapter {
 
   private async poll(): Promise<void> {
     try {
-      const [cycleStatusRaw, partCountRaw, alarmMessageRaw] = await Promise.all([
-        this.readItem(this.cycleStatusItem, DataType.LONG),
-        this.readItem(this.partCountItem, DataType.LONG),
-        this.readItem(this.alarmMessageItem, DataType.CHAR),
-      ]);
-
-      this.onAlarmMessageChanged(decodeCharValue(alarmMessageRaw));
-      this.onPartCountChanged(decodeLongValue(partCountRaw));
-      this.onCycleStatusChanged(decodeLongValue(cycleStatusRaw));
+      const observation = await this.readControllerObservation();
+      if (observation.connectionState !== "ONLINE") return;
+      const raw = observation.raw ?? {};
+      this.onAlarmMessageChanged(String(raw.alarmText ?? ""));
+      this.onPartCountChanged(Number(raw.partCounter));
+      this.onCycleStatusChanged(Number(raw.cycleStatus));
     } catch {
       // Tek bir poll turu başarısız olursa bir sonraki interval'da tekrar denenir;
       // `Connector` katmanı zaten backend'e giden event'ler için retry uyguluyor.

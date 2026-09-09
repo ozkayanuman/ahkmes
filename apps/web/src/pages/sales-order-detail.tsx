@@ -7,7 +7,7 @@ import { useAuth } from "../lib/auth";
 import { fmtDate, fmtMoney, fmtQty } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { SALES_ORDER_STATUS, StatusBadge } from "../components/status";
-import { Button, Card, Input, Modal, Table } from "../components/ui";
+import { Button, Card, Input, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
 
 interface SalesOrderLine {
@@ -43,6 +43,7 @@ interface InvoiceRow {
   lines: { id: string; qty: string; unitPrice: string; salesOrderLine: { id: string; part: { partNo: string } } }[];
 }
 type LineQty = Record<string, string>;
+interface BinOption { id: string; code: string; warehouse: { name: string } }
 
 export function SalesOrderDetailPage() {
   const { id = "" } = useParams();
@@ -55,6 +56,7 @@ export function SalesOrderDetailPage() {
 
   const [deliverOpen, setDeliverOpen] = useState(false);
   const [deliverQty, setDeliverQty] = useState<LineQty>({});
+  const [deliveryBinId, setDeliveryBinId] = useState("");
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [invoiceQty, setInvoiceQty] = useState<LineQty>({});
 
@@ -75,6 +77,7 @@ export function SalesOrderDetailPage() {
     queryKey: ["/invoices", id],
     queryFn: () => apiGet<InvoiceRow[]>(`/invoices?salesOrderId=${id}`),
   });
+  const bins = useQuery({ queryKey: ["/bins"], queryFn: () => apiGet<BinOption[]>("/bins"), enabled: canDeliver });
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ["/sales-orders", id] });
@@ -88,11 +91,12 @@ export function SalesOrderDetailPage() {
         salesOrderId: id,
         lines: Object.entries(deliverQty)
           .filter(([, qty]) => Number(qty) > 0)
-          .map(([salesOrderLineId, qty]) => ({ salesOrderLineId, qty: Number(qty) })),
+          .map(([salesOrderLineId, qty]) => ({ salesOrderLineId, qty: Number(qty), ...(deliveryBinId ? { binId: deliveryBinId } : {}) })),
       }),
     onSuccess: () => {
       invalidateAll();
       setDeliverOpen(false);
+      setDeliveryBinId("");
       toast("Sevkiyat oluşturuldu", "success");
     },
     onError: (e) => {
@@ -279,6 +283,13 @@ export function SalesOrderDetailPage() {
       </Table>
 
       <Modal open={deliverOpen} title="Sevkiyat Oluştur" onClose={() => setDeliverOpen(false)}>
+        <div className="mb-3">
+          <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="deliveryBin">Kaynak raf</label>
+          <Select id="deliveryBin" value={deliveryBinId} onChange={(e) => setDeliveryBinId(e.target.value)}>
+            <option value="">Atanmamış stok</option>
+            {bins.data?.map((b) => <option key={b.id} value={b.id}>{b.warehouse.name} / {b.code}</option>)}
+          </Select>
+        </div>
         <div className="mb-4 space-y-2">
           {so.lines
             .filter((l) => Number(l.quantity) - Number(l.shippedQty) > 0)

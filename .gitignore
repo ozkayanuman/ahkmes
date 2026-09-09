@@ -15,3 +15,12 @@ scratch-backups/
 # occt-import-js wasm binary'si node_modules'tan `scripts/copy-occt-wasm.mjs`
 # ile kopyalanır (bkz. apps/web/package.json predev/prebuild) — commit edilmez.
 apps/web/public/
+
+# Ajan/tooling çalışma dizinleri ve üretilen çıktılar — kaynak kod değildir.
+.agents/
+.codex/
+.swarm/
+ECC/
+graphify-out/
+ruvector.db
+apps/connector/.ahkmes-edge-m1.queue.json

@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import type { Role } from "@prisma/client";
 
 interface NotifyInput {
@@ -15,7 +15,7 @@ interface NotifyInput {
 export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   list(tenantId: string, userId: string) {
@@ -41,10 +41,13 @@ export class NotificationsService {
   /** Tek bir kullanıcıya bildirim oluşturur ve o kullanıcının tenant odasına yayınlar
    * (istemci payload.userId'yi kendi kimliğiyle eşleştirip filtreler). */
   async notifyUser(tenantId: string, userId: string, input: NotifyInput) {
-    const created = await this.prisma.notification.create({
-      data: { tenantId, userId, ...input },
+    const created = await this.prisma.$transaction(async (tx) => {
+      const notification = await tx.notification.create({
+        data: { tenantId, userId, ...input },
+      });
+      await this.outbox.record(tx, tenantId, "notification", notification.id, "notification.created", { userId, id: notification.id });
+      return notification;
     });
-    this.realtime.emitToTenant(tenantId, "notification.created", { userId, id: created.id });
     return created;
   }
 

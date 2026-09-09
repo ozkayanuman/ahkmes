@@ -37,7 +37,7 @@ function providerRow(overrides: Record<string, unknown> = {}) {
 function buildService(overrides: any = {}) {
   const prisma = {
     oidcProvider: { findFirst: jest.fn(), findMany: jest.fn() },
-    user: { findUnique: jest.fn(), update: jest.fn() },
+    user: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn() },
     ...overrides,
   };
   const config = { get: jest.fn(), getOrThrow: jest.fn().mockReturnValue(SECRET) };
@@ -125,6 +125,8 @@ describe("OidcAuthService.handleCallback", () => {
       "t1",
       "tr",
       "Europe/Istanbul",
+      "OIDC",
+      "p1",
     );
     expect(result).toEqual({ accessToken: "app-access", refreshToken: "app-refresh" });
   });
@@ -207,6 +209,100 @@ describe("OidcAuthService.handleCallback", () => {
     const { state, nonce } = await validState(service, "p1");
 
     await expect(service.handleCallback("p1", "auth-code", state, nonce)).rejects.toThrow();
+  });
+});
+
+describe("OidcAuthService.reauthorizeUrl / handleReauthCallback (AHK-006 kalanı)", () => {
+  let publicJwk: Record<string, unknown>;
+  let privateKey: KeyLike;
+  const kid = "test-key-1";
+  const row = providerRow();
+
+  beforeAll(async () => {
+    const { publicKey, privateKey: pk } = await generateKeyPair("RS256");
+    privateKey = pk;
+    publicJwk = { ...(await exportJWK(publicKey)), kid, alg: "RS256", use: "sig" };
+  });
+
+  function mockTokenAndJwks(idTokenBody: string) {
+    const mock = safeRequest.safeFetch as jest.Mock;
+    mock.mockImplementation(async (url: string, options: { method: string; body?: string }) => {
+      if (url === row.jwksUri) return { status: 200, body: JSON.stringify({ keys: [publicJwk] }) };
+      if (url === row.tokenEndpoint && options.method === "POST") return { status: 200, body: idTokenBody };
+      throw new Error(`beklenmeyen URL: ${url}`);
+    });
+  }
+
+  async function validReauthState(service: OidcAuthService, providerId: string, userId: string, tenantId: string) {
+    const nonce = "test-nonce-value";
+    const nonceHash = require("node:crypto").createHash("sha256").update(nonce).digest("hex");
+    const state = await (
+      service as unknown as {
+        signReauthState: (id: string, nonceHash: string, userId: string, tenantId: string) => Promise<string>;
+      }
+    ).signReauthState(providerId, nonceHash, userId, tenantId);
+    return { state, nonce };
+  }
+
+  it("reauthorizeUrl yalnızca bu sağlayıcıya OIDC ile bağlı, aktif kullanıcı için URL üretir ve prompt=login zorlar", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    prisma.user.findFirst.mockResolvedValue({ id: "u1", authSource: "OIDC", oidcProviderId: "p1", isActive: true });
+
+    const { url, nonce } = await service.reauthorizeUrl("p1", "u1", "t1");
+
+    expect(nonce).toBeTruthy();
+    const parsed = new URL(url);
+    expect(parsed.searchParams.get("prompt")).toBe("login");
+    expect(parsed.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("reauthorizeUrl: authSource OIDC değilse veya başka sağlayıcıya bağlıysa reddeder", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    prisma.user.findFirst.mockResolvedValue({ id: "u1", authSource: "LOCAL", oidcProviderId: null, isActive: true });
+
+    await expect(service.reauthorizeUrl("p1", "u1", "t1")).rejects.toThrow();
+  });
+
+  it("handleReauthCallback: geçerli state + id_token email'i oturumdaki kullanıcıyla eşleşince reauth token döner", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    prisma.user.findFirst.mockResolvedValue({
+      id: "u1", email: "user@acme.com", authSource: "OIDC", oidcProviderId: "p1", isActive: true, tenantId: "t1",
+    });
+    const idToken = await makeIdToken(privateKey, kid, {});
+    mockTokenAndJwks(JSON.stringify({ id_token: idToken }));
+    const { state, nonce } = await validReauthState(service, "p1", "u1", "t1");
+
+    const result = await service.handleReauthCallback("p1", "auth-code", state, nonce);
+
+    expect(result.reauthToken).toBeTruthy();
+  });
+
+  it("handleReauthCallback: id_token email'i state'teki kullanıcıyla eşleşmiyorsa reddeder (hesap değiştirme koruması)", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    prisma.user.findFirst.mockResolvedValue({
+      id: "u1", email: "farkli-kullanici@acme.com", authSource: "OIDC", oidcProviderId: "p1", isActive: true, tenantId: "t1",
+    });
+    const idToken = await makeIdToken(privateKey, kid, {}); // email: user@acme.com
+    mockTokenAndJwks(JSON.stringify({ id_token: idToken }));
+    const { state, nonce } = await validReauthState(service, "p1", "u1", "t1");
+
+    await expect(service.handleReauthCallback("p1", "auth-code", state, nonce)).rejects.toThrow();
+  });
+
+  it("handleReauthCallback: normal login state'i (purpose farklı) reauth callback'inde reddedilir", async () => {
+    const { service, prisma } = buildService();
+    prisma.oidcProvider.findFirst.mockResolvedValue(row);
+    const nonce = "test-nonce-value";
+    const nonceHash = require("node:crypto").createHash("sha256").update(nonce).digest("hex");
+    const loginState = await (
+      service as unknown as { signState: (id: string, nonceHash: string) => Promise<string> }
+    ).signState("p1", nonceHash); // normal login state — purpose yok
+
+    await expect(service.handleReauthCallback("p1", "auth-code", loginState, nonce)).rejects.toThrow();
   });
 });
 

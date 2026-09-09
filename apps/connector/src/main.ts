@@ -1,6 +1,7 @@
 import type { MachineAdapter } from "./adapters/adapter.interface";
 import { FanucAdapter } from "./adapters/fanuc.adapter";
 import { M80Adapter } from "./adapters/m80.adapter";
+import { parseM80Address } from "./adapters/m80-protocol";
 import { OpcuaAdapter } from "./adapters/opcua.adapter";
 import { SimulatorAdapter } from "./adapters/simulator.adapter";
 import { Connector } from "./core/connector";
@@ -14,6 +15,7 @@ async function main() {
   let opcuaEndpointUrl = config.opcuaEndpointUrl;
   let m80Host = config.m80Host;
   let m80Port = config.m80Port;
+  let m80ProgramIdentityAddress = config.m80ProgramIdentityAddress;
 
   // ADAPTER env değişkeni açıkça verilmediyse, web'de configure edilen bağlantı
   // ayarlarını (Machine.connectorType/connectorConfig) backend'den çek.
@@ -32,6 +34,7 @@ async function main() {
         adapterType = "m80";
         if (!process.env.M80_HOST && cfg.host) m80Host = cfg.host;
         if (!process.env.M80_PORT && cfg.port) m80Port = Number(cfg.port);
+        if (!process.env.M80_PROGRAM_IDENTITY_ADDRESS && cfg.programIdentityAddress) m80ProgramIdentityAddress = cfg.programIdentityAddress;
       }
       // eslint-disable-next-line no-console
       console.log(`Backend'den bağlantı ayarları alındı: connectorType=${backendConfig.connectorType}`);
@@ -52,6 +55,7 @@ async function main() {
             port: m80Port,
             pollIntervalMs: config.m80PollIntervalMs,
             tags: config.m80Tags,
+            ...(m80ProgramIdentityAddress && parseM80Address(m80ProgramIdentityAddress) ? { programIdentityItem: parseM80Address(m80ProgramIdentityAddress)! } : {}),
           })
         : adapterType === "fanuc"
           ? new FanucAdapter({ host: config.fanucHost, port: config.fanucPort })
@@ -65,6 +69,9 @@ async function main() {
     machineId: config.machineId,
     machineKey: config.machineKey,
     tagPollIntervalMs: config.tagPollIntervalMs,
+    durableQueuePath: config.durableQueuePath,
+    healthPort: config.healthPort,
+    adapter: adapterType,
   });
 
   await connector.start();

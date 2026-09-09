@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
-import { createHmac } from "node:crypto";
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { createHmac, randomUUID } from "node:crypto";
 import { isIPv4, isIPv6 } from "node:net";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { CreateWebhookSubscriptionDto, UpdateWebhookSubscriptionDto } from "@ahkmes/shared-types";
+import { Prisma, WebhookDeliveryStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
 /** Regex yerine gerçek sayısal IPv4 ayrıştırma — "0x7f000001" gibi alternatif
@@ -144,10 +145,24 @@ function pinnedRequest(
  * gerekmez. Teslim fire-and-forget'tir — cron/kuyruk/retry yok (MVP kapsamı),
  * lastStatus sadece son deneme görünürlüğü içindir. */
 @Injectable()
-export class WebhooksService {
+export class WebhooksService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WebhooksService.name);
+  private deliveryTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly maxAttempts = 8;
+  private readonly lockMs = 30_000;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  onModuleInit() {
+    void this.processPending();
+    this.deliveryTimer = setInterval(() => void this.processPending(), 5_000);
+    this.deliveryTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.deliveryTimer) clearInterval(this.deliveryTimer);
+    this.deliveryTimer = null;
+  }
 
   findAll(tenantId: string) {
     return this.prisma.webhookSubscription.findMany({
@@ -177,13 +192,33 @@ export class WebhooksService {
     return { id };
   }
 
-  /** Fire-and-forget — çağıran (RealtimeGateway) bunu await ETMEMELİDİR, aksi
-   * halde her socket olayı dış URL'in yanıt hızına bağımlı hale gelir. */
-  dispatch(tenantId: string, event: string, payload: unknown) {
-    void this.deliverAll(tenantId, event, payload);
+  findDeliveries(tenantId: string, status?: WebhookDeliveryStatus) {
+    return this.prisma.webhookDeliveryEvent.findMany({
+      where: { tenantId, ...(status ? { status } : {}) },
+      orderBy: { occurredAt: "desc" },
+      take: 100,
+    });
   }
 
-  private async deliverAll(tenantId: string, event: string, payload: unknown) {
+  async replayDelivery(tenantId: string, id: string) {
+    const delivery = await this.prisma.webhookDeliveryEvent.findFirst({ where: { id, tenantId } });
+    if (!delivery) throw new NotFoundException("Webhook teslim kaydı bulunamadı");
+    if (delivery.status !== "DEAD_LETTER") {
+      throw new BadRequestException("Yalnızca dead-letter teslim kayıtları tekrar oynatılabilir");
+    }
+    return this.prisma.webhookDeliveryEvent.update({
+      where: { id },
+      data: { status: "PENDING", attempts: 0, nextAttemptAt: new Date(), lockedUntil: null, lastError: null },
+    });
+  }
+
+  /** Fire-and-forget — çağıran (RealtimeGateway) bunu await ETMEMELİDİR, aksi
+   * halde her socket olayı dış URL'in yanıt hızına bağımlı hale gelir. */
+  dispatch(tenantId: string, event: string, payload: unknown, eventId: string = randomUUID()) {
+    void this.enqueueDeliveries(tenantId, event, payload, eventId);
+  }
+
+  private async enqueueDeliveries(tenantId: string, event: string, payload: unknown, eventId: string) {
     let subs;
     try {
       subs = await this.prisma.webhookSubscription.findMany({
@@ -194,18 +229,95 @@ export class WebhooksService {
       return;
     }
 
-    await Promise.all(subs.map((sub) => this.deliverOne(sub.id, sub.url, sub.secret, event, tenantId, payload)));
+    if (subs.length === 0) return;
+    const envelope = { eventId, event, tenantId, payload, timestamp: new Date().toISOString() };
+    await this.prisma.webhookDeliveryEvent
+      .createMany({
+        data: subs.map((sub) => ({
+          tenantId,
+          subscriptionId: sub.id,
+          eventId,
+          event,
+          payload: envelope as Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
+      })
+      .catch((err) => this.logger.error(`Webhook teslim kaydı oluşturulamadı: ${err instanceof Error ? err.message : err}`));
+  }
+
+  /** Birden çok backend instance'ı aynı olayı göndermesin diye kısa süreli bir
+   * DB claim alınır; kapanan worker'ın kilidi süre bitiminde yeniden denenir. */
+  async processPending() {
+    const now = new Date();
+    await this.prisma.webhookDeliveryEvent.updateMany({
+      where: { status: "PROCESSING", lockedUntil: { lt: now } },
+      data: { status: "PENDING", lockedUntil: null },
+    }).catch(() => undefined);
+
+    const candidates = await this.prisma.webhookDeliveryEvent.findMany({
+      where: { status: "PENDING", nextAttemptAt: { lte: now } },
+      orderBy: { occurredAt: "asc" },
+      take: 20,
+    }).catch((err) => {
+      this.logger.error(`Webhook kuyruğu okunamadı: ${err instanceof Error ? err.message : err}`);
+      return [];
+    });
+    await Promise.all(candidates.map((delivery) => this.processOne(delivery.id)));
+  }
+
+  private async processOne(id: string) {
+    const now = new Date();
+    const claim = await this.prisma.webhookDeliveryEvent.updateMany({
+      where: { id, status: "PENDING", nextAttemptAt: { lte: now } },
+      data: { status: "PROCESSING", lockedUntil: new Date(now.getTime() + this.lockMs) },
+    });
+    if (claim.count !== 1) return;
+
+    const delivery = await this.prisma.webhookDeliveryEvent.findUnique({ where: { id } });
+    if (!delivery) return;
+    const subscription = await this.prisma.webhookSubscription.findFirst({
+      where: { id: delivery.subscriptionId, tenantId: delivery.tenantId, isActive: true },
+      select: { id: true, url: true, secret: true },
+    });
+    if (!subscription) {
+      await this.failDelivery(delivery.id, delivery.attempts, "Abonelik bulunamadı veya etkin değil", true);
+      return;
+    }
+
+    const delivered = await this.deliverOne(subscription.id, subscription.url, subscription.secret, delivery.payload);
+    if (delivered) {
+      await this.prisma.webhookDeliveryEvent.update({
+        where: { id: delivery.id },
+        data: { status: "DELIVERED", attempts: delivery.attempts + 1, deliveredAt: new Date(), lockedUntil: null, lastError: null },
+      });
+    } else {
+      await this.failDelivery(delivery.id, delivery.attempts, "Teslim başarısız", false);
+    }
+  }
+
+  private async failDelivery(id: string, attempts: number, error: string, permanent: boolean) {
+    const nextAttempts = attempts + 1;
+    const deadLetter = permanent || nextAttempts >= this.maxAttempts;
+    const delayMs = Math.min(1_000 * 2 ** Math.min(nextAttempts, 8), 15 * 60_000);
+    await this.prisma.webhookDeliveryEvent.update({
+      where: { id },
+      data: {
+        status: deadLetter ? "DEAD_LETTER" : "PENDING",
+        attempts: nextAttempts,
+        lockedUntil: null,
+        lastError: error.slice(0, 1_000),
+        nextAttemptAt: new Date(Date.now() + delayMs),
+      },
+    });
   }
 
   private async deliverOne(
     id: string,
     url: string,
     secret: string | null,
-    event: string,
-    tenantId: string,
-    payload: unknown,
+    payload: Prisma.JsonValue,
   ) {
-    const body = JSON.stringify({ event, tenantId, payload, timestamp: new Date().toISOString() });
+    const body = JSON.stringify(payload);
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (secret) {
       headers["X-Webhook-Signature"] = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
@@ -237,5 +349,6 @@ export class WebhooksService {
     await this.prisma.webhookSubscription
       .update({ where: { id }, data: { lastTriggeredAt: new Date(), lastStatus: status } })
       .catch(() => undefined);
+    return status === "success";
   }
 }

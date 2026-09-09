@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
+import { TenantContextInterceptor } from "./common/interceptors/tenant-context.interceptor";
 import { ConfigModule } from "@nestjs/config";
 import { APP_INTERCEPTOR } from "@nestjs/core";
 import { HealthController } from "./health/health.controller";
+import { HealthService } from "./health/health.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { AuthModule } from "./auth/auth.module";
 import { AuditInterceptor } from "./common/audit.interceptor";
@@ -24,11 +26,13 @@ import { NonConformanceModule } from "./non-conformance/non-conformance.module";
 import { HierarchyModule } from "./hierarchy/hierarchy.module";
 import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
+import { SchedulingModule } from "./scheduling/scheduling.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { LaborModule } from "./labor/labor.module";
 import { EnergyModule } from "./energy/energy.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
+import { OutboxModule } from "./outbox/outbox.module";
 import { ReportsModule } from "./reports/reports.module";
 import { PermissionGroupsModule } from "./permission-groups/permission-groups.module";
 import { LdapModule } from "./ldap/ldap.module";
@@ -59,12 +63,29 @@ import { SpcModule } from "./spc/spc.module";
 import { AlarmsModule } from "./alarms/alarms.module";
 import { ApModule } from "./ap/ap.module";
 import { ArModule } from "./ar/ar.module";
+import { InventoryModule } from "./inventory/inventory.module";
+import { QualityPlansModule } from "./quality-plans/quality-plans.module";
+import { CopilotModule } from "./copilot/copilot.module";
+import { PlatformModulesModule } from "./platform-modules/platform-modules.module";
+import { ToolingModule } from "./tooling/tooling.module";
+import { ActionPermissionsModule } from "./action-permissions/action-permissions.module";
+import { HmiModule } from "./hmi/hmi.module";
+import { DowntimeModule } from "./downtime/downtime.module";
+import { EntitlementsV2Module } from "./entitlements-v2/entitlements-v2.module";
+import { validateEnvironment } from "./config/environment.validation";
+import { RequestLoggingInterceptor } from "./common/interceptors/request-logging.interceptor";
+import { UomModule } from "./uom/uom.module";
+import { ProductionCalendarModule } from "./production-calendar/production-calendar.module";
+import { ProductionDefinitionsModule } from "./production-definitions/production-definitions.module";
+import { ProductionMaterialModule } from "./production-material/production-material.module";
+import { QualityExecutionModule } from "./quality-execution/quality-execution.module";
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ["../../.env", ".env"],
+      validate: validateEnvironment,
     }),
     PrismaModule,
     AuthModule,
@@ -87,11 +108,13 @@ import { ArModule } from "./ar/ar.module";
     HierarchyModule,
     DigitalTwinModule,
     OeeModule,
+    SchedulingModule,
     AuditLogModule,
     ShiftReportModule,
     LaborModule,
     EnergyModule,
     WebhooksModule,
+    OutboxModule,
     ReportsModule,
     PermissionGroupsModule,
     LdapModule,
@@ -122,8 +145,29 @@ import { ArModule } from "./ar/ar.module";
     AlarmsModule,
     ApModule,
     ArModule,
+    InventoryModule,
+    QualityPlansModule,
+    CopilotModule,
+    PlatformModulesModule,
+    ToolingModule,
+    ActionPermissionsModule,
+    HmiModule,
+    DowntimeModule,
+    EntitlementsV2Module,
+    UomModule,
+    ProductionCalendarModule,
+    ProductionDefinitionsModule,
+    ProductionMaterialModule,
+    QualityExecutionModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_INTERCEPTOR, useClass: AuditInterceptor }],
+  providers: [
+    HealthService,
+    // Sıra önemli: TenantContextInterceptor EN DIŞTA olmalı ki AuditInterceptor'ın
+    // kendi Prisma yazımı da (auditLog.create) tenant context'i görsün.
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: RequestLoggingInterceptor },
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+  ],
 })
 export class AppModule {}

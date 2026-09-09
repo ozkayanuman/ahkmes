@@ -24,6 +24,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       pages: payload.pages,
       locale: payload.locale,
       timezone: payload.timezone,
+      authSource: payload.authSource,
+      oidcProviderId: payload.oidcProviderId,
     };
   }
 }

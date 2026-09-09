@@ -7,12 +7,14 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 export function Button({
   variant = "primary",
+  size,
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "outline" | "danger" | "ghost" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "outline" | "danger" | "ghost"; size?: "sm" }) {
   return (
     <button
       className={clsx(
@@ -21,6 +23,7 @@ export function Button({
         variant === "outline" && "border border-slate-300 bg-white hover:bg-slate-100",
         variant === "danger" && "bg-red-600 text-white hover:bg-red-700",
         variant === "ghost" && "hover:bg-slate-100",
+        size === "sm" && "px-2 py-1 text-xs",
         className,
       )}
       {...props}
@@ -95,13 +98,14 @@ export function Modal({
   children: ReactNode;
   className?: string;
 }) {
+  const { t } = useTranslation();
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className={clsx("w-full max-w-lg rounded-lg bg-white p-6 shadow-xl", className)}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold">{title}</h2>
-          <button onClick={onClose} className="rounded p-1 hover:bg-slate-100" aria-label="Kapat">
+          <button onClick={onClose} className="rounded p-1 hover:bg-slate-100" aria-label={t("Kapat")}>
             <X className="h-5 w-5" />
           </button>
         </div>

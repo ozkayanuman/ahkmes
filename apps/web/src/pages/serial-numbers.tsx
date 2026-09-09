@@ -7,10 +7,16 @@ import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { Button, Input, Label, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
+import { BackwardTree, type BackwardTraceNode } from "../components/trace-tree";
 
 interface PartOption {
   id: string;
   partNo: string;
+  name: string;
+}
+interface MaterialOption {
+  id: string;
+  code: string;
   name: string;
 }
 interface WorkOrderOption {
@@ -39,8 +45,10 @@ interface TraceResult {
     part: { partNo: string; name: string };
     consumptions: {
       id: string;
-      material: { code: string; name: string };
+      itemType: "MATERIAL" | "PART";
+      itemId: string;
       lot: { id: string; lotNo: string } | null;
+      backward: BackwardTraceNode | null;
     }[];
   } | null;
 }
@@ -51,6 +59,24 @@ function ScanModal({ onClose }: { onClose: () => void }) {
   const toast = useToast();
   const [code, setCode] = useState("");
   const [result, setResult] = useState<TraceResult | null>(null);
+  const materials = useQuery({
+    queryKey: ["/materials"],
+    queryFn: () => apiGet<MaterialOption[]>("/materials"),
+  });
+  const parts = useQuery({
+    queryKey: ["/parts"],
+    queryFn: () => apiGet<PartOption[]>("/parts"),
+  });
+  const materialById = new Map((materials.data ?? []).map((m) => [m.id, m]));
+  const partById = new Map((parts.data ?? []).map((p) => [p.id, p]));
+  function itemLabel(c: { itemType: "MATERIAL" | "PART"; itemId: string }) {
+    if (c.itemType === "MATERIAL") {
+      const m = materialById.get(c.itemId);
+      return m ? `${m.code} — ${m.name}` : c.itemId;
+    }
+    const p = partById.get(c.itemId);
+    return p ? `${p.partNo} — ${p.name}` : c.itemId;
+  }
 
   const scan = useMutation({
     mutationFn: (serialNo: string) =>
@@ -100,14 +126,18 @@ function ScanModal({ onClose }: { onClose: () => void }) {
                   {result.producedByWorkOrder.woNo} — {result.producedByWorkOrder.part.partNo} (
                   {result.producedByWorkOrder.status})
                 </div>
-                {result.producedByWorkOrder.consumptions.length > 0 && (
-                  <div className="text-slate-500">
-                    Tüketilen lotlar:{" "}
-                    {result.producedByWorkOrder.consumptions
-                      .map((c) => `${c.material.code}${c.lot ? ` (${c.lot.lotNo})` : ""}`)
-                      .join(", ")}
-                  </div>
+                {result.producedByWorkOrder.consumptions.length === 0 && (
+                  <div className="text-slate-400">Tüketilen kalem yok</div>
                 )}
+                {result.producedByWorkOrder.consumptions.map((c) => (
+                  <div key={c.id} className="mt-1">
+                    <div className="text-slate-500">
+                      ← Tüketilen: {itemLabel(c)}
+                      {c.lot ? ` (${c.lot.lotNo})` : ""}
+                    </div>
+                    {c.backward && <BackwardTree node={c.backward} itemLabel={itemLabel} depth={1} />}
+                  </div>
+                ))}
               </div>
             )}
           </div>

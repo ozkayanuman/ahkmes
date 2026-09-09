@@ -25,8 +25,9 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://ahkmes:ahkmes-ci@localhost:5432/ahkmes?schema=public
-      JWT_SECRET: ci-test-secret
+      JWT_SECRET: ci-test-jwt-secret-at-least-32-chars
       SEED_ADMIN_PASSWORD: ci-admin-password
+      SEED_MODE: demo
       MINIO_ENDPOINT: localhost
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"

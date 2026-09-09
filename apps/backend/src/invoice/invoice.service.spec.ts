@@ -7,10 +7,10 @@ function buildService(overrides: any = {}) {
     $transaction: jest.fn(),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new InvoiceService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const service = new InvoiceService(prisma as any, outbox as any);
+  return { service, prisma, outbox };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,7 +57,7 @@ describe("InvoiceService.create", () => {
 
   it("başarılı fatura: SalesOrderLine.unitPrice kopyalanır, invoicedQty artar", async () => {
     const tx = buildTx();
-    const { service, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const { service } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
 
     const result = await service.create("t1", "u1", {
       salesOrderId: "so1",
@@ -76,10 +76,6 @@ describe("InvoiceService.create", () => {
       data: { invoicedQty: { increment: 4 } },
     });
     expect(result.id).toBe("inv1");
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "invoice.created", {
-      id: "inv1",
-      salesOrderId: "so1",
-    });
   });
 });
 
@@ -94,7 +90,7 @@ describe("InvoiceService.cancel", () => {
 
   it("iptalde invoicedQty geri düşer", async () => {
     const tx = buildTx();
-    const { service, prisma, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const { service, prisma } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     prisma.invoice.findFirst.mockResolvedValue({
       id: "inv1",
       status: "ISSUED",
@@ -109,9 +105,5 @@ describe("InvoiceService.cancel", () => {
       data: { invoicedQty: { decrement: 4 } },
     });
     expect(updated.status).toBe("CANCELLED");
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "invoice.updated", {
-      id: "inv1",
-      status: "CANCELLED",
-    });
   });
 });

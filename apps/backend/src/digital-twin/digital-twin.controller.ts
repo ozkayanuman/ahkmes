@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
   createMachineConnectionSchema,
   updateMachinePositionSchema,
@@ -14,18 +14,28 @@ import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { parseOeeCalculationContext } from "../oee/oee-request";
+import { ActionPermissionsGuard } from "../common/guards/action-permissions.guard";
+import { RequireActionPermissions } from "../common/decorators/require-action-permission.decorator";
 
 const WRITE_ROLES = ["ADMIN", "PLANNER", "FOREMAN"] as const;
 
 @Controller("digital-twin")
 @RequirePage("digital-twin")
-@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard, ActionPermissionsGuard)
 export class DigitalTwinController {
   constructor(private readonly service: DigitalTwinService) {}
 
   @Get("layout")
-  layout(@CurrentUser() user: AuthUser) {
-    return this.service.layout(user.tenantId);
+  @RequireActionPermissions("OEE_READ")
+  layout(
+    @CurrentUser() user: AuthUser,
+    @Query("plantId") plantId?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("asOf") asOf?: string,
+  ) {
+    return this.service.layout(user.tenantId, parseOeeCalculationContext(plantId, from, to, asOf));
   }
 
   @Patch("machines/:id/position")

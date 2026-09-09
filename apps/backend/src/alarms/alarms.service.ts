@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from "@nestjs/common
 import { Prisma } from "@prisma/client";
 import type { CreateAlarmDefinitionDto, UpdateAlarmDefinitionDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 
 /**
  * Alarm Management (Faz F) — AlarmDefinition kataloğu (kod/önem derecesi standardizasyonu,
@@ -13,7 +13,7 @@ import { RealtimeGateway } from "../realtime/realtime.gateway";
 export class AlarmsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   findDefinitions(tenantId: string, machineId?: string) {
@@ -70,12 +70,15 @@ export class AlarmsService {
     if (event.type !== "ALARM") throw new ConflictException("Sadece ALARM tipi olaylar onaylanabilir");
     if (event.acknowledgedAt) throw new ConflictException("Bu alarm zaten onaylanmış");
 
-    const updated = await this.prisma.machineStatusEvent.update({
-      where: { id: eventId },
-      data: { acknowledgedById: userId, acknowledgedAt: new Date(), ackNote: note },
-      include: { machine: { select: { id: true, name: true } } },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.machineStatusEvent.update({
+        where: { id: eventId },
+        data: { acknowledgedById: userId, acknowledgedAt: new Date(), ackNote: note },
+        include: { machine: { select: { id: true, name: true } } },
+      });
+      await this.outbox.record(tx, tenantId, "alarm", eventId, "alarm.acknowledged", { id: eventId, machineId: event.machineId });
+      return updated;
     });
-    this.realtime.emitToTenant(tenantId, "alarm.acknowledged", { id: eventId, machineId: event.machineId });
     return updated;
   }
 

@@ -8,7 +8,7 @@ import { useAuth } from "../lib/auth";
  * User.locale'i (PATCH /auth/me, kalıcı tercih + yeni token) günceller —
  * sonraki girişte tercih hatırlanır. */
 export function LanguageSwitcher() {
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const { applyTokens } = useAuth();
 
   async function toggle() {
@@ -27,7 +27,7 @@ export function LanguageSwitcher() {
   return (
     <button
       onClick={toggle}
-      title={i18n.language === "en" ? "Switch to Turkish" : "İngilizce'ye geç"}
+      title={i18n.language === "en" ? t("Türkçe'ye geç") : t("İngilizce'ye geç")}
       className="mb-1 flex w-full items-center justify-center rounded-md py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100"
     >
       <Languages className="h-4 w-4 shrink-0" />

@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateSupplierInvoiceDto, CreateSupplierPaymentDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 
 const INVOICE_INCLUDE = {
@@ -31,7 +31,7 @@ const PAYMENT_INCLUDE = {
 export class ApService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   findInvoices(tenantId: string, purchaseOrderId?: string) {
@@ -100,13 +100,13 @@ export class ApService {
         });
       }
 
+      await this.outbox.record(tx, tenantId, "supplierinvoice", invoice.id, "supplierinvoice.created", {
+        id: invoice.id,
+        purchaseOrderId: dto.purchaseOrderId,
+      });
       return invoice;
     });
 
-    this.realtime.emitToTenant(tenantId, "supplierinvoice.created", {
-      id: created.id,
-      purchaseOrderId: dto.purchaseOrderId,
-    });
     return created;
   }
 
@@ -124,10 +124,11 @@ export class ApService {
           data: { invoicedQty: { decrement: l.qty } },
         });
       }
-      return tx.supplierInvoice.update({ where: { id }, data: { status: "CANCELLED" }, include: INVOICE_INCLUDE });
+      const updated = await tx.supplierInvoice.update({ where: { id }, data: { status: "CANCELLED" }, include: INVOICE_INCLUDE });
+      await this.outbox.record(tx, tenantId, "supplierinvoice", id, "supplierinvoice.updated", { id, status: "CANCELLED" });
+      return updated;
     });
 
-    this.realtime.emitToTenant(tenantId, "supplierinvoice.updated", { id, status: "CANCELLED" });
     return updated;
   }
 
@@ -167,7 +168,7 @@ export class ApService {
       }
 
       const spNo = await nextDocNo(tx, "supplierPayment", "spNo", "TOD");
-      return tx.supplierPayment.create({
+      const payment = await tx.supplierPayment.create({
         data: {
           tenantId,
           spNo,
@@ -186,9 +187,10 @@ export class ApService {
         },
         include: PAYMENT_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "supplierpayment", payment.id, "supplierpayment.created", { id: payment.id, supplierId: dto.supplierId });
+      return payment;
     });
 
-    this.realtime.emitToTenant(tenantId, "supplierpayment.created", { id: created.id, supplierId: dto.supplierId });
     return created;
   }
 

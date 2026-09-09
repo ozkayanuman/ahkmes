@@ -7,6 +7,7 @@ import { fmtDate } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
 import { Button, Input, Label, Modal, Table, Textarea } from "../components/ui";
 import { useToast } from "../components/toast";
+import { ReauthModal } from "../components/reauth-modal";
 
 type CapaStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "CLOSED";
 
@@ -39,6 +40,7 @@ export function CapaPage() {
   const [title, setTitle] = useState("");
   const [rootCause, setRootCause] = useState("");
   const [actionPlan, setActionPlan] = useState("");
+  const [pendingDecision, setPendingDecision] = useState<{ id: string; action: "approve" | "reject" } | null>(null);
 
   useInvalidateOn(["capa.updated"], ["/capa"]);
 
@@ -73,13 +75,21 @@ export function CapaPage() {
     onError: onError("Onaya gönderilemedi"),
   });
   const approve = useMutation({
-    mutationFn: (id: string) => apiPatch(`/capa/${id}/approve`, {}),
-    onSuccess: invalidate,
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/capa/${id}/approve`, { password }),
+    onSuccess: () => {
+      invalidate();
+      setPendingDecision(null);
+    },
     onError: onError("Onaylanamadı"),
   });
   const reject = useMutation({
-    mutationFn: (id: string) => apiPatch(`/capa/${id}/reject`, {}),
-    onSuccess: invalidate,
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      apiPatch(`/capa/${id}/reject`, { password }),
+    onSuccess: () => {
+      invalidate();
+      setPendingDecision(null);
+    },
     onError: onError("Reddedilemedi"),
   });
   const close = useMutation({
@@ -130,13 +140,17 @@ export function CapaPage() {
                 )}
                 {canDecide && row.status === "PENDING_APPROVAL" && (
                   <>
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => approve.mutate(row.id)}>
+                    <Button
+                      variant="ghost"
+                      className="px-2 py-1 text-xs"
+                      onClick={() => setPendingDecision({ id: row.id, action: "approve" })}
+                    >
                       <CheckCircle2 className="h-4 w-4" /> Onayla
                     </Button>
                     <Button
                       variant="ghost"
                       className="px-2 py-1 text-xs text-red-600"
-                      onClick={() => reject.mutate(row.id)}
+                      onClick={() => setPendingDecision({ id: row.id, action: "reject" })}
                     >
                       <XCircle className="h-4 w-4" /> Reddet
                     </Button>
@@ -183,6 +197,17 @@ export function CapaPage() {
           </div>
         </form>
       </Modal>
+
+      <ReauthModal
+        open={pendingDecision !== null}
+        onClose={() => setPendingDecision(null)}
+        busy={approve.isPending || reject.isPending}
+        onConfirm={(password) => {
+          if (!pendingDecision) return;
+          const mutation = pendingDecision.action === "approve" ? approve : reject;
+          mutation.mutate({ id: pendingDecision.id, password });
+        }}
+      />
     </div>
   );
 }

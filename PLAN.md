@@ -1,7 +1,8 @@
 # AHKMES — Doğrulanmış Ürün ve Teknik Yol Haritası
 
-> **Plan durumu:** 2026-07-31 tarihinde kaynak kod, Prisma şeması/migration'lar,
-> Git geçmişi, Graphify ve yerel doğrulamalar karşılaştırılarak güncellendi.
+> **Plan durumu:** 2026-08-03 tarihinde `4fb7840` devralma teslimi üzerinde kaynak
+> kod, Prisma şeması/migration'lar, Graphify sorgusu, Git geçmişi ve seçili gerçek
+> PostgreSQL doğrulamaları tekrar karşılaştırıldı.
 > Bu bölüm normatif, güncel plandır. Aşağıdaki tarihsel plan/günlük korunmuştur;
 > ancak oradaki checkbox ve tarihsel iddialar tek başına güncel durum kanıtı değildir.
 
@@ -37,22 +38,22 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 ## 2. Mevcut sistemin doğrulanmış özeti
 
 - **Mimari:** `pnpm` monorepo içinde modüler NestJS monoliti, React SPA ve ayrı
-  edge connector paketi. `AppModule` yaklaşık 60 iş modülünü bir süreçte
+  edge connector paketi. `AppModule` 69 kaynak modülünü bir süreçte
   birleştirir; servisler Prisma'ya doğrudan erişir. Genel repository/port
   katmanı yoktur.
 - **Uygulama:** Tek tenant için satır bazlı `tenantId` filtreleri kullanan,
   JWT/LDAP/OIDC girişli, REST + Socket.IO uygulamasıdır. Gerçek çoklu tenant
   yönetimi veya PostgreSQL RLS yoktur.
-- **Veri:** Prisma 5 / PostgreSQL 16, 31 migration; MinIO doküman deposu;
+- **Veri:** Prisma 5 / PostgreSQL 16, 52 forward-only migration; MinIO doküman deposu;
   Docker Compose ile PostgreSQL + MinIO + backend + web, opsiyonel connector.
-- **Doğrulama:** `pnpm typecheck`, shared-types (12), connector (15), web (22),
-  backend birim (147) testleri ve `pnpm build` bu incelemede başarılıdır.
-  Backend e2e paketi mevcut üretim/geliştirme veritabanına dokunmamak için bu
-  incelemede çalıştırılmadı.
-- **Graphify:** 31 Temmuz raporu 3.372 düğüm/8.404 kenar ve Prisma, auth,
-  RealtimeGateway, `App.tsx`, ortak şemalar ile work-order ekranını merkez
-  düğümler olarak gösterir. Rapor üstverisi `7cba124` commit'inde kalmıştır;
-  güncel `HEAD` (`df1091e`, Faz O/OIDC) için grafik tek başına kanıt değildir.
+- **Doğrulama:** Bu devralmada shared DTO testleri (18), backend/web typecheck,
+  backend/web production build, Prisma validate ve gerçek PostgreSQL üzerinde
+  MES tooling E2E (9) geçti. Tüm monorepo/e2e paketi bu incelemede yeniden
+  koşturulmadığından geçmiş sayıların tamamı yeniden doğrulanmış sayılmaz.
+- **Graphify:** Mevcut graph üzerinde sorgu, `AppModule`, auth/page guard,
+  product entitlement, connector ve UI route'larını çapraz bağımlılık merkezleri
+  olarak doğruladı. Graph çıktısı mimari keşif aracıdır; kararlar gerçek
+  kaynak/test kanıtına dayanır.
 
 ## 3. Teknoloji yığını
 
@@ -68,19 +69,21 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 ## 4. Modül envanteri
 
-| Modül | Gerçek durum | Kaynakla doğrulanan kapsam |
+| Modül | Gerçek durum | Kanıt / kaynakla doğrulanan kapsam |
 |---|---|---|
-| Platform Core | `PARTIAL` | JWT, RBAC, sayfa izin grupları, LDAP, OIDC, audit, bildirim, onay, hiyerarşi. |
-| MES Core | `PARTIAL` | İş emri, production run, makine atama, manuel üretim, OEE, vardiya görünümü. Operasyon/rota yürütme modeli yok. |
+| Platform Core | `PARTIAL` | `apps/backend/src/auth/auth.service.ts`, `common/guards/pages.guard.ts`, `platform-modules/*`, `approvals/*`, `audit.interceptor.ts`, `prisma/schema.prisma`: JWT/RBAC, page permission, entitlement, audit, onay ve hiyerarşi var; tenant sınırı global zorlanmıyor. |
+| MES Core | `PARTIAL` | İş emri, immutable rota operasyonları, makine atama/WIP, manuel üretim, OEE ve vardiya görünümü; PUBLISHED NC ve tooling setup start-gate'i vardır. Genel dispatch, operatör yetkinliği ve kalite kapısı eksik. |
+| PLM / CNC release | `PARTIAL` | `NcProgram` checksum, revizyon, Draft→Review→Approved→Published→Superseded/Archived, effectivity ve yayın kontrolü vardır. Genel controlled-document/ECO lifecycle ayrı eksiktir. |
+| CNC tooling / fixture | `PARTIAL` | Tool/component/assembly/physical instance, makine uyumluluğu, requirement, rezervasyon, immutable setup snapshot ve HMI start-gate doğrulandı. Fixture bakım/kalibrasyon politikası uygulama dilimi sürüyor; presetter, offset ve DNC yok. |
 | Machine Connect / AGW | `PARTIAL` | Makine anahtarı, telemetri, tag CRUD/değerleri, simulator, OPC-UA ve deneysel M80. |
 | Quality | `PARTIAL` | NCR, inspection, CAPA, SPC, alarm, kalibrasyon. Kontrollü doküman/deviation/e-imza eksik. |
-| Inventory / Warehouse | `PARTIAL` | Material, depo/bin, lot, serial, transfer, sayım; toplam stok ve bin bakiyesi çift kaynak. |
+| Inventory / Warehouse | `PARTIAL` | Material, depo/bin, lot, serial, transfer ve sayım; immutable hareket defteri ile toplam/bakiye projeksiyonları transaction içinde tutulur. Heat/CoC/kabul ve zorunlu lot politikası vardır; karantina rafı/ölçümle bağ henüz yoktur. |
 | Planning / MRP | `PARTIAL` | Tek seviyeli BOM, netleme, satın alma/üretim önerisi, manuel Gantt. |
 | MRP II / Capacity | `NOT_STARTED` | Sonlu kapasite, rota süresi, alternatif kaynak, ATP/CTP yok. |
-| Maintenance | `PARTIAL` | Planlı/düzeltici bakım, runtime saat ve enerji manuel/temel. |
-| Integration Gateway | `PROTOTYPE` | HMAC webhook ve CSV export var; ERP adapter, outbox/inbox, mapping yok. |
+| Maintenance / CMMS | `VERIFIED_DONE` (V1 minimum, CNC-V1-07R, 2026-08-21) | Machine bakım durumu/telemetri ayrımı, bakım talebi, ilk sınıf arıza, zaman damgalı bakım duruşu, kontrollü bakım iş emri yaşam döngüsü, idempotent arıza→iş emri dönüşümü, zaman tabanlı PM (due/overdue/replay-safe üretim), teknisyen ataması (HR bağımlılığı yok), zorunlu kontrol listesi kapanış kapısı, kanonik envanterden yedek parça çıkış/iade, açık servise dönüş, kullanılabilir bakım geçmişi, supervisor workbench ve HMI görünürlüğü; MES start/resume gate'i sunucu tarafında zorlanır. Metre/runtime bazlı PM ve CMMS yedek parça rezervasyonu bilinçli olarak V1 dışı (`P1`). Gerçek PostgreSQL kanıtı: `cnc-v1-07r.e2e-spec.ts` 13/13, tam CNC-V1-00/01/02/03R/04/06/07R regresyonu 7 suite/65 test, backup→izole restore doğrulaması. |
+| Integration Gateway | `PARTIAL` | `apps/backend/src/webhooks/*`, `prisma/schema.prisma` (`WebhookDeliveryEvent`): HMAC webhook, retry/DLQ/replay ve CSV export var; genel inbox, ERP adapter ve mapping yok. |
 | Reporting / Analytics | `PROTOTYPE` | Dashboard, OEE ve sınırlı CSV; metrik/tracing/veri ambarı yok. |
-| AI Copilot | `NOT_STARTED` | Güvenli command/tool katmanı, model sağlayıcısı veya onay orkestrasyonu yok. |
+| AI Copilot | `PROTOTYPE` | `apps/backend/src/copilot/*`, `apps/web/src/pages/copilot.tsx`: yetki-bağlı taslak/öneri var; model sağlayıcısı, kalıcı approval ve mutation tool yok. |
 | ERP yardımcı modülleri | `PARTIAL` | RFQ/teklif/satış, teslimat/fatura, AR/AP, CRM, proje, servis talebi. Genel muhasebe değildir. |
 
 ## 5. Çalışan özellikler
@@ -108,17 +111,23 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
   kapsar; route map birçok yeni modülü içermediğinden tüm iş mutasyonları audit
   kapsamına girmez. Audit yazma hatası isteği başarısız kılmaz ve yalnızca
   console'a yazılır.
-- `PARTIAL` — Lot/seri izlenebilirliği iş emri düzeyindedir. Heat number,
-  malzeme sertifikası/CoC, kabul/karantina, as-built/as-inspected ilişki ve
-  lotun zorunlu tüketim/üretim bağları yoktur.
-- `PARTIAL` — Recipe adımları ad, sıra ve parametre taşır; iş emrine donmuş
-  rota/revizyon, operasyon istasyonu, takım/program, setup, yetkin operatör ve
-  operasyon bazlı kalite kapısı içermez.
-- `PARTIAL` — `Material.stockQty`/`PartStock.qty` ile `StockBalance` bilinçli
-  olarak paraleldir; satın alma, tüketim, mamul ve teslim akışlarının tamamı
-  bin/lot bakiyesine henüz bağlı değildir.
-- `PARTIAL` — Webhook teslimi imzalı ve SSRF'e karşı korunmuş olsa da
-  fire-and-forget'tir; durable outbox, retry, teslim geçmişi ve dead-letter yoktur.
+- `VERIFIED_DONE` — Material lotunda heat, tedarikçi lotu, CoC numarası ve
+  kabul/karantina/red durumu saklanır. Kabul edilmemiş lot teslim/tüketime
+  giremez; zorunlu lot politikası ve iş emri düzeyinde as-built bağ doğrulandı.
+  As-inspected ölçüm bağı ve fiziksel karantina rafı henüz yoktur.
+- `PARTIAL` — Aktif Recipe, iş emrine revizyonu ve adım parametreleriyle
+  immutable operasyon snapshot'ı olarak kopyalanır. Operasyon makine ataması,
+  sıralı başlatma ve koşulardan türetilen WIP vardır; CNC operasyonunda
+  PUBLISHED NC ve tooling setup doğrulaması zorlanır. Yetkin operatör, genel
+  kalite kapısı ve alternatif kaynak yoktur.
+- `VERIFIED_DONE` — `InventoryMovement` immutable hareket defteri stok
+  değişiminin kaynağıdır. `Material.stockQty`, `PartStock.qty` ve
+  `StockBalance` transaction içi projeksiyonlardır; satın alma, tüketim/madde
+  iadesi, mamul, sevkiyat, transfer ve sayım bu sınırdan geçer. Eski toplamlar
+  kaybolmadan `UNASSIGNED` başlangıç bakiyesine taşınır.
+- `PARTIAL` — Webhook teslimi imzalı ve SSRF'e karşı korunmuştur; subscription
+  delivery event'i, retry, DLQ ve replay vardır. Ancak tüm domain mutasyonları
+  için transaction-içi outbox ve harici consumer inbox dedup yoktur.
 - `PARTIAL` — OEE, enerji, bakım ve çizelgeleme gerçek iş verisini kullanır;
   ancak otomatik enerji, güvenilir duruş sınıflaması ve sonlu kapasite yoktur.
 
@@ -139,17 +148,17 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 - Çok tenant şirket/fabrika izolasyonu, tenant provisioning, RLS ve tenant
   yönetim yaşam döngüsü.
-- Operasyon/rota yürütme, iş merkezi kapasitesi, takım/fixture/program
-  bağlama, operatör yetkinliği ve dispatching.
+- İş merkezi kapasitesi, operatör yetkinliği, genel kalite kapısı ve dispatching.
 - Çok seviyeli/alt montaj BOM, alternate material/supplier, lead-time ve
   capacity-aware MRP II.
-- Transactional outbox/inbox, kalıcı queue/worker, dead-letter/replay ve
-  entegrasyon idempotency sözleşmeleri.
+- Tüm domain komutlarına transactionally bağlanan outbox/inbox ve entegrasyon
+  idempotency sözleşmeleri.
 - SAP/Logo/Netsis/Dynamics/Oracle adapterleri, canonical event modeli ve veri
   sahipliği kuralları.
 - AI Copilot command gateway, taslak/onay, tool izinleri, model sağlayıcı
   seçimi ve lokal model dağıtımı.
-- Feature flag, lisans, modül etkinleştirme, müşteri/kurulum paketleme.
+- Edition/limit lisanslama, müşteri/kurulum paketleme ve entitlement dışındaki
+  feature-flag kapsamı.
 - MSSQL ürünü, Oracle uygulama veritabanı desteği, Kubernetes/air-gap bundle,
   gözlemlenebilirlik ve felaket kurtarma orkestrasyonu.
 
@@ -171,11 +180,16 @@ kurulumlar ayrı dağıtım/sürümleme kararları gerektirir.
 
 ## 10. Kritik mimari riskler
 
-1. **Tenant izolasyonu:** `DEFAULT_TENANT_ID` sabiti ve RLS olmaması cloud
-   ürününe doğrudan taşınamaz. `CRITICAL`.
-2. **Stok çift doğrusu:** toplam stok ile bin/lot stoğu ayrışabilir. `CRITICAL`.
-3. **Operasyon/rota eksikliği:** gerçek CNC iş akışı ve kapasite planı güvenilir
-   biçimde modellenemez. `CRITICAL`.
+1. **Tenant izolasyonu:** Uygulama katmanında artık Prisma Client Extension +
+   AsyncLocalStorage ile zorunlu (bkz. AHK-017, `VERIFIED_DONE`). Kalan artık
+   risk: tam PostgreSQL RLS yok — `$queryRaw`/harici script/DB-doğrudan erişim
+   uygulama katmanını atlayabilir; cloud çok-kiracılı varyant için ayrı RLS
+   ADR'si gerekir. `MEDIUM` (önceki `CRITICAL`'dan düşürüldü).
+2. **Legacy lokasyon doğruluğu:** eski toplamlarla uzlaştırılan `UNASSIGNED`
+   bakiye fiziksel sayımla gerçek rafa taşınmalıdır. `HIGH`.
+3. **Rota kapsamı:** operasyon snapshot/WIP çekirdeği vardır; ancak setup,
+   takım/program, kalite kapısı ve kaynak kapasitesi olmadan gerçek CNC
+   planlama/dispatch güvenilir değildir. `HIGH`.
 4. **M80 saha doğrulaması yok:** simülatör başarısı gerçek tezgâh entegrimi
    anlamına gelmez. `HIGH`.
 5. **Audit kapsam/başarısızlık davranışı:** immutable tablo tam audit trail
@@ -208,10 +222,12 @@ yönetimi. Bu standartlar hedef olarak yazılabilir; sertifikasyon iddiası yap�
 
 - Organization/Company/Fabrication site yapısı tenant'tan ayrı ve bağlayıcı
   değildir; Plant > Area > Workplace > Unit yalnız fiziki hiyerarşidir.
-- Route, OperationDefinition, WorkOrderOperation, resource requirement,
-  operation status/quantity, setup ve operasyon bazlı WIP yoktur.
-- Material masterda grade/form/heat/CoC/sertifika, supplier approval ve kabul
-  statüsü yoktur.
+- Recipe kaynak rota tanımı ve WorkOrderOperation snapshot/status/WIP vardır;
+  OperationDefinition, resource requirement, setup, takım/program ve kalite
+  kapısı eksiktir.
+- Material masterda grade/form ve supplier approval yoktur. Heat/CoC ve kabul
+  statüsü material lotunda tutulur; CoC dosyasını karar anında zorunlu
+  bağlayan kontrollü iş akışı henüz yoktur.
 - Lot/serial kaydı vardır fakat seri birimi, ölçüm, NCR, rework, sevkiyat ve
   as-built doküman ilişkileri zorunlu/kapsamlı değildir.
 - Doküman, NC programı, teknik resim ve recipe için controlled release,
@@ -310,29 +326,115 @@ belirlememeli; on-premise/offline grace, audit ve destek prosedürü iş kararı
 
 | ID | Başlık | Modül | Durum | Öncelik | Bağımlılık / risk | Kabul kriteri | Test | Boyut | Faz |
 |---|---|---|---|---|---|---|---|---|---|
-| AHK-001 | Plan/README/rehber tutarlılığı | Platform | `PARTIAL` | P0 | Stale belge yanlış kurulum/ürün beklentisi doğurur | README, kurulum ve entegrasyon rehberi güncel modül/connector/error/webhook durumunu açıkça belirtir | Link/komut smoke | S | 0 |
-| AHK-002 | Yerel izole e2e + CI build gate | Platform | `VERIFIED_DONE` | P0 | Gerçek DB'ye test koşturulması riskli; CI build eksik | `pnpm test:e2e` host portu/kalıcı volume olmadan PostgreSQL, MinIO ve LDAP ile migration+seed+e2e çalıştırır; CI backend/web production build ve fresh-db migration e2e koşar | Yerel Docker e2e, build/type-check/lint ve test kanıtı | M | 0 |
-| AHK-003 | Stok tek doğrusu ve movement ledger | Inventory | `PARTIAL` | P0 | Mevcut total/bin/lot bakiyeleri ayrışabilir | Her stok değişimi immutable hareket üretir; toplam/balance tutarlılık testi geçer | Transaction/e2e | XL | 1 |
-| AHK-004 | Rota ve WorkOrderOperation çekirdeği | MES | `NOT_STARTED` | P0 | Gerçek operasyon, kalite ve kapasite bunun üzerine kurulur | Revizyonlu rota, operasyon statüsü/qty, kaynak ve WIP iş emrine snapshot olarak bağlanır | Unit/e2e/UI | XL | 1 |
-| AHK-005 | Traceability foundation | Quality/Inventory | `PARTIAL` | P0 | Savunma denetimi ve recall için heat/CoC eksik | Material lot heat/CoC/kabul durumu; tüketim/üretimde zorunlu bağ ve as-built trace | E2e/replay | XL | 2 |
-| AHK-006 | Audit coverage ve elektronik onay tasarımı | Platform/Quality | `PARTIAL` | P0 | Kısmi audit denetlenebilirlik iddiasını zayıflatır | Tüm command mutasyonları atomik audit/event üretir; imza policy karar kaydı vardır | Audit matrix/e2e | L | 2-3 |
-| AHK-007 | M80 keşif ve hardware acceptance | Machine Connect | `BLOCKED` | P0 | M80 API dokümanı, IP/ağ erişimi ve bakım penceresi gerekir | Gerçek iki tezgâhta protocol contract, read-only pilot, event doğruluk ve rollback kanıtı | Hardware acceptance | L | 4 |
-| AHK-008 | Güvenli factory edge | Machine Connect | `NOT_STARTED` | P1 | Connector bellek kuyruğu/tek key üretim dayanıklılığı için yetersiz | Kalıcı kuyruk, device identity, outbound-only TLS ve health/metrics | Fault-injection | L | 4 |
-| AHK-009 | Outbox/inbox ve DLQ | Integration Gateway | `NOT_STARTED` | P1 | Webhook fire-and-forget veri kaybedebilir | Atomik outbox, consumer inbox dedup, retry/backoff/DLQ/replay ekranı | Contract/e2e | XL | 5 |
-| AHK-010 | ERP ownership matrix + ilk adapter | Integration Gateway | `NEEDS_DECISION` | P1 | Hedef ERP ve master-data sahibi seçilmeden kodlanamaz | Seçilen ERP için mapping, mutabakat ve hata yönetimiyle dar pilot | Contract/UAT | L | 5 |
-| AHK-011 | MRP II / finite capacity | Planning | `NOT_STARTED` | P1 | Rota ve güvenilir stok gerektirir | Alternatif kaynak, süre, kapasite takvimi ve senaryo sonucu | Algorithm/e2e | XL | 6 |
-| AHK-012 | Quality plan/deviation/rework | Quality | `NOT_STARTED` | P1 | Operation model ve controlled docs gerekir | Kontrol planı, cihaz, deviation onayı ve rework route as-built kayda bağlıdır | E2e/UAT | XL | 3 |
-| AHK-013 | AI command gateway | AI Copilot | `NOT_STARTED` | P1 | Command/audit/approval çekirdeği gerekir | Taslak, policy, onay ve audit olmadan hiçbir mutation tool çalışmaz | Security/contract | XL | 7 |
-| AHK-014 | Tenant/entitlement foundation | Platform | `NOT_STARTED` | P2 | Ürün/hosting kararı gerekir | Tenant context, RLS/izolasyon testi ve modül entitlement policy'si | Isolation/e2e | XL | 8 |
-| AHK-015 | Air-gap/DR/observability paketi | Deployment | `NOT_STARTED` | P2 | Operasyon sahipliği ve altyapı kararı gerekir | Offline bundle/SBOM, MinIO+Postgres restore drill, metrics/logging/alerting | Drill | L | 8 |
-| AHK-016 | MSSQL portability assessment | Data | `NOT_STARTED` | P3 | PostgreSQL-only kontratların envanteri gerekir | Karar kaydı, uyum matrisi ve POC CI; aksi halde resmî destek verilmez | Matrix/POC | L | 8 |
+| AHK-001 | Plan/README/rehber tutarlılığı | Platform | `VERIFIED_DONE` | P0 | Stale belge yanlış kurulum/ürün beklentisi doğurur. **2026-08-09'da düzeltildi:** README hâlâ Faz 0'ı tek kapsam olarak anlatıyordu (Satış/Kalite/Bakım/Finans/HR/CRM/PLM/tooling/connector genişlemesinden hiç bahsetmiyordu), roller/yetkilendirme bölümü `PermissionGroup`/tenant entitlement katmanını atlıyordu, test bölümü aylar önce donmuş sayılar (56 e2e, "backend 3" birim) taşıyordu — hepsi güncellendi; README artık `PLAN.md`'yi tek kaynak-of-truth olarak işaret ediyor ve hızla eskiyen sayı/yüzde eklemiyor. `docs/entegrasyon-kilavuzu.md`'de kendi kendiyle çelişen bir cümle bulundu (§2.1 webhook teslim/replay'i belgeliyordu, §6 "webhook mekanizması yok" diyordu — Faz J'den beri yanlıştı) ve düzeltildi. `docs/kurulum-kilavuzu.md` zaten güncel bulundu (tek-tenant kısıtlaması hâlâ doğru — tenant provisioning API'si yok), değiştirilmedi. | README'deki link/komutlar (`pnpm test`/`test:e2e`/`typecheck`/`dev:backend`/`dev:web`, `docs/*.md` yolları) doğrulandı; `docs/kullanici-kilavuzu.md`'nin kendisi bu turun kapsamı dışı bırakıldı (AHK-001 kabul kriteri README+kurulum+entegrasyon rehberini adlandırıyor). | Link/komut smoke (manuel — `package.json` script'leri ve dosya yolları grep ile doğrulandı) | S | 0 |
+| AHK-002 | Yerel izole e2e + CI build gate | Platform | `VERIFIED_DONE` | P0 | Gerçek DB'ye test koşturulması riskli; CI build eksik | `pnpm test:e2e` host portu/kalıcı volume olmadan PostgreSQL, MinIO ve LDAP ile migration+seed+e2e çalıştırır; CI backend/web production build ve fresh-db migration e2e koşar. İzole e2e başlangıç timeout'u 20 sn olarak düzeltildi; 19 paket/126 test temiz ortamda geçti. | Yerel Docker e2e, build/type-check/lint ve test kanıtı | M | 0 |
+| AHK-003 | Stok tek doğrusu ve movement ledger | Inventory | `VERIFIED_DONE` | P0 | Eski verinin fiziksel lokasyonu bilinmeyebilir | Her stok değişimi immutable hareket üretir; toplam/balance tutarlılık testi geçer. Legacy miktar `UNASSIGNED` başlangıç hareketiyle korunur. | Transaction/e2e | XL | 1 |
+| AHK-004 | Rota ve WorkOrderOperation çekirdeği | MES | `VERIFIED_DONE` | P0 | Setup/kalite kapısı/kapasite sonraki işlere bırakıldı | Aktif Recipe revizyonu/adımları iş emrine immutable snapshot olarak kopyalanır; operasyon sırası, makine ataması ve koşu temelli WIP korunur. | Type-check, build, unit ve fresh-db e2e | XL | 1 |
+| AHK-005 | Traceability foundation | Quality/Inventory | `VERIFIED_DONE` | P0 | Karantina rafı ve CoC dosyasının sertifika numarasıyla zorunlu eşleştirilmesi ileri iştir | Material lot heat/CoC/kabul durumu; kabul edilmemiş lot stoğa/tüketime girmez, zorunlu lot bağlantısı ve as-built trace korunur | Fresh-db E2E/replay | XL | 2 |
+| AHK-006 | Audit coverage ve elektronik onay tasarımı | Platform/Quality | `VERIFIED_DONE` | P0 | ApprovalRequest oluşturma ve kararları (CAPA, MRP satın alma/üretim önerisi), CAPA/MRP'nin çağırdığı aynı transaction içinde audit yazar; bildirim commit sonrasındadır. **Kritik kararlar artık `AuthService.reauthenticate()` ile transaction dışında yeniden kimlik doğrulama gerektirir** (`ApprovalsService.approve/reject`'in `reauth` parametresi), kanıt (`reauthenticatedAt`/`reauthSource`) audit'in `after` alanına yazılır — PLM NC onayının zaten uyguladığı deseni CAPA/MRP'ye genelleştirdi. **OIDC kullanıcıları için de artık mümkün:** `OidcAuthService.reauthorizeUrl`/`handleReauthCallback` (`prompt=login` ile IdP'de zorunlu yeniden interaktif giriş) kısa ömürlü imzalı bir reauth kanıtı üretir, `AuthService.reauthenticate` bunu doğrular — önceden bu dal her zaman 401 dönüyordu. Ortak `InventoryService` sınırı, satın alma teslimi/tüketim-iade/mamul/transfer/sevkiyat/sayım hareketini kendi transaction'ında auditler. Lot kabulü ile QualityPlan/Inspection de kendi transaction'ında audit yazar. Kaynakla doğrulanmış açıklar `docs/audit-matrisi.md` içindedir. **Frontend reauth açığı KAPATILDI (2026-08-07):** `capa.tsx`/`mrp.tsx` onay/red butonlarının `password` alanı olmadan boş body gönderdiği (backend her zaman 400 dönüyordu — web UI'da hiç kimse CAPA/MRP onaylayamıyordu) canlı `docker compose` testiyle doğrulandı ve düzeltildi: paylaşılan `apps/web/src/components/reauth-modal.tsx` (LOCAL/LDAP şifre input'u + OIDC popup penceresi ile `IdP ile yeniden doğrula`, `oidc-callback.tsx`'e `postMessage` desteği eklendi), `AuthUser`/`JwtPayload`'a `authSource`/`oidcProviderId` eklendi (`/auth/me` artık bunları döner — frontend'in hangi reauth UI'ını göstereceğine karar vermesi için gerekliydi). | Genel `AuditInterceptor`'ın istek-sonrası (transaction dışı) yazım modeli ve alan bazlı hassas veri maskeleme/break-glass kapsam dışı bırakıldı — güvenilir teslim outbox'ı gerektirir (AHK-009). | Unit (18+7 yeni OIDC reauth, capa/mrp/approvals/auth/oidc-auth spec'leri) + fresh PostgreSQL E2E (`test/approval-reauth.e2e-spec.ts`: yanlış şifre 401, doğru şifre + audit kanıtı, eksik şifre 400) + canlı `docker compose` duman testi (CAPA approve/reject, MRP purchase/production-proposal approve/reject — gerçek şifreyle 200 OK) | L | 2-3 |
+| AHK-007 | M80 keşif ve hardware acceptance | Machine Connect | `PARTIAL` | P0 | Simülatörle read-only contract, event/tag, bağlantı kesilmesi ve otomatik yeniden bağlanma doğrulandı; M80 API dokümanı, IP/ağ erişimi ve bakım penceresi gerçek saha kabulü için gerekir. Prosedür `docs/m80-hardware-acceptance.md` içinde hazır | Gerçek iki tezgâhta protocol contract, read-only pilot, event doğruluk ve rollback kanıtı | Simulator + hardware acceptance | L | 4 |
+| AHK-008 | Güvenli factory edge | Machine Connect | `PARTIAL` | P1 | Kalıcı event kuyruğu disk üzerinde atomic rename ile eklendi; Docker profilinde adlandırılmış volume'a bağlandı ve simülasyon testleriyle doğrulandı. Makine anahtarı bcrypt hash olarak saklanır; connector yalnızca loopback sağlık/Prometheus metric ucu açar ve Docker healthcheck ile denetlenir. Karşılıklı cihaz sertifikası, sertifika yenileme, outbound TLS zorlaması ve merkezi metric toplama eksik | Kalıcı kuyruk, device identity, outbound-only TLS ve health/metrics | Fault-injection | L | 4 |
+| AHK-009 | Outbox/inbox ve DLQ | Integration Gateway | `VERIFIED_DONE` | P1 | Kalıcı webhook teslim outbox'ı, claim, retry, DLQ ve admin replay endpoint'i (mevcuttu). Genel `OutboxEvent` modeli + `OutboxService.record(tx, ...)` (sadece `Prisma.TransactionClient` alır, transaction dışı kullanım derleme zamanında engellenir) + `OutboxDispatcherService` (claim+backoff, WebhooksService ile aynı desen) — `CapaService.decide` ve `downtime.service.ts` (AHK-018) ile pilot edildikten sonra **2026-08-08/09'da geri kalan tüm domain yazım noktalarına genelleştirildi:** gerçek kapsam ilk tahmin edilen ~29 değil ~85 `emitToTenant` çağrı yeriydi (24 servis: alarms, ap, ar, calibrations, capa (kalan 4 metodu), consumption, customer-notes, cycle-counts, delivery, finished-goods, inspections, invoice, machines, maintenance-orders, mrp, non-conformance, notifications, production, purchasing, quotes, rfq, sales-orders, service-tickets, spc, transfer-orders, work-orders) — hepsi ya zaten var olan `$transaction` içine `outbox.record(tx,...)` eklenerek (Case A) ya da tek başına duran yazım `$transaction`'a sarılarak (Case B) göç etti; event adı/payload'ları değişmedi, sadece teslim mekanizması. `NotificationsService.notifyUser` kendi (`notification.create` + `outbox.record`) transaction'ına kavuştu — `ApprovalsService.notifyDecision`'ın kendi transaction'ına katılamaması bilinçli bir kapsam sınırı (ayrı bir aggregate, zaten kendi atomikliğine sahip). Gelen mesaj inbox dedup hâlâ yok (backlog). | Consumer inbox dedup (gelen webhook/entegrasyon mesajları için) | Unit (tüm 24 servisin spec'leri, `$transaction`/`outbox: { record }` mock'larıyla güncellendi) + fresh PostgreSQL tam E2E suite (30 dosya, 166/173 — 7 bilinen ilgisiz hata: `crud.e2e-spec.ts`/`platform-modules.e2e-spec.ts`'nin "SMEC 5500"/`MES_CNC_TOOLING` varsayımları, AHK-009'dan önce de mevcuttu) + `test/outbox-durability.e2e-spec.ts` (dispatcher durdurulunca event PENDING kalır/kaybolmaz, manuel tetiklenince DISPATCHED + emitToTenant tam 1 kez). **Yan bulgu/düzeltme:** `platform-modules.e2e-spec.ts` paylaşılan varsayılan tenant'ta `QMS_INSPECTION`'ı disabled bırakıyordu, "alarms" sayfasını (aynı modüle eşlenir) yeniden kullanan `downtime.e2e-spec.ts` tam suite'te sahte 403 alıyordu — `afterAll`'a temizlik eklenerek düzeltildi. | XL | 5 |
+| AHK-010 | ERP ownership matrix + ilk adapter | Integration Gateway | `NEEDS_DECISION` | P1 | Hedef ERP ve master-data sahibi seçilmeden adapter kodlanamaz. Hedeften bağımsız sahiplik/sözleşme matrisi `docs/erp-ownership-matrix.md` içinde hazır | Seçilen ERP için mapping, mutabakat ve hata yönetimiyle dar pilot | Contract/UAT | L | 5 |
+| AHK-011 | MRP II / finite capacity | Planning | `PARTIAL` | P1 | Kapasite hazırlık endpoint/ekranı makine yükünü, atanmamış ve bloke operasyonları gösterir. **2026-08-09'da daraltılmış bir dilim eklendi (kullanıcı onayıyla, gerçek finite scheduling motoru kapsam dışı bırakıldı):** `RecipeStep.standardMinutes` (opsiyonel planlama verisi) `WorkOrderOperation.standardMinutes`'e WorkOrder oluşturulunca immutable snapshot olarak kopyalanıyor (ncProgramId ile aynı desen); `Machine.dailyCapacityMinutes` (opsiyonel — girilmezse o makine hesaba katılmaz). Yeni `SchedulingModule`/`GET /scheduling/capacity?from&to`: bir iş emrinin operasyon süresini planlanan pencereye (plannedStartDate→plannedEndDate) eşit dağıtıp her makine/gün için yük ve kapasite aşımını (`overloaded`) döner — **gerçek sıralı zamanlama değil, bilinçli basitleştirme**. `scheduling.tsx`'e Gantt'ın üstünde günlük yük çubukları eklendi (aşımda kırmızı); `machines.tsx`/`recipes.tsx`'e ilgili form alanları eklendi. | Standart süre, vardiya, bakım takvimi ve alternatif kaynak modeli olmadığı için hâlâ gerçek finite schedule üretmiyor — sadece yük görünürlüğü var. Alternatif kaynak, vardiya takvimi ve senaryo sonucu hâlâ backlog'da. | Unit (`scheduling.service.spec.ts` 5 test: eşit dağıtım, kapasitesiz makine atlama, aşım tespiti, eksik veri atlama) + fresh PostgreSQL E2E (`scheduling.e2e-spec.ts` 3/3: recipe→WO snapshot kopyalama, pencereye eşit dağıtım, aşım tespiti) + tam e2e paketi regresyonsuz (181/182, kalan 1 hata `crud.e2e-spec.ts`'nin bilinen "SMEC 5500" sıralama kırılganlığı, bağımsız) | Algorithm/e2e | XL | 6 |
+| AHK-012 | Quality plan/deviation/rework | Quality | `PARTIAL` | P1 | Tenant kapsamlı QualityPlan/QualityPlanCheck modeli, migration, yetkili API ve muayene ekranı eklendi. Plan satırı seçildiğinde ölçüm zorunluluğu/toleransı sunucuda zorlanır; tolerans dışı ölçüm FAIL ve NCR üretir. Kontrollü revizyon, satırları kopyalar, eski planı pasifleştirir ve geçmiş muayene bağını korur. **2026-08-10'da daraltılmış bir dilim eklendi (kullanıcı onayıyla, cihaz kalibrasyon bağı ve rework as-built rota kapsam dışı bırakıldı):** `NonConformanceActionType.DEVIATION` + `NonConformanceStatus.PENDING_DEVIATION_APPROVAL` — CAPA'nın Faz A `ApprovalsService`/AHK-006 reauth desenini `NonConformance`'a geneller. `requestDeviation()`/`decideDeviation()` (`PATCH /non-conformances/:id/{request,approve,reject}-deviation`) CAPA'nın `submitForApproval()`/`decide()` ile birebir aynı akış; `resolve()`'a yeni bir kapı eklendi — `DEVIATION` tipi bir NCR sadece onaylı (APPROVED) bir `ApprovalRequest` varsa `RESOLVED`'a geçebilir. `non-conformances.tsx`'e paylaşılan `reauth-modal.tsx` ile "Deviation Talep Et"/"Onayla"/"Reddet" eklendi. | Cihaz kalibrasyon bağı ve rework as-built rota kaydı hâlâ yok — backlog. | Unit (`non-conformance.service.spec.ts` yeni, 8 test: yanlış actionType/status reddi, ApprovalRequest oluşturma, reauth, resolve() kapısı) + fresh PostgreSQL E2E (`non-conformance-deviation.e2e-spec.ts` 5/5: onaysız kapatma reddi, talep→PENDING geçişi, yanlış şifre 401, SoD 403, doğru şifre→OPEN→resolve) + tam e2e paketi regresyonsuz (186/187, kalan 1 hata bilinen `crud.e2e-spec.ts` kırılganlığı) | Unit + e2e/UAT | XL | 3 |
+| AHK-013 | AI command gateway | AI Copilot | `PROTOTYPE` | P1 | Yetkili `/copilot/drafts` API'si ve ekranı, kullanıcının sayfa yetkisine göre iş emri/üretim, stok-lot, kalite, MRP, satın alma/satış, tezgah-bakım, rota, raporlama ve entegrasyon yeteneklerini eşleştirir; malzeme kaydında tenant içi mükerrer ve eksik alan taslağı vardır. Model sağlayıcısı, kalıcı draft/approval kaydı ve mutation tool'u yok; `executionAllowed=false` zorlanır | Taslak, policy, onay ve audit olmadan hiçbir mutation tool çalışmaz | Unit/security/contract | XL | 7 |
+| AHK-014 | Tenant module entitlement foundation | Platform | `VERIFIED_DONE` | P0 | `TenantModuleEntitlement` katalog varsayılanlarını korur; admin PATCH atomik değişiklik + transaction-içi audit yazar. `PagesGuard` kapalı modülün backend endpoint'ini engeller, SPA aynı API ile görsel geri bildirim verir. Eşzamanlı aynı-state isteklerde tek audit kaydı E2E ile doğrulandı. Genel tenant izolasyonu bu işin parçası değildir; AHK-017'de ayrı ele alınır. | Migration + unit/guard + fresh PostgreSQL E2E: tenantId enjeksiyonu, RBAC, kapat/aç, audit ve concurrency geçer | M | 0 |
+| AHK-018 | Downtime/Andon taksonomisi | MES | `VERIFIED_DONE` | P1 | `DowntimeReason` (tenant-scoped kod/kategori kataloğu, AlarmDefinition ile aynı desen) + `DowntimeEvent` (açık/kapalı yaşam döngülü, sınıflandırılabilir duruş kaydı) eklendi. Mevcut `MachineStatusEvent(ALARM)`/`downtimeNote`/OEE Pareto akışına DOKUNULMADI (paralel, forward-only). `MachinesService.handleTelemetry`: ALARM otomatik açar (sınıflandırılmamış), CYCLE_START/PART_COMPLETE/IDLE otomatik kapatır. `POST /downtime/start` ile elle Andon çağrısı (aynı makinede ikinci açık kayıt 409), `PATCH /downtime/:id/classify` ile sonradan sınıflandırma, `PATCH /downtime/:id/end`. AHK-009 outbox'ı kullanır (`downtime.started`/`downtime.ended` domain yazımıyla aynı transaction'da). "alarms" sayfa entitlement'ı yeniden kullanıldı, yeni PageKey/katalog genişletmesi gerekmedi. **2026-08-09'da tamamlandı:** Andon çağrı butonu HMI operatör terminaline (`hmi-operations.tsx`, `/hmi/operations`) eklendi — seçili operasyonun makinesine bağlı `DowntimeCard`, açık duruş yoksa "Duruş Bildir" (`POST /downtime/start`, opsiyonel neden/not), açık duruşta "Duruşu Bitir" (`PATCH /downtime/:id/end`) gösterir; Andon panosu (`andon.tsx`) bilinçli olarak dokunmatik yapılmadı (salon ekranı tasarım niyeti korundu). `DowntimeService.pareto()` + `GET /downtime/pareto` eklendi — kapanmış `DowntimeEvent`'leri `reason.label`'a göre gruplar (sınıflandırılmamış dahil), mevcut `DowntimeParetoChart` bileşeni değişmeden reuse edildi; `alarms.tsx`'e "Duruş Nedeni Kataloğu" (CRUD) + "Duruş Pareto" bölümleri eklendi. HMI operatörlerinin (sadece `hmi-operations` sayfa yetkisi, `alarms` yetkisi YOK) `/downtime/*`'a erişebilmesi için `findReasons`/`list`/`start`/`end`'e method-level `@RequirePage("alarms","hmi-operations")` eklendi (AR/AP'nin GET-override deseninin genellemesi); `classify` ve reason CRUD bilinçli olarak `alarms`-only kaldı. | Eskalasyon (N dakika kapatılmazsa üst role bildirim) hâlâ yok — backlog. | Fresh PostgreSQL E2E (`test/downtime.e2e-spec.ts`, 9/9): ALARM idempotent açılış, classify, CYCLE_START otomatik kapanış, elle start/409/end, var olmayan reasonId reddi, pareto gruplama, HMI-only kullanıcı list/start/end erişimi + classify 403; `test/hmi-operations.e2e-spec.ts`/`test/permission-groups.e2e-spec.ts` regresyonsuz (3 suite/19 test birlikte); yeni `downtime.service.spec.ts` unit (3/3); backend tam unit 201/203 (2 bilinen ilgisiz `pages.guard.spec.ts` hatası), backend/web typecheck temiz, web 22/22. | M | 1 |
+| AHK-017 | Uygulama katmanı tenant-isolation sınırı | Platform | `VERIFIED_DONE` | P0 | Tenant filtresi artık Prisma katmanında yapısal olarak zorunlu: `TenantContextInterceptor` (en dış global interceptor) her istekte `req.user`/`req.machine`'den tenantId'yi AsyncLocalStorage'a yazar; `PrismaService` (factory provider, `prisma.module.ts`) bir Prisma Client Extension (`tenant-scope.extension.ts`) ile DMMF'den türetilen TÜM `tenantId` alanlı modeller için `where`/`create`/`createMany`/`upsert`'e otomatik tenantId enjekte eder, nested (iç içe) write'ları recursive damgalar ve context'le çelişen açık bir tenantId varsa `TenantScopeViolationError` fırlatır. Context yoksa (login/refresh/machine-key gibi kimliğin henüz bilinmediği adımlar) sorgu bilerek dokunulmadan geçer. 3 adet ham `$queryRaw`/`$executeRaw` kullanımı (tooling/parts/inventory) tek tek denetlendi: ikisi salt advisory lock (veri sızdırmıyor), biri zaten elle tenantId içeriyor — değişiklik gerekmedi. | Fresh PostgreSQL E2E'de DMMF-tabanlı jenerik "tenant isolation sweep" (`test/tenant-isolation-sweep.e2e-spec.ts`) tüm tenant-scoped modeller için boş tenant'ta okuma sızıntısı olmadığını ve mismatch'li create/deleteMany'nin reddedildiğini kanıtlar; ayrıca mevcut 65 servisin tamamı bu extension altında tam e2e paketinde (158/160, kalan 2 hata AHK-017'den bağımsız önceden bilinen test-sıralama kırılganlığı) regresyonsuz çalışır. Tam PostgreSQL RLS (savunma-derinliği, `$queryRaw`/harici script erişimi için) kapsam dışı bırakıldı — Prisma'nın connection pooling modeliyle `SET LOCAL`/transaction-scoping karmaşıklığı ayrı bir ADR gerektirir, cloud varyantı kararına ertelendi. | Prisma extension unit test (9), DMMF sweep E2E, backend/web typecheck, tam izole e2e paketi | XL | 0-1 |
+| CAT-001 | Merkezi capability/product katalog ve core koruması | Platform | `VERIFIED_DONE` | P0 | `product-catalog.ts` suite, canonical module, implementation durumu, dependency, route/page/permission ve legacy entitlement eşlemesini tek kaynakta tutar. Platform Core kapatılamaz; beta veya uygulanmamış legacy entitlement tenant tarafından toggle edilemez. Kapsama matrisi `docs/capability-coverage-matrix.md` içindedir. Canonical child entitlement migration'ı ve sayfa guard'ın child kodlara taşınması CAT-002 ile daha önce tamamlanmıştı. **2026-08-09'da tamamlandı (lisans/edition limiti):** `Tenant.edition` alanı (yeni `ProductEdition` enum: FOUNDATION<ESSENTIALS<PROFESSIONAL<ENTERPRISE, default `ENTERPRISE` — mevcut tenant'ın hiçbir açık modülü kırılmadan göç eder) + `product-catalog.ts`'teki `edition` alanı artık gerçekten uygulanıyor: `PlatformModulesService.set()` tenant edition'ını aşan bir modülü etkinleştirmeyi reddeder (toggle-time), `PagesGuard` her guarded istekte tenant'ın edition'ını tazeden okuyup aşan modülleri disabled gibi 403'e düşürür (runtime) — tenant sonradan düşürülürse önceden açılmış modüller de otomatik bloklanır. Yeni `GET/PATCH /platform/modules/edition` (ADMIN-only, transactional audit). `platform-modules.tsx`'e tenant edition seçici + kartlarda "X edition gerektirir" rozeti eklendi. | Lisans/edition limitleri artık uygulanıyor; kalan açık yok. | Unit (`product-catalog.test.ts` 4 yeni, `platform-modules.service.spec.ts` 5 yeni, `pages.guard.spec.ts` 2 yeni) + fresh PostgreSQL E2E (`platform-modules.e2e-spec.ts`'ye izole `tenantB` üzerinden edition senaryosu: FOUNDATION'da modül açılamaz → ENTERPRISE'a yükseltilince açılır ve kullanılır → tekrar FOUNDATION'a düşürülünce zaten açık modül de 403 alır) + tam e2e paketi regresyonsuz (178/179, kalan 1 hata `crud.e2e-spec.ts`'nin bilinen "SMEC 5500" sıralama kırılganlığı, bu işten bağımsız) | Unit + platform entitlement E2E | L | 0 |
+| CAT-002 | Canonical child entitlement migration | Platform | `VERIFIED_DONE` | P0 | Canonical child enum'u, legacy-to-child compatibility map'i ve PostgreSQL backfill migration'ı eklendi. Page guard/SPA her sayfayı child entitlement ile zorlar; Platform Core kalıcı tenant entitlement'ı değildir. | Temiz PostgreSQL migration+seed, canonical catalog/unit/guard testleri ve iki-tenant platform entitlement E2E geçer. | XL | 0 |
+| PRODUCT-ARCH-001 | Commercial product catalog foundation | Platform / Commercial Architecture | `VERIFIED_DONE` | P0 | `commercial-product-catalog.ts` mevcut teknik `product-catalog.ts`'den ayrı, additive ve type-safe hedef sözleşmeyi sunar: non-sellable platform capabilities, independently sellable products, exactly-one-parent product features, provider requirements, iki ayrı graph ve mevcut teknik katalog için exhaustive declarative mapping. `SHARED_MASTER_DATA` platform capability olarak açıkça tanımlandı; `ERP_CRM_SALES`, `ERP_PROJECT_SERVICE`, `MES_PERFORMANCE`, `MES_CNC_TOOLING` split-required olarak işaretlendi. Hiçbir Prisma/entitlement/guard/route/UI davranışı değişmedi. Ayrıntı: `docs/product-arch-001-commercial-catalog-foundation.md`. | PRODUCT-ARCH-002 öncesi ticari grant migration'ı veya runtime resolver uygulanmaz; önce compatibility projection/ledger ve tenant acceptance matrisi gerekir. | Shared-types unit + typecheck; mevcut entitlement regressions | M | 0 |
+| PRODUCT-ARCH-002 | Entitlement V2 persistence & compatibility foundation | Platform / Commercial Architecture | `VERIFIED_DONE` | P0 | Expand-only Prisma V2 licence/product/feature/limit/usage/reconciliation tabloları, tenant-consistent composite FK'ler, catalogue-validating `EntitlementsV2Service`, read-only projection, existing `AuditLog` ve V2 resolver eklendi. Legacy runtime/edition/PagesGuard/UI bağlanmadı. PRODUCT-ARCH-003 implicit-default güvenlik riski nedeniyle eski materialisation yolunu kapatıp policy kontrollü servise taşıdı. Ayrıntı: `docs/product-arch-002-entitlement-v2-foundation.md`. | 2026-08-12 current isolated PostgreSQL run: `pnpm test:e2e -- entitlements-v2.e2e-spec.ts` applied all 64 migrations including 002+003, then passed 4/4 real-DB assertions. It proves V2 persistence/resolution, expiry, product/feature validation, and tenant-consistent composite-FK rejections. | Catalogue 6/6, focused backend 33/33, workspace typecheck PASS, isolated PostgreSQL E2E 4/4 PASS; host Prisma validate remains separately BLOCKED_ENVIRONMENT | L | 0 |
+| PRODUCT-ARCH-003 | Commercial migration policy & safe reconciliation | Platform / Commercial Architecture | `VERIFIED_DONE` | P0 | V2 ticari migration için versioned evidence/policy, read-only dry-run, tenant-admin approval, explicit reconciliation, provenance ve selective rollback eklendi. Missing legacy row `IMPLICIT_DEFAULT_ENABLED/REVIEW_REQUIRED` olur ve asla otomatik ProductGrant yaratmaz; tüm SPLIT_REQUIRED mapping'ler review'dadır. V2 guard/API/UI'ye bağlanmadı, public endpoint/all-tenant startup migration eklenmedi. Ayrıntı: `docs/product-arch-003-commercial-migration-policy.md`. | 2026-08-12 isolated PostgreSQL E2E 4/4 passed approval-gated reconciliation, idempotent replay, rollback with DIRECT-grant protection, tenant-scope rejection, and raw composite-FK rejection for approval/reconciliation/provenance relationships. | Focused policy/shadow/guard/platform tests within 33/33 PASS; isolated PostgreSQL E2E 4/4 PASS; no separate migration-service unit suite | L | 0 |
+| PRODUCT-ARCH-004 | Shadow entitlement evaluation & migration validation | Platform / Commercial Architecture | `VERIFIED_DONE` | P0 | Read-only `ShadowEntitlementEvaluatorService`, legacy effective access ile persisted/approved/projected V2 durumlarını type-safe karşılaştırır; high-severity privilege expansion/access removal mismatch’lerini ayırır, tenant-admin batch analysis ve deterministic readiness gate sağlar. PagesGuard/API/UI’ye bağlanmadı; request-time hook bilinçli olarak eklenmedi. Ayrıntı: `docs/product-arch-004-shadow-entitlement-evaluation.md`. | 2026-08-12 current isolated PostgreSQL E2E verified the persisted V2 foundation used by shadow evaluation (4/4); its focused unit tests verify comparison semantics. Source inspection confirms no guard/API/UI coupling. | Shadow evaluator included in 33/33 focused backend PASS, workspace typecheck PASS, isolated PostgreSQL entitlement E2E 4/4 PASS | L | 0 |
+| CNC-V1-00 | Deployment, provisioning & operations baseline | Deployment / CNC V1 | `VERIFIED_DONE` | P0 | Production startup is non-mutating; controlled migration and idempotent tenant/admin/plant provisioning use legacy ProductModule authority only. Production config fail-fast, health/readiness/build info, request correlation logging, connector heartbeat diagnostics, demo-seed separation, backup/restore and on-prem runbook were added. | `pnpm test:operations-e2e` on 2026-08-12: isolated PostgreSQL 16 fresh install (65 migrations) → provisioning → 2 smoke assertions → timestamped backup → second isolated PostgreSQL restore → Prisma schema status → restored login/data/legacy-module assertion. | Backend/connector typechecks PASS; connector 23/23; config/health 5/5; operations PostgreSQL E2E 3/3. Details: `docs/CNC-V1-00-DEPLOYMENT-OPERATIONS.md`. | L | 0 |
+| CNC-V1-01 | Released engineering master data, UOM & production calendar | CNC V1 / PLM | `VERIFIED_DONE` | P0 | Controlled Part/BOM/Routing release lifecycle and plant-scoped ProductionDefinition; immutable WO engineering snapshots, decimal-safe tenant UOM and canonical plant calendar/shift resolver. Legacy historical records remain `LEGACY_UNVERIFIED`; V2 entitlement authority is unchanged. | `pnpm test:operations-e2e` on 2026-08-12 applied 66 migrations, passed P-100 A/B snapshot + draft-C rejection E2E, provisioning, backup and isolated restore. | Backend/web typecheck PASS; UOM/calendar 4/4 unit PASS; isolated PostgreSQL E2E 3/3 PASS. Details: `docs/CNC-V1-01-ENGINEERING-MASTER-DATA.md`. | L | 0 |
+| CNC-V1-02 | Production material reservation & execution consumption | CNC V1 / Inventory | `VERIFIED_DONE` | P0 | Immutable WO snapshot requirements, tenant/lot allocation, canonical issue/return ledger movement, derived WIP, idempotent cumulative backflush, material scrap and MRP available-to-plan netting. Legacy stock remains readable; V2 entitlement authority is unchanged. Details: `docs/CNC-V1-02-MATERIAL-EXECUTION.md`. | 2026-08-12 isolated PostgreSQL 16: all 67 migrations, CNC-V1-02 material/concurrency E2E, deployment/engineering E2E (3 suites/5 tests), isolated backup/restore verification (1/1) PASS. Backend/web/connector/shared typechecks, focused backend regression and diff check PASS. | XL | 0 |
+| CNC-V1-03R | MRP daily planning, exception control & proposal conversion | CNC V1 / MRP | `VERIFIED_DONE` | P0 | Canonical `MrpService` performs plant/date-phased full regeneration with explicit `SalesOrderLine.fulfillmentPlantId` provenance, released-definition multi-level explosion, CNC-V1-01/02 UOM/calendar/inventory/reservation/WIP semantics, stored buckets/pegging/calculation, full exception workbench, and concurrency-safe FIRMED MAKE→PLANNED-WO / BUY→DRAFT-requisition conversion. All input reads, calculation and atomic publication use one PostgreSQL REPEATABLE READ snapshot; unassigned Sales demand is NOT_PLANNABLE and never guessed. Legacy entitlement authority remains unchanged. | 2026-08-17 real PostgreSQL: 37/37 MRP matrix including Sales Z1–Z3 and deterministic snapshot SNAP-A–F; 1,000 items 5.847s after hardening versus 4.699s before; backend/web/workspace/build PASS; clean 74-migration CNC 00/01/02/04/06 operations suite, backup and isolated restore PASS. Details: `docs/CNC-V1-03R-MRP-DAILY-PLANNING.md`. | XL | 0 |
+| CNC-V1-06 | Production quality execution, hold/release & NCR disposition | CNC V1 / QMS | `VERIFIED_DONE` | P0 | Released-plan lifecycle, immutable WO snapshot, inspection execution, hold/release, NCR disposition, canonical quality scrap, controlled rework boundary and inspector/NCR/HMI visibility. Details: `docs/CNC-V1-06-QUALITY-EXECUTION.md`. | Isolated real PostgreSQL operations suite PASS: 4 suites / 10 tests; isolated backup/restore verification PASS: 1 suite / 1 test. | XL | 0 |
+| CNC-V1-04 | Controlled MES execution lifecycle & rework execution | CNC V1 / MES | `VERIFIED_DONE` | P0 | One `WorkOrderOperation` lifecycle with durable setup/pause/hold/history, delta-safe idempotent production reports, material/quality gates, controlled NCR rework and separate reinspection evidence. HMI exposes state-appropriate actions and blocker/history visibility. Details: `docs/CNC-V1-04-MES-LIFECYCLE.md`. | 2026-08-13 isolated PostgreSQL 16 clean run: all 69 migrations; deployment, engineering, material, quality and MES lifecycle suites 5/14 PASS; second isolated PostgreSQL backup/restore suite 1/1 PASS. | XL | 0 |
+| CNC-V1-08R | Trustworthy OEE and operations cockpit | CNC V1 / MES analytics | `VERIFIED_DONE` | P0 | Canonical on-demand OEE uses governed planned time, immutable operation standards, execution, structured downtime and quality-hold facts. Explicit tenant/plant/range/as-of context is enforced for OEE, Digital Twin and the permission-gated read-only Cockpit; CMMS/MRP stay read-only blocker context. Cockpit and Digital Twin batch active work-order projections in one `REPEATABLE READ` source snapshot. Details: `docs/CNC-V1-08R-OEE-OPERATIONS-COCKPIT.md`. | 2026-09-08 fresh isolated PostgreSQL 16 with all 79 migrations: 50-machine canonical OEE benchmark 173.37 ms; 8 V1 operation suites / 70 tests PASS; backup to MinIO, second isolated restore, schema-current confirmation and restored canonical OEE proof 2/2 PASS. Focused backend/web gates previously green. | L | 0 |
+| CNC-V1-05 | Mitsubishi M80 controller production qualification | CNC V1 / CNC | `SOFTWARE_READY_FIELD_VALIDATION_REQUIRED` | P0 | One read-only M80 controller boundary: explicit capability/trust/freshness contract, tenant-scoped observation history/current projection, expected-versus-observed NC comparison, and fail-closed server-side start/resume gate. It never changes MES quantity/lifecycle, transfers programs, or remotely starts a CNC. Details: `docs/CNC-V1-05-CONTROLLER-QUALIFICATION.md`. | Simulator contract tests and isolated PostgreSQL evidence verify software behaviour; the real M80 field acceptance record is deliberately incomplete. `VERIFIED_DONE` requires `docs/CNC-V1-05-M80-FIELD-ACCEPTANCE.md` against a representative controller. | XL | Field validation |
+| PLM-001 | Kontrollü teknik doküman ve NC revizyon yayını | PLM/CNC | `VERIFIED_DONE` | P1 | `NcProgram` SHA-256, revision-history, Draft→Review→Approved→Published→Superseded/Archived, effectivity ve tek yayınlı revizyon kontrolünü taşır. RecipeStep/WorkOrderOperation yalnızca yayınlı snapshot bağlar; HMI başlangıçta tekrar doğrular. | Prisma migration/backfill, canonical `PLM_NC_PROGRAM` entitlement, RBAC/SoD, AHK-006 focused reauth/e-imza, transaction audit ve isolated PostgreSQL E2E geçer. Genel controlled-document lifecycle PLM_CHANGE_CONTROL kapsamıdır. | Unit + integration + fresh PostgreSQL E2E | XL | 1 |
+| MES-TOOL-001 | CNC tooling ve fixture master data | MES/CNC | `VERIFIED_DONE` | P1 | **Canonical iş kodu:** `MES-TOOL-001`; `AHK-019` alias/dependency etiketidir, ayrı backlog değildir. Forward-only tooling migration, tenant-scoped DB reservation constraints, immutable as-built snapshot, PUBLISHED NC/start gate, idempotent life consumption, persistent action grants and HMI/setup/requirement UI tamamlandı. | Presetter/offset/DNC, predictive life ve fixture maintenance/calibration validity kapsam dışı bağımlılıklarda kalır. | Shared DTO unit + fresh PostgreSQL E2E (8/8), backend/web typecheck ve production build, Prisma validate, diff check | XL | 0 |
+| MES-FIXTURE-MAINT-001 | Fixture bakım ve kalibrasyon uygunluğu | MES/EAM/QMS | `IN_PROGRESS` | P2 | Forward-only policy/event/record modeli, tenant-scoped idempotency anahtarları, action grants, bakım/kalibrasyon API’ları ve setup/start policy değerlendirmesi eklendi. CYCLE/PART_COUNT sayaçları yalnız doğrulanmış operasyon tamamlanmasında veya gerekçeli `FIXTURE_MAINT_OVERRIDE` ile değişir; bakım kanıtı policy revizyonuna bağlanır. Tooling UI policy seçimi, bakım/kalibrasyon geçmişi, evaluation, sertifika Document seçimi ve audit’li sayaç düzeltmesini sunar. Policy olmayan fixture mevcut MES-TOOL-001 davranışını korur; BLOCKING policy gerçek bakım/kalibrasyon kanıtı olmadan geçmez. | Kapanış kanıtları `RH-MES-FIXTURE-MAINT-001` release-hardening backlog’unda tutulur; bu checkpoint capability’yi `VERIFIED_DONE` yapmaz. | Seçili gerçek PostgreSQL E2E (11/11), backend/web typecheck ve production build, Prisma validate ve diff check geçer. MES-TOOL-001 için blocker değildir: mevcut güvenli status kapısı kullanılmayan fixture’ı reddeder, fakat ileri bakım doğrulamasını temsil etmez. | L | 3 |
+| RH-MES-FIXTURE-MAINT-001 | Fixture bakım/kalibrasyon release hardening | MES/EAM/QMS | `NOT_STARTED` | P2 | `MES-FIXTURE-MAINT-001` çalışan checkpoint’inin kapanış kanıtıdır; ayrı entitlement veya ürün modülü değildir. | 22 maddelik gerçek PostgreSQL negatif/concurrency matrisi; ham Prisma constraint hata sızıntısı denetimi; policy/override stale-version ve SoD kapsamı; belge sertifikası UI→API→tenant-boundary E2E; tam tooling regresyonu ve güvenlik/audit kapanışı. | Policy olmayan fixture, BLOCKING/WARNING/INFORMATIONAL politika, geçersiz/FAIL kalibrasyon, bakım vadesi, cross-tenant fixture/policy/event/record/Document, bakım–rezervasyon yarışı, duplicate event, revalidation ve immutable snapshot senaryolarının tamamı gerçek PostgreSQL’de kanıtlanır. | L | Release hardening |
+| MES-OPERATOR-HMI-001 | Operatör operasyon terminali | MES | `VERIFIED_DONE` | P1 | `/hmi/operations` tenant kapsamlı operasyon kuyruğu, canonical NC/setup checklist görünümü ve mevcut production/work-order start-complete komutlarını tek operatör akışında birleştirir. `HMI_READ`, `HMI_START`, `HMI_COMPLETE` persistent action grant’leri `MES_EXECUTION` sayfa entitlement’ından ayrıdır. | Bu ilk dilim yalnız yönlendirilmiş online operasyon yürütmeyi kapsar; backend gate’leri HMI’dan bağımsız canonical otorite olmaya devam eder. | Gerçek PostgreSQL HMI E2E (7/7): tenant liste/detail sınırı, doğrulanmış setup ile start+complete, blocker ve action grant reddi, machine/status filtreleri, aktif koşu olmadan tamamlama reddi, HMI_START-var-ama-HMI_READ-yok reddi, cross-tenant start/complete reddi; backend/web typecheck ve production build geçti | M | 1 |
+| MES-OPERATOR-HMI-002 | Operatör terminali genişletme backlog’u | MES | `PARTIAL` | P2 | `MES-OPERATOR-HMI-001`. **2026-08-10'da alt kabiliyetlerden biri (elektronik iş talimatı editörü) için PLANNER tarafı daraltılmış bir dilim eklendi (kullanıcı onayıyla, HMI'da gösterim ve talimat versiyonlama kapsam dışı bırakıldı):** `RecipeStep.instructionHtml`/`WorkOrderOperation.instructionHtml` (immutable snapshot, `standardMinutes` deseni), backend'de yazma-anında `sanitize-html` (dar allowlist — script/style/on*/href yasak, `<img>` sadece `data-document-id` referansı taşır, ham `src` asla saklanmaz), gömülü resimler mevcut `DocumentsService`/MinIO'ya (`entityType: "recipe-step"`) bağlanır. Grounding sırasında bulunan gerçek bir bug düzeltildi: `RecipesService.update()` her güncellemede tüm `RecipeStep`'leri silip yeniden oluşturuyordu (id kararlılığını kırıp resimleri yetim bırakırdı) — id-korumalı upsert'e çevrildi. `recipes.tsx`'e daha önce hiç var olmayan bir "Reçete Düzenle" ekranı eklendi (resim yüklemenin gerçek bir giriş noktası olması için). `/hmi/operations`'da gösterim de aynı oturumda tamamlandı: `HmiService.queueRow()` artık `instructionHtml`'i dönüyor (daha önce elle whitelist'lendiği için hiç dönmüyordu), `hmi-operations.tsx`'e talimat varsa gösterilen salt-okunur bir "İş Talimatı" kartı (`InstructionEditor readOnly`) eklendi. Barkod/QR, offline-first kuyruk, Andon, vardiya devri, beceri matrisi, OEE/telemetri ve gelişmiş dispatch hâlâ kapsam dışı — **elektronik iş talimatı editörü alt kabiliyeti (PLANNER editör + HMI gösterim) tam olarak bitti.** | Diğer alt kabiliyetler için her biri kendi tenant/action grant, canonical command kullanımı ve gerçek PostgreSQL E2E kabul kriteri ayrı tanımlanır. | Unit (`recipe-instruction-sanitizer.spec.ts` 7/7, `recipes.service.spec.ts` 8/8, `hmi.service.spec.ts` 3/3) + fresh PostgreSQL E2E (`work-instruction.e2e-spec.ts` 4/4: XSS sanitization, upsert ile resim kararlılığı, yabancı id reddi, WO snapshot + HMI'da görünme) + tam e2e paketi regresyonsuz (190/191, kalan 1 hata bilinen `crud.e2e-spec.ts` "SMEC 5500" kırılganlığı) + backend 234/236 (2 bilinen ilgisiz `pages.guard.spec.ts` hatası) + web 22/22 | L | 2-4 |
+| AHK-015 | Air-gap/DR/observability paketi | Deployment | `PARTIAL` | P2 | PostgreSQL backup scripti var; offline bundle/SBOM, MinIO restore drill, metrics/logging/alerting eksik. İşletim sınırı `docs/airgap-operasyon.md` içinde | Offline bundle/SBOM, MinIO+Postgres restore drill, metrics/logging/alerting | Drill | L | 8 |
+| AHK-016 | MSSQL portability assessment | Data | `PARTIAL` | P3 | PostgreSQL-only kontratlar kaynakta envanterlendi; SQL Server provider/POC/CI yok | Karar kaydı, uyum matrisi ve POC CI; aksi halde resmî destek verilmez. Kaynak kanıtı ve POC kabul kriterleri `docs/mssql-portability-assessment.md` içindedir | Matrix/POC | L | 8 |
+
+### PLM-001 sonrası platform açıkları
+
+- **AHK-006:** `apps/backend/src/auth/auth.service.ts#reauthenticate` local ve
+  LDAP reauth'ını PLM kritik komutlarında ve artık `ApprovalsService` üzerinden
+  CAPA/MRP proposal kararlarında da uygular (`VERIFIED_DONE`). **OIDC için
+  provider-side `prompt=login` kanıtı eklendi:** `OidcAuthService.reauthorizeUrl`
+  (JWT korumalı `POST /auth/oidc/:id/reauth/authorize`, IdP'nin mevcut SSO
+  oturumunu yok sayıp yeniden interaktif girişe zorlar) + `handleReauthCallback`
+  (`GET /auth/oidc/:id/reauth/callback`, public — kimlik imzalı `state`'ten
+  gelir, id_token'daki email zaten oturum açmış kullanıcıyla eşleşmezse
+  reddedilir/hesap değiştirme engellenir) kısa ömürlü (2dk) imzalı bir reauth
+  kanıtı üretir; `AuthService.reauthenticate` artık `authSource==="OIDC"` için
+  bunu doğrular (önceden bu dal her zaman 401 dönüyordu — OIDC kullanıcıları
+  CAPA/MRP gibi hiçbir kritik kararı ASLA onaylayamıyordu). CAPA/MRP DTO'ları
+  değişmedi: mevcut `password` alanına OIDC için bu kanıt token'ı yazılır.
+  **Keşfedilen ayrı bir açık (bu işin kapsamı dışında, backlog):** web UI'da
+  CAPA/MRP onay/red butonları (`apps/web/src/pages/capa.tsx`, `mrp.tsx`)
+  şu an `password` alanı hiç göndermeden boş body ile PATCH atıyor —
+  `decideCapaSchema`/`mrpProposalDecisionSchema` `password` zorunlu kıldığı
+  için bu istek authSource'tan bağımsız olarak backend'den her zaman 400
+  dönüyor olmalı; hiçbir kullanıcı (LOCAL/LDAP/OIDC) şu an web UI üzerinden
+  bir CAPA/MRP kararını onaylayamıyor gibi görünüyor. Reauth modalı (şifre
+  input'u LOCAL/LDAP için, OIDC için "IdP ile yeniden doğrula" popup akışı)
+  frontend'de hiç yok — ayrı bir P0 backlog maddesi olmalı.
+- **AHK-017:** `PartsService.assertNcProgramUsable`,
+  `RecipesService.create/update` ve `WorkOrdersService.createWithRoute` tenant
+  predicate kullanır. Zorunlu Prisma tenant context/RLS bu PLM sınırının
+  dışındadır ve AHK-017'de izlenmeye devam eder.
 
 ### Önerilen ilk geliştirme işi
 
-**AHK-002 — Yerel izole e2e + CI build gate** tamamlandı. `pnpm test:e2e`,
-geçici ağdaki PostgreSQL, MinIO ve LDAP üzerinde migration, seed ve e2e paketini
-çalıştırır; tamamlandığında volume'ları da siler. CI backend ve web production
-build'lerini de doğrular. Sonraki iş AHK-003 (stok tek doğrusu) olmalıdır;
+**MES-OPERATOR-HMI-001 — Operatör dispatch ve yönlendirilmiş operasyon terminali**
+`VERIFIED_DONE` durumundadır. İlk çalışan dikey dilim `/hmi/operations` route’u,
+tenant kapsamlı operasyon kuyruğu/detayı, canonical NC ve tooling/fixture checklist’i,
+ayrı persistent action grant’leri ve mevcut production/work-order start-complete
+komutlarını getirir. Mevcut `MES_EXECUTION`, PLM yayınlı NC sınırı ve
+MES-TOOL-001 setup checklist’ini tek operatör akışında birleştiren ayrı bir HMI
+route’u sağlar: kullanıcının atanmış/açık operasyonlarını gösterir, doğru
+makine/operasyon seçimini yapar, yayınlı NC ve tooling/fixture doğrulama
+durumunu görünür kılar ve mevcut backend start/complete komutlarını
+değiştirmeden kullanır. İlk dilim; tenant+action-grant tabanlı permission, HMI
+ekranı, 7 gerçek PostgreSQL E2E senaryosu (tenant sınırı, canonical start/
+complete, blocking setup+action grant reddi, machine/status filtresi, aktif
+koşu olmadan tamamlama reddi, eksik HMI_READ reddi, cross-tenant mutation
+reddi) ve backend/web typecheck+production build ile sınırlıdır. Barkod/
+offline, elektronik talimat editörü, Andon ve vardiya teslimi
+`MES-OPERATOR-HMI-002` backlog’undadır. Fixture bakım hardening’i
+`RH-MES-FIXTURE-MAINT-001` altında ayrı izlenir; bu dikey dilimin blocker’ı
+değildir.
+
+> Aşağıdaki AHK-005/AHK-002 notları tarihsel tamamlanma kanıtıdır; aktif ilk
+> geliştirme önerisi değildir.
+
+**AHK-005 — Traceability foundation** `VERIFIED_DONE` durumundadır.
+Material ve Part için lot zorunluluğu tanımlanabilir; material lotunda heat,
+tedarikçi lotu, CoC numarası ve kabul kararı saklanır. Sertifika zorunlu
+malzeme sertifikasız kabul edilemez; yalnızca kabul edilmiş material lotu satın
+alma teslimine ve tüketime girebilir. Mamul girişi lot-zorunlu partlarda lot
+ister; iki yönlü as-built trace lot → iş emri → mamul lot ve ters yönüyle temiz
+veritabanı E2E'de doğrulandı. Lot ekranı kabul/karantina/red, sertifika alanı
+ve lot belgelerini sunar. Sıradaki iş AHK-006 ile audit kapsamı ve elektronik
+onay tasarımını güçlendirmektir.
+
+**AHK-002 — Yerel izole e2e + CI build gate** `VERIFIED_DONE` durumundadır.
+`pnpm test:e2e`, geçici ağdaki PostgreSQL, MinIO ve LDAP
+üzerinde migration, seed ve e2e paketini çalıştırır; tamamlandığında volume'ları
+da siler. CI backend ve web production build'lerini de doğrular. Konteynerde
+OEE trend paketinin başlangıç maliyeti için Jest e2e timeout'u 20 sn'ye
+çıkarıldı; 2026-08-01'de temiz ortamda migration+seed sonrası 19 paket ve 126
+test geçti. Sonraki iş AHK-003 (stok tek doğrusu) olmalıdır;
 AHK-004 (rota/operasyon çekirdeği) onunla birlikte ürünün gerçek MES omurgasını
 kurar.
 
@@ -349,8 +451,10 @@ AHK-002 kabul kriterleri:
    Bu monorepo'da henüz lint komutu tanımlı değildir; boş/yanıltıcı bir lint
    kapısı eklenmedi. AHK-001/sonraki platform işi olarak ESLint+Prettier ve CI
    kapısı seçilmelidir.
-5. **Doğrulandı:** Mevcut 196 birim testin yeşil kalması ve e2e sonucunun CI'da kanıtlanması
-   zorunludur.
+5. **Açık kabul kriteri:** Mevcut 196 birim testin yeşil kalması ve e2e sonucunun CI'da kanıtlanması
+   zorunludur. İzole koşumda OEE trend başlangıç timeout'u gözlendi ve 20 sn
+   sınırla düzeltildi; bu ortamın süreç sınırı tam paketin son çıkış kodunu
+   toplamayı engellediği için CI veya sınırı olmayan yerel koşum kanıtı gerekir.
 
 ---
 
@@ -606,7 +710,12 @@ Kullanıcı isteği: AHKMES'i Siemens Opcenter X / Smartes SmartFactory ile reka
 - [x] **Yedekleme:** `scripts/backup.sh` (pg_dump + gzip + retention), `scripts/restore.sh`, `docs/yedekleme.md`.
 
 ### v1.0 — İlk Satış Adayı (tamamlandı)
-- [x] **Genealogy görselleştirme:** `GET /work-orders/:id/genealogy` — iş emri granülaritesinde backward (tüketilen malzeme) / forward (üretim koşuları, mamul girişi, müşteri/teklif) izlenebilirlik. **Bilinçli kapsam sınırı:** MTU/seri numarası bazlı takip yok (veri modelinde yok). Web: `/genealogy` sayfası.
+- [x] **Genealogy görselleştirme:** `GET /work-orders/:id/genealogy` — iş emri granülaritesinde backward (tüketilen malzeme) / forward (üretim koşuları, mamul girişi, müşteri/teklif) izlenebilirlik. Web: `/genealogy` sayfası.
+- [x] **Faz K — Çok seviyeli BOM (alt montaj) desteği, tam genealogy zinciri (2026-08-07 başladı, 2026-08-08 tamamlandı):** Önceki "MTU/seri numarası bazlı takip yok (veri modelinde yok)" kısıtının kök nedeni: `BomLine`/`MaterialConsumption` sadece `materialId` destekliyordu (Part-of-Part alt montaj yok), bu yüzden `lots.service.ts`/`serial-numbers.service.ts` `trace()` zinciri tek hop'ta doğal olarak sonlanıyordu. 3 fazlı plan onaylandı:
+  - **Faz 1 (TAMAMLANDI, commit edilecek):** `BomLine` diğer modellerin (`StockBalance`/`Lot`/vb.) kullandığı polimorfik `itemType`(`MATERIAL`|`PART`)/`itemId` desenine taşındı (`materialId` kaldırıldı, migration `20260807111941_ahk_genealogy_bom_polymorphic` mevcut veriyi `itemType=MATERIAL` olarak backfill eder). `BomService.create/update`'e döngü kontrolü eklendi (bir parça kendi doğrudan/dolaylı alt montajı olamaz — aktif BOM grafiğinde DFS). `MrpService.run()`'daki tek-seviye patlatma döngüsü yeni alanları okuyacak şekilde güncellendi; `itemType=PART` satırları **Faz 2'ye kadar bilinçli olarak atlanıyor** (sadece Material satırlarından oluşan mevcut BOM'ların davranışı değişmedi). `bom.service.spec.ts` (yeni, 5 test: self-reference reddi, dolaylı döngü reddi, eksik parça 404, karışık satır kabulü, geriye dönük Material-only uyumluluk) + `mrp.service.spec.ts` güncellendi. Backend typecheck + 192/194 unit yeşil (2 bilinen ilgisiz `pages.guard.spec.ts` hatası hariç). Henüz BOM için web UI yok (Faz K öncesinde de yoktu).
+  - **Faz 2a — MRP recursive patlatma (TAMAMLANDI, commit edilecek):** `MrpService.run()` artık BOM grafiğini keşfedip her parçanın low-level-code'unu (LLC — en derin göründüğü seviye) hesaplıyor, ardından LLC artan sırayla işliyor: seviye 0 (doğrudan WorkOrder talebi) brüt miktar üzerinden materyal/alt montaj ihtiyacı üretir (WO zaten taahhüt edilmiş); seviye 1+ (alt montaj) önce kendi `PartStock`'u + zaten-önerilmiş üretime karşı netlenir, sadece NET eksik miktar kendi BOM'una recursive patlatılır ve yeni bir `ProductionProposal` olarak kaydedilir (onaylanınca mevcut mekanizmayla WorkOrder'a dönüşür, model düzeyinde üst/alt parça farkı yok). LLC sıralaması "diamond" senaryolarda (aynı alt montaj birden fazla üst parçadan talep edilirse) çifte sayımı önlüyor. Döngüler BOM kayıt anında (Faz 1) reddediliyor; burada ayrıca savunma amaçlı `MAX_BOM_DEPTH=10` sınırı var. `mrp.service.spec.ts`'e 3 seviyeli (WO→alt montaj→malzeme) senaryo eklendi (10 test, hepsi yeşil) — backend typecheck + 193/195 unit yeşil (2 bilinen ilgisiz hata hariç).
+  - **Faz 2b — Part tüketimi (TAMAMLANDI, commit edilecek):** `MaterialConsumption` `itemType`(`MATERIAL`|`PART`)/`itemId` desenine taşındı (migration `20260807125730_ahk_genealogy_consumption_polymorphic`, backfill ile veri kaybı yok). `consumption.service.ts` artık Material veya Part için lot kontrolü/stok düşümü yapıyor (`InventoryService.record()` zaten polimorfikti). `work-orders.service.ts` (`genealogy()`/`cost()`) ve `lots.service.ts`/`serial-numbers.service.ts` (`trace()`) artık `.material` include'una değil ham `itemType`/`itemId`'ye dayanıyor — isim/kod çözümlemesi frontend'de yapılıyor (Lot sayfasındaki mevcut desenle aynı). 5 frontend dosyası (`lots.tsx`, `serial-numbers.tsx`, `genealogy.tsx`, `work-order-detail.tsx`, `genealogy.test.tsx`) güncellendi: `work-order-detail.tsx`'e Malzeme/Parça kalem tipi seçici eklendi, diğerlerine `materialById`/`partById` map'leriyle isim çözümleyen `itemLabel()` helper'ı eklendi. Part tüketimlerinde maliyet hesaplanamaz (`Part.standardCost` yok) — `cost()` bunu `materialCostPartial` ile işaretliyor, sessizce atlanmıyor. Backend typecheck + 198/200 unit (2 bilinen ilgisiz `pages.guard.spec.ts` hatası hariç) + web typecheck + 22/22 web test + `faz0c`/`traceability-acceptance` e2e (17/17, taze Postgres) yeşil.
+  - **Faz 3 — Recursive trace + ağaç görünümü (TAMAMLANDI, commit edilecek):** `LotsService.trace()` artık uygulama katmanında recursive: `traceForward()` (bir lotu tüketen WO'lar → ürettikleri lotlar → o lotlar da tüketildiyse zincir devam eder) ve `traceBackward()` (bir lotu üreten WO → tükettiği lotlar → PART ise kendi backward'ı) — MRP'deki `MAX_BOM_DEPTH` deseniyle aynı şekilde `MAX_TRACE_DEPTH=10` + ziyaret edilen lot seti ile döngü/aşırı derinlik korumalı. PART lotları artık hem `backward` (kimden üretildi) hem `forward` (nereye tüketildi, varsa) taşıyor — önceden Part'lar başka bir WO'ya giremediği için sadece backward vardı. `SerialNumbersService.trace()` de aynı desenle (bağımsız, modüller arası coupling kurulmadı) tüketilen PART lotlarına recursive iniyor. Frontend: yeni paylaşılan `components/trace-tree.tsx` (`ForwardTree`/`BackwardTree`, girintili iç içe liste) — `lots.tsx` ve `serial-numbers.tsx`'in `ScanModal`'ları artık tek seviye yerine tam zinciri gösteriyor. Yeni e2e: `traceability-acceptance.e2e-spec.ts`'e 3 seviyeli (hammadde→alt montaj→üst montaj) senaryo eklendi — forward'ın 2 seviye yukarı, backward'ın 2 seviye aşağı çıktığı ve seri numarası trace()'inin de alt montaj zincirine indiği doğrulandı (6/6 e2e). Backend typecheck + 198/200 unit + web typecheck + 22/22 web test yeşil.
 - [x] **Basit Scheduling/Gantt:** `WorkOrder.plannedStartDate/plannedEndDate` (migration `add_work_order_schedule`), `PATCH /work-orders/:id/schedule`. Web: `/scheduling` — CSS-grid tabanlı 14 günlük Gantt görünümü, tıklayınca tarih düzenleme modalı. Otomatik kapasite planlama algoritması değil, manuel çizelgeleme.
 - [x] **Automation Gateway — dinamik protokol seçici:** `Machine.connectorType` (MANUAL/OPC_UA/M80, migration `add_machine_connector_type`) + `connectorConfig` (Json). Web: Automation Gateway sayfasında "Bağlantı Ayarları" kartı — tip seçilince ilgili alanlar (OPC-UA: endpoint URL; M80: host/port) dinamik gösterilir. Kullanıcı geri bildirimi doğrultusunda ("hangi paneli seçersek seçelim arka planda o panelin bağlantı şekli olacak") tasarlandı.
 - [x] **İkinci marka connector iskeleti (Fanuc FOCAS2):** `apps/connector/src/adapters/fanuc.adapter.ts` — `MachineAdapter` arayüzüne uyan, ama gerçek FOCAS2 native kütüphanesi (lisanslı, FFI gerektiren) entegre edilmediği için `connect()` açıkça "iskelet" hatası fırlatıyor. Çoklu-marka mimarisinin genişletilebilir olduğunu kanıtlıyor; M80'in aksine (açık kaynak reverse-engineering mevcut) Fanuc için ücretsiz bir eşdeğer yok.

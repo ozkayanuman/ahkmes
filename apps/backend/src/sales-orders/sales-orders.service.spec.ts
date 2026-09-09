@@ -2,15 +2,16 @@ import { SalesOrdersService } from "./sales-orders.service";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     salesOrder: { findFirst: jest.fn(), update: jest.fn() },
-    $transaction: jest.fn(),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  if (!prisma.$transaction) prisma.$transaction = jest.fn((cb: any) => cb(prisma));
+  const outbox = { record: jest.fn() };
+  const workOrders = { createWithRoute: jest.fn() };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new SalesOrdersService(prisma as any, realtime as any);
-  return { service, prisma, realtime };
+  const service = new SalesOrdersService(prisma as any, workOrders as any, outbox as any);
+  return { service, prisma, outbox, workOrders };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,8 +21,8 @@ function soFixture(overrides: any = {}) {
     soNo: "SIP-2026-0001",
     status: "OPEN",
     lines: [
-      { id: "sol1", part: { id: "p1" }, quantity: "10", dueDate: new Date("2026-08-01"), workOrders: [], shippedQty: "0" },
-      { id: "sol2", part: { id: "p2" }, quantity: "3", dueDate: new Date("2026-08-02"), workOrders: [{ id: "wo1" }], shippedQty: "0" },
+      { id: "sol1", part: { id: "p1" }, fulfillmentPlantId: "plant1", quantity: "10", dueDate: new Date("2026-08-01"), workOrders: [], shippedQty: "0" },
+      { id: "sol2", part: { id: "p2" }, fulfillmentPlantId: "plant1", quantity: "3", dueDate: new Date("2026-08-02"), workOrders: [{ id: "wo1" }], shippedQty: "0" },
     ],
     ...overrides,
   };
@@ -36,26 +37,28 @@ describe("SalesOrdersService.release", () => {
   });
 
   it("henüz üretime alınmamış satırlardan WorkOrder üretir, alınmışları skipler", async () => {
-    const tx = {
-      workOrder: {
-        findFirst: jest.fn().mockResolvedValue(null),
-        create: jest.fn().mockResolvedValue({ id: "wo-new", woNo: "IE-2026-0001" }),
-      },
-    };
-    const { service, prisma, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    const tx = { workOrder: { findFirst: jest.fn().mockResolvedValue(null) } };
+    const { service, prisma, workOrders } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+    workOrders.createWithRoute.mockResolvedValue({ id: "wo-new", woNo: "IE-2026-0001" });
     prisma.salesOrder.findFirst.mockResolvedValue(soFixture());
 
     const result = await service.release("t1", "so1", {});
 
-    expect(tx.workOrder.create).toHaveBeenCalledTimes(1);
-    expect(tx.workOrder.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ salesOrderLineId: "sol1", partId: "p1", quantity: "10" }),
-      }),
+    expect(workOrders.createWithRoute).toHaveBeenCalledWith(
+      tx,
+      "t1",
+      expect.objectContaining({ salesOrderLineId: "sol1", partId: "p1", plantId: "plant1", quantity: expect.anything() }),
     );
     expect(result.workOrders).toHaveLength(1);
     expect(result.skippedLineIds).toEqual(["sol2"]);
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "workorder.updated", { ids: ["wo-new"] });
+  });
+
+  it("explicit plant atanmamış satırı üretime almaz", async () => {
+    const { service, prisma, workOrders } = buildService();
+    prisma.salesOrder.findFirst.mockResolvedValue(soFixture({ lines: [{ id: "sol1", part: { id: "p1" }, fulfillmentPlantId: null, quantity: "10", dueDate: new Date(), workOrders: [], shippedQty: "0" }] }));
+
+    await expect(service.release("t1", "so1", {})).rejects.toThrow("explicit fulfillment plant");
+    expect(workOrders.createWithRoute).not.toHaveBeenCalled();
   });
 
   it("tüm satırlar zaten üretime alınmışsa hata fırlatır", async () => {

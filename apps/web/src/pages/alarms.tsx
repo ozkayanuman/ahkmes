@@ -6,6 +6,7 @@ import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
 import { Button, Input, Label, Modal, Select, Table, Textarea } from "../components/ui";
 import { useToast } from "../components/toast";
+import { DowntimeParetoChart } from "../components/oee-charts";
 
 interface MachineOption {
   id: string;
@@ -26,6 +27,18 @@ interface ActiveAlarmRow {
 }
 interface ParetoRow {
   message: string;
+  count: number;
+}
+interface DowntimeReasonRow {
+  id: string;
+  code: string;
+  label: string;
+  category: "PLANNED" | "UNPLANNED";
+  isActive: boolean;
+}
+interface DowntimeParetoRow {
+  reason: string;
+  totalSeconds: number;
   count: number;
 }
 
@@ -51,6 +64,11 @@ export function AlarmsPage() {
   const [severity, setSeverity] = useState<AlarmDefinitionRow["severity"]>("MEDIUM");
   const [machineId, setMachineId] = useState("");
 
+  const [reasonOpen, setReasonOpen] = useState(false);
+  const [reasonCode, setReasonCode] = useState("");
+  const [reasonLabel, setReasonLabel] = useState("");
+  const [reasonCategory, setReasonCategory] = useState<DowntimeReasonRow["category"]>("UNPLANNED");
+
   const definitions = useQuery({
     queryKey: ["/alarms/definitions"],
     queryFn: () => apiGet<AlarmDefinitionRow[]>("/alarms/definitions"),
@@ -69,6 +87,14 @@ export function AlarmsPage() {
     queryFn: () => apiGet<MachineOption[]>("/machines"),
     enabled: defOpen,
   });
+  const downtimeReasons = useQuery({
+    queryKey: ["/downtime/reasons"],
+    queryFn: () => apiGet<DowntimeReasonRow[]>("/downtime/reasons"),
+  });
+  const downtimePareto = useQuery({
+    queryKey: ["/downtime/pareto"],
+    queryFn: () => apiGet<DowntimeParetoRow[]>("/downtime/pareto"),
+  });
 
   const createDefinition = useMutation({
     mutationFn: () =>
@@ -85,6 +111,19 @@ export function AlarmsPage() {
     onError: (e) => {
       const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
       toast(msg ?? "Alarm tanımı kaydedilemedi", "error");
+    },
+  });
+
+  const createDowntimeReason = useMutation({
+    mutationFn: () =>
+      apiPost("/downtime/reasons", { code: reasonCode, label: reasonLabel, category: reasonCategory }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/downtime/reasons"] });
+      setReasonOpen(false);
+    },
+    onError: (e) => {
+      const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+      toast(msg ?? "Duruş nedeni kaydedilemedi", "error");
     },
   });
 
@@ -197,6 +236,46 @@ export function AlarmsPage() {
         </Table>
       </div>
 
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold">Duruş Nedeni Kataloğu</h2>
+          {canWrite && (
+            <Button
+              onClick={() => {
+                setReasonCode("");
+                setReasonLabel("");
+                setReasonCategory("UNPLANNED");
+                setReasonOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" /> Yeni Duruş Nedeni
+            </Button>
+          )}
+        </div>
+        <Table headers={["Kod", "Etiket", "Kategori", "Durum"]}>
+          {(downtimeReasons.data ?? []).length === 0 && (
+            <tr>
+              <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                Kayıt yok
+              </td>
+            </tr>
+          )}
+          {(downtimeReasons.data ?? []).map((r) => (
+            <tr key={r.id}>
+              <td className="px-4 py-3 font-medium">{r.code}</td>
+              <td className="px-4 py-3">{r.label}</td>
+              <td className="px-4 py-3">{r.category === "PLANNED" ? "Planlı" : "Plansız"}</td>
+              <td className="px-4 py-3">{r.isActive ? "Aktif" : "Pasif"}</td>
+            </tr>
+          ))}
+        </Table>
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-lg font-semibold">Duruş Pareto</h2>
+        <DowntimeParetoChart data={downtimePareto.data ?? []} />
+      </div>
+
       <Modal open={defOpen} title="Yeni Alarm Kodu" onClose={() => setDefOpen(false)}>
         <form
           onSubmit={(e) => {
@@ -265,6 +344,44 @@ export function AlarmsPage() {
             </Button>
             <Button type="submit" disabled={acknowledge.isPending}>
               Onayla
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={reasonOpen} title="Yeni Duruş Nedeni" onClose={() => setReasonOpen(false)}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            createDowntimeReason.mutate();
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <Label htmlFor="reasonCode">Kod</Label>
+            <Input id="reasonCode" required value={reasonCode} onChange={(e) => setReasonCode(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="reasonLabel">Etiket</Label>
+            <Input id="reasonLabel" required value={reasonLabel} onChange={(e) => setReasonLabel(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="reasonCategory">Kategori</Label>
+            <Select
+              id="reasonCategory"
+              value={reasonCategory}
+              onChange={(e) => setReasonCategory(e.target.value as DowntimeReasonRow["category"])}
+            >
+              <option value="UNPLANNED">Plansız</option>
+              <option value="PLANNED">Planlı</option>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setReasonOpen(false)}>
+              Vazgeç
+            </Button>
+            <Button type="submit" disabled={createDowntimeReason.isPending}>
+              Kaydet
             </Button>
           </div>
         </form>

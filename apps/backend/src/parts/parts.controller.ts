@@ -15,10 +15,16 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import {
   createNcProgramSchema,
+  createNcProgramRevisionSchema,
+  electronicSignatureSchema,
   createPartSchema,
   updatePartSchema,
   type CreateNcProgramDto,
+  type CreateNcProgramRevisionDto,
+  type ElectronicSignatureDto,
   type CreatePartDto,
+  engineeringStatusChangeSchema,
+  type EngineeringStatusChangeDto,
   type UpdatePartDto,
 } from "@ahkmes/shared-types";
 import { PartsService } from "./parts.service";
@@ -27,6 +33,7 @@ import { RolesGuard } from "../common/guards/roles.guard";
 import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
 import { RequirePage } from "../common/decorators/require-page.decorator";
+import { RequireProductModule } from "../common/decorators/require-product-module.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
@@ -66,6 +73,12 @@ export class PartsController {
     return this.service.update(user.tenantId, id, dto);
   }
 
+  @Patch(":id/engineering-status")
+  @Roles("ADMIN", "PLANNER")
+  setEngineeringStatus(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(engineeringStatusChangeSchema)) dto: EngineeringStatusChangeDto) {
+    return this.service.setEngineeringStatus(user.tenantId, user.userId, id, dto);
+  }
+
   @Delete(":id")
   @Roles("ADMIN")
   remove(@CurrentUser() user: AuthUser, @Param("id") id: string) {
@@ -73,12 +86,14 @@ export class PartsController {
   }
 
   @Get(":id/nc-programs")
+  @RequireProductModule("PLM_NC_PROGRAM")
   listNcPrograms(@CurrentUser() user: AuthUser, @Param("id") partId: string) {
     return this.service.listNcPrograms(user.tenantId, partId);
   }
 
   @Post(":id/nc-programs")
   @Roles("ADMIN", "PLANNER")
+  @RequireProductModule("PLM_NC_PROGRAM")
   addNcProgram(
     @CurrentUser() user: AuthUser,
     @Param("id") partId: string,
@@ -92,6 +107,7 @@ export class PartsController {
 
 @Controller("nc-programs")
 @RequirePage("parts")
+@RequireProductModule("PLM_NC_PROGRAM")
 @UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
 export class NcProgramsController {
   constructor(private readonly service: PartsService) {}
@@ -115,5 +131,47 @@ export class NcProgramsController {
   @Get(":id/url")
   getUrl(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.getNcProgramFileUrl(user.tenantId, id);
+  }
+
+  @Post(":id/revisions")
+  @Roles("ADMIN", "PLANNER")
+  createRevision(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(createNcProgramRevisionSchema)) dto: CreateNcProgramRevisionDto,
+  ) {
+    return this.service.createNcProgramRevision(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post(":id/submit-review")
+  @Roles("ADMIN", "PLANNER")
+  submitForReview(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: { note?: string }) {
+    return this.service.submitNcProgramForReview(user.tenantId, user.userId, id, body.note);
+  }
+
+  @Post(":id/approve")
+  @Roles("ADMIN")
+  approve(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(electronicSignatureSchema)) signature: ElectronicSignatureDto,
+  ) {
+    return this.service.approveNcProgram(user.tenantId, user.userId, user.role, id, signature);
+  }
+
+  @Post(":id/publish")
+  @Roles("ADMIN", "PLANNER")
+  publish(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(electronicSignatureSchema)) signature: ElectronicSignatureDto,
+  ) {
+    return this.service.publishNcProgram(user.tenantId, user.userId, user.role, id, signature);
+  }
+
+  @Post(":id/archive")
+  @Roles("ADMIN", "PLANNER")
+  archive(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.archiveNcProgram(user.tenantId, user.userId, id);
   }
 }

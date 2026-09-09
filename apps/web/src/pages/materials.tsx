@@ -10,6 +10,8 @@ interface MaterialRow {
   unit: string;
   stockQty: string;
   minStock?: string | null;
+  lotTrackingRequired?: boolean;
+  certificateRequired?: boolean;
 }
 
 export function MaterialsPage() {
@@ -32,6 +34,8 @@ export function MaterialsPage() {
         { key: "unit", label: "Birim" },
         { key: "stockQty", label: "Stok" },
         { key: "minStock", label: "Min. Stok" },
+        { key: "lotTrackingRequired", label: "Lot", render: (r) => (r.lotTrackingRequired ? "Zorunlu" : "Opsiyonel") },
+        { key: "certificateRequired", label: "Sertifika", render: (r) => (r.certificateRequired ? "Zorunlu" : "Opsiyonel") },
       ]}
       fields={[
         { name: "code", label: "Kod", required: true },
@@ -49,6 +53,8 @@ export function MaterialsPage() {
         { name: "unit", label: "Birim (kg, adet, m…)", required: true },
         { name: "minStock", label: "Minimum Stok", type: "number" },
         { name: "standardCost", label: "Standart Birim Maliyet", type: "number" },
+        { name: "lotTrackingRequired", label: "Lot takibi zorunlu", type: "checkbox", defaultValue: false },
+        { name: "certificateRequired", label: "Kabulde sertifika zorunlu", type: "checkbox", defaultValue: false },
       ]}
     />
   );

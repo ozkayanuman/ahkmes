@@ -30,6 +30,17 @@ export interface WorkOrderRow {
   notes?: string | null;
   part: PartOption;
   machine?: { id: string; name: string } | null;
+  recipeRevision?: string | null;
+  routeSnapshotAt?: string | null;
+  operations?: {
+    id: string;
+    seq: number;
+    name: string;
+    status: string;
+    completedQty: string;
+    scrapQty: string;
+    machine?: { id: string; name: string } | null;
+  }[];
   quoteLine?: {
     id: string;
     quote: { id: string; quoteNo: string; customer: { id: string; name: string } };

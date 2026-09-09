@@ -21,6 +21,8 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
 
   let quoteId: string;
   let quoteLineIds: string[] = [];
+  let salesOrderId: string;
+  let salesOrderLineIds: string[] = [];
   let convertedWoIds: string[] = [];
   let manualWoId: string;
   let poId: string;
@@ -64,6 +66,7 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
     // Durum kuralları API'den silmeyi engelleyebilir — temizliği doğrudan Prisma ile yap
     const woIds = [...convertedWoIds, manualWoId].filter(Boolean);
     await prisma.workOrder.deleteMany({ where: { id: { in: woIds } } }).catch(() => undefined);
+    if (salesOrderId) await prisma.salesOrder.deleteMany({ where: { id: salesOrderId } }).catch(() => undefined);
     if (quoteId) await prisma.quote.deleteMany({ where: { id: quoteId } }).catch(() => undefined);
     if (poId) await prisma.purchaseOrder.deleteMany({ where: { id: poId } }).catch(() => undefined);
     await prisma.material.deleteMany({ where: { id: materialId } }).catch(() => undefined);
@@ -133,20 +136,35 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
     });
   });
 
-  describe("0b.2 Teklif → İş Emri dönüşümü", () => {
-    it("POST /quotes/:id/convert — her satırdan IE numaralı iş emri üretir", async () => {
+  describe("0b.2 Teklif → Satış Siparişi → İş Emri dönüşümü", () => {
+    it("POST /quotes/:id/convert — her satırdan satış siparişi satırı üretir", async () => {
       const res = await auth(api().post(`/quotes/${quoteId}/convert`).send({})).expect(201);
-      expect(res.body.workOrders).toHaveLength(2);
-      convertedWoIds = res.body.workOrders.map((w: { id: string }) => w.id);
-      for (const wo of res.body.workOrders) {
-        expect(wo.woNo).toMatch(/^IE-\d{4}-\d{4}$/);
-        expect(wo.status).toBe("PLANNED");
-        expect(quoteLineIds).toContain(wo.quoteLineId);
+      salesOrderId = res.body.salesOrder.id;
+      salesOrderLineIds = res.body.salesOrder.lines.map((line: { id: string }) => line.id);
+      expect(res.body.salesOrder.soNo).toMatch(/^SIP-\d{4}-\d{4}$/);
+      expect(res.body.salesOrder.lines).toHaveLength(2);
+      for (const line of res.body.salesOrder.lines) {
+        expect(quoteLineIds).toContain(line.quoteLineId);
       }
     });
 
     it("mükerrer dönüşüm 409", async () => {
       await auth(api().post(`/quotes/${quoteId}/convert`).send({})).expect(409);
+    });
+
+    it("POST /sales-orders/:id/release — her satırdan IE numaralı iş emri üretir", async () => {
+      const res = await auth(api().post(`/sales-orders/${salesOrderId}/release`).send({})).expect(201);
+      expect(res.body.workOrders).toHaveLength(2);
+      convertedWoIds = res.body.workOrders.map((w: { id: string }) => w.id);
+      for (const wo of res.body.workOrders) {
+        expect(wo.woNo).toMatch(/^IE-\d{4}-\d{4}$/);
+        expect(wo.status).toBe("PLANNED");
+        expect(salesOrderLineIds).toContain(wo.salesOrderLineId);
+      }
+    });
+
+    it("aynı satış siparişi satırları ikinci kez üretime alınamaz (409)", async () => {
+      await auth(api().post(`/sales-orders/${salesOrderId}/release`).send({})).expect(409);
     });
   });
 

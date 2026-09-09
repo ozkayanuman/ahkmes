@@ -12,6 +12,7 @@ interface PartRow {
   name: string;
   description?: string | null;
   stock?: { qty: string } | null;
+  lotTrackingRequired?: boolean;
 }
 
 export function PartsPage() {
@@ -31,8 +32,10 @@ export function PartsPage() {
           { key: "name", label: "Ad" },
           { key: "description", label: "Açıklama" },
           { key: "stock", label: "Mamul Stok", render: (r) => r.stock?.qty ?? "0" },
+          { key: "lotTrackingRequired", label: "Lot", render: (r) => (r.lotTrackingRequired ? "Zorunlu" : "Opsiyonel") },
         ]}
         fields={[
+          { name: "lotTrackingRequired", label: "Mamul lotu zorunlu", type: "checkbox", defaultValue: false },
           { name: "partNo", label: "Parça No", required: true },
           { name: "revision", label: "Revizyon", required: true },
           { name: "name", label: "Ad", required: true },

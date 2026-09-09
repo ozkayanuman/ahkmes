@@ -8,7 +8,7 @@ import type {
   UpdateQuoteLineDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 import { SalesOrdersService } from "../sales-orders/sales-orders.service";
 
@@ -35,8 +35,8 @@ const QUOTE_INCLUDE = {
 export class QuotesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly salesOrders: SalesOrdersService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: QuoteStatus, q?: string) {
@@ -75,7 +75,7 @@ export class QuotesService {
 
     const created = await this.prisma.$transaction(async (tx) => {
       const quoteNo = await nextDocNo(tx, "quote", "quoteNo", "TKF");
-      return tx.quote.create({
+      const quote = await tx.quote.create({
         data: {
           tenantId,
           quoteNo,
@@ -96,20 +96,24 @@ export class QuotesService {
         },
         include: QUOTE_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "quote", quote.id, "quote.updated", { id: quote.id });
+      return quote;
     });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id: created.id });
     return created;
   }
 
   async update(tenantId: string, id: string, dto: UpdateQuoteDto) {
     const quote = await this.findOne(tenantId, id);
     this.ensureDraft(quote.status, "Teklif başlığı sadece taslakken düzenlenebilir");
-    const updated = await this.prisma.quote.update({
-      where: { id },
-      data: dto,
-      include: QUOTE_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.quote.update({
+        where: { id },
+        data: dto,
+        include: QUOTE_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "quote", id, "quote.updated", { id });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id });
     return updated;
   }
 
@@ -118,20 +122,26 @@ export class QuotesService {
     if (!TRANSITIONS[quote.status].includes(status)) {
       throw new ConflictException(`Geçersiz durum geçişi: ${quote.status} → ${status}`);
     }
-    const updated = await this.prisma.quote.update({
-      where: { id },
-      data: { status },
-      include: QUOTE_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.quote.update({
+        where: { id },
+        data: { status },
+        include: QUOTE_INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "quote", id, "quote.updated", { id, status });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id, status });
     return updated;
   }
 
   async remove(tenantId: string, id: string) {
     const quote = await this.findOne(tenantId, id);
     this.ensureDraft(quote.status, "Sadece taslak teklif silinebilir");
-    const deleted = await this.prisma.quote.delete({ where: { id } });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id, deleted: true });
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      const removed = await tx.quote.delete({ where: { id } });
+      await this.outbox.record(tx, tenantId, "quote", id, "quote.updated", { id, deleted: true });
+      return removed;
+    });
     return deleted;
   }
 
@@ -142,10 +152,12 @@ export class QuotesService {
     this.ensureDraft(quote.status, "Satır sadece taslak teklife eklenebilir");
     const part = await this.prisma.part.findFirst({ where: { id: dto.partId, tenantId } });
     if (!part) throw new NotFoundException("Parça bulunamadı");
-    await this.prisma.quoteLine.create({
-      data: { tenantId, quoteId, ...dto },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.quoteLine.create({
+        data: { tenantId, quoteId, ...dto },
+      });
+      await this.outbox.record(tx, tenantId, "quote", quoteId, "quote.updated", { id: quoteId });
     });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id: quoteId });
     return this.findOne(tenantId, quoteId);
   }
 
@@ -154,8 +166,10 @@ export class QuotesService {
     this.ensureDraft(quote.status, "Satır sadece taslak teklifte düzenlenebilir");
     const line = quote.lines.find((l) => l.id === lineId);
     if (!line) throw new NotFoundException("Teklif satırı bulunamadı");
-    await this.prisma.quoteLine.update({ where: { id: lineId }, data: dto });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id: quoteId });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.quoteLine.update({ where: { id: lineId }, data: dto });
+      await this.outbox.record(tx, tenantId, "quote", quoteId, "quote.updated", { id: quoteId });
+    });
     return this.findOne(tenantId, quoteId);
   }
 
@@ -167,8 +181,10 @@ export class QuotesService {
     if (quote.lines.length <= 1) {
       throw new ConflictException("Teklifte en az bir satır kalmalı");
     }
-    await this.prisma.quoteLine.delete({ where: { id: lineId } });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id: quoteId });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.quoteLine.delete({ where: { id: lineId } });
+      await this.outbox.record(tx, tenantId, "quote", quoteId, "quote.updated", { id: quoteId });
+    });
     return this.findOne(tenantId, quoteId);
   }
 
@@ -205,7 +221,6 @@ export class QuotesService {
       })),
     );
 
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id: salesOrder.id });
     return {
       salesOrder,
       skippedLineIds: targetLines.filter((l) => l.salesOrderLines.length > 0).map((l) => l.id),

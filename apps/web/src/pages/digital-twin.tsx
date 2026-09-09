@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useInvalidateOn } from "../lib/socket";
-import { Button, Card } from "../components/ui";
+import { Button, Card, Label, Select } from "../components/ui";
 import { useToast } from "../components/toast";
 
 interface TwinMachine {
@@ -24,6 +24,7 @@ interface TwinMachine {
   scrapCountToday: number;
   energyTodayKwh: number;
   openAlarmCount: number;
+  dataQuality?: string | null;
   activeWorkOrder?: { id: string; woNo: string; status: string } | null;
 }
 interface TwinConnection {
@@ -34,6 +35,13 @@ interface TwinConnection {
 interface Layout {
   machines: TwinMachine[];
   connections: TwinConnection[];
+}
+
+function oeeContext(plantId: string) {
+  const now = new Date();
+  const from = new Date(now);
+  from.setHours(0, 0, 0, 0);
+  return new URLSearchParams({ plantId, from: from.toISOString(), to: now.toISOString(), asOf: now.toISOString() });
 }
 
 function statusColor(m: TwinMachine) {
@@ -64,6 +72,7 @@ export function DigitalTwinPage() {
   };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [plantId, setPlantId] = useState("");
   const [connectMode, setConnectMode] = useState(false);
   const [connectFrom, setConnectFrom] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -71,15 +80,18 @@ export function DigitalTwinPage() {
 
   useInvalidateOn(
     ["machine.updated", "machine.alarm", "productionrun.updated", "workorder.updated"],
-    ["/digital-twin/layout"],
+    ["/digital-twin/layout", plantId],
   );
 
+  const plants = useQuery({ queryKey: ["/plants"], queryFn: () => apiGet<{ id: string; name: string }[]>("/plants") });
+
   const layout = useQuery({
-    queryKey: ["/digital-twin/layout"],
-    queryFn: () => apiGet<Layout>("/digital-twin/layout"),
+    queryKey: ["/digital-twin/layout", plantId],
+    queryFn: () => apiGet<Layout>(`/digital-twin/layout?${oeeContext(plantId)}`),
+    enabled: Boolean(plantId),
   });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["/digital-twin/layout"] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["/digital-twin/layout", plantId] });
 
   const setPosition = useMutation({
     mutationFn: ({ id, posX, posY }: { id: string; posX: number; posY: number }) =>
@@ -161,6 +173,13 @@ export function DigitalTwinPage() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Digital Twin — Saha Planı</h1>
         <div className="flex gap-2">
+          <div className="w-48">
+            <Label htmlFor="digital-twin-plant">Tesis</Label>
+            <Select id="digital-twin-plant" value={plantId} onChange={(event) => { setPlantId(event.target.value); setSelectedId(null); }}>
+              <option value="">Tesis seÃ§in</option>
+              {(plants.data ?? []).map((plant) => <option key={plant.id} value={plant.id}>{plant.name}</option>)}
+            </Select>
+          </div>
           <Link to="/andon" target="_blank" rel="noopener">
             <Button variant="outline">
               <Maximize2 className="h-4 w-4" /> Tam Ekran İzleme

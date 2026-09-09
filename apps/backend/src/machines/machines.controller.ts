@@ -5,6 +5,8 @@ import {
   createMachineTagSchema,
   machineTagValuesSchema,
   machineTelemetrySchema,
+  connectorStatusSchema,
+  controllerObservationSchema,
   updateMachineSchema,
   updateMachineTagSchema,
   type AssignActiveWorkOrderDto,
@@ -12,6 +14,8 @@ import {
   type CreateMachineTagDto,
   type MachineTagValuesDto,
   type MachineTelemetryDto,
+  type ConnectorStatusDto,
+  type ControllerObservationDto,
   type UpdateMachineDto,
   type UpdateMachineTagDto,
 } from "@ahkmes/shared-types";
@@ -85,6 +89,11 @@ export class MachinesController {
     return this.service.generateConnectorKey(user.tenantId, id);
   }
 
+  @Get(":id/connector-status")
+  connectorStatus(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.connectorStatus(user.tenantId, id);
+  }
+
   // ---- Automation Gateway: Machine Tag CRUD (Faz 1) ----
 
   @Get(":id/tags")
@@ -140,6 +149,22 @@ export class MachineTelemetryController {
     @Body(new ZodValidationPipe(machineTagValuesSchema)) dto: MachineTagValuesDto,
   ) {
     return this.service.handleTagValues(machine, dto);
+  }
+
+  @Post(":id/connector-status")
+  connectorStatus(
+    @CurrentMachine() machine: Machine,
+    @Body(new ZodValidationPipe(connectorStatusSchema)) dto: ConnectorStatusDto,
+  ) {
+    return this.service.recordConnectorStatus(machine, dto);
+  }
+
+  @Post(":id/controller-observation")
+  controllerObservation(
+    @CurrentMachine() machine: Machine,
+    @Body(new ZodValidationPipe(controllerObservationSchema)) dto: ControllerObservationDto,
+  ) {
+    return this.service.recordControllerObservation(machine, dto);
   }
 
   /** Connector'ın başlangıçta kendi bağlantı ayarlarını (web'de configure edilen) çekmesi için. */

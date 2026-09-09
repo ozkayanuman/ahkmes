@@ -34,7 +34,7 @@ describe("SerialNumbersService.trace", () => {
       status: "COMPLETED",
       part: { id: "p1", partNo: "PN1", name: "Parça 1" },
       consumptions: [
-        { id: "mc1", material: { id: "mat-1", code: "M1", name: "Çelik" }, lot: { id: "lot-mat-1" } },
+        { id: "mc1", itemType: "MATERIAL", itemId: "mat-1", lot: { id: "lot-mat-1" } },
       ],
     });
 
@@ -44,7 +44,7 @@ describe("SerialNumbersService.trace", () => {
       expect.objectContaining({ where: { id: "wo1", tenantId: "t1" } }),
     );
     expect(result.producedByWorkOrder!.woNo).toBe("IE-2026-0001");
-    expect(result.producedByWorkOrder!.consumptions[0].material.code).toBe("M1");
+    expect(result.producedByWorkOrder!.consumptions[0].itemId).toBe("mat-1");
   });
 
   it("seri numarası bulunamazsa hata fırlatır", async () => {

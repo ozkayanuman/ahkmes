@@ -40,6 +40,14 @@ function buildService(overrides: any = {}) {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    webhookDeliveryEvent: {
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      findMany: jest.fn().mockResolvedValue([]),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
     ...overrides,
   };
   const service = new WebhooksService(prisma as any);
@@ -66,76 +74,78 @@ describe("WebhooksService.create", () => {
   });
 });
 
-describe("WebhooksService.dispatch", () => {
+describe("WebhooksService delivery outbox", () => {
+  const delivery = {
+    id: "d1",
+    tenantId: "t1",
+    subscriptionId: "w1",
+    event: "workorder.updated",
+    payload: { event: "workorder.updated", tenantId: "t1", payload: { id: "wo1" }, timestamp: "2026-08-01T00:00:00.000Z" },
+    attempts: 0,
+  };
+
   beforeEach(() => {
     mockStatusCode = 200;
     mockRequestError = null;
     httpsRequestMock.mockClear();
   });
 
-  it("sadece eşleşen aktif abonelikleri çağırır, pinlenmiş IP'ye bağlanır ve lastStatus'u günceller", async () => {
+  it("eşleşen aktif abonelikler için değişmez olay zarfını kalıcı kuyruğa ekler", async () => {
     const { service, prisma } = buildService();
-    prisma.webhookSubscription.findMany.mockResolvedValue([
-      { id: "w1", url: "https://example.com/hook", secret: null },
-    ]);
-    prisma.webhookSubscription.update.mockResolvedValue({});
+    prisma.webhookSubscription.findMany.mockResolvedValue([{ id: "w1" }]);
 
-    service.dispatch("t1", "workorder.updated", { id: "wo1" });
-    // dispatch fire-and-forget — bir sonraki microtask'a kadar bekle
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    service.dispatch("t1", "workorder.updated", { id: "wo1" }, "event-1");
     await new Promise((r) => setImmediate(r));
 
     expect(prisma.webhookSubscription.findMany).toHaveBeenCalledWith({
       where: { tenantId: "t1", isActive: true, OR: [{ event: "workorder.updated" }, { event: "*" }] },
     });
-    // DNS'in ikinci kez çözülmemesi için bağlantı doğrulanmış IP'ye pinlenir,
-    // Host header orijinal hostname'i taşır (TLS SNI + sertifika için).
+    expect(prisma.webhookDeliveryEvent.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ tenantId: "t1", subscriptionId: "w1", eventId: "event-1", event: "workorder.updated" })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("claimed olayı pinlenmiş IP'ye teslim eder ve DELIVERED işaretler", async () => {
+    const { service, prisma } = buildService();
+    prisma.webhookDeliveryEvent.findMany.mockResolvedValue([delivery]);
+    prisma.webhookDeliveryEvent.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    prisma.webhookDeliveryEvent.findUnique.mockResolvedValue(delivery);
+    prisma.webhookSubscription.findFirst.mockResolvedValue({ id: "w1", url: "https://example.com/hook", secret: null });
+    prisma.webhookSubscription.update.mockResolvedValue({});
+    prisma.webhookDeliveryEvent.update.mockResolvedValue({});
+
+    await service.processPending();
+
     expect(httpsRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({ hostname: "93.184.216.34", headers: expect.objectContaining({ Host: "example.com" }) }),
       expect.any(Function),
     );
-    expect(prisma.webhookSubscription.update).toHaveBeenCalledWith({
-      where: { id: "w1" },
-      data: { lastTriggeredAt: expect.any(Date), lastStatus: "success" },
+    expect(prisma.webhookDeliveryEvent.update).toHaveBeenCalledWith({
+      where: { id: "d1" },
+      data: expect.objectContaining({ status: "DELIVERED", attempts: 1, lockedUntil: null }),
     });
   });
 
-  it("istek hata fırlatırsa lastStatus 'failed' olur, dispatch kendisi throw etmez", async () => {
+  it("başarısız teslimi backoff ile PENDING'e geri koyar", async () => {
     const { service, prisma } = buildService();
-    prisma.webhookSubscription.findMany.mockResolvedValue([
-      { id: "w1", url: "https://example.com/hook", secret: null },
-    ]);
+    prisma.webhookDeliveryEvent.findMany.mockResolvedValue([delivery]);
+    prisma.webhookDeliveryEvent.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    prisma.webhookDeliveryEvent.findUnique.mockResolvedValue(delivery);
+    prisma.webhookSubscription.findFirst.mockResolvedValue({ id: "w1", url: "https://example.com/hook", secret: null });
     prisma.webhookSubscription.update.mockResolvedValue({});
+    prisma.webhookDeliveryEvent.update.mockResolvedValue({});
     mockRequestError = new Error("network down");
 
-    expect(() => service.dispatch("t1", "workorder.updated", {})).not.toThrow();
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
+    await service.processPending();
 
-    expect(prisma.webhookSubscription.update).toHaveBeenCalledWith({
-      where: { id: "w1" },
-      data: { lastTriggeredAt: expect.any(Date), lastStatus: "failed" },
-    });
-  });
-
-  it("3xx yönlendirme yanıtı 'failed' sayılır (yönlendirme hiç izlenmez)", async () => {
-    const { service, prisma } = buildService();
-    prisma.webhookSubscription.findMany.mockResolvedValue([
-      { id: "w1", url: "https://example.com/hook", secret: null },
-    ]);
-    prisma.webhookSubscription.update.mockResolvedValue({});
-    mockStatusCode = 302;
-
-    service.dispatch("t1", "workorder.updated", {});
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setImmediate(r));
-
-    expect(prisma.webhookSubscription.update).toHaveBeenCalledWith({
-      where: { id: "w1" },
-      data: { lastTriggeredAt: expect.any(Date), lastStatus: "failed" },
+    expect(prisma.webhookDeliveryEvent.update).toHaveBeenCalledWith({
+      where: { id: "d1" },
+      data: expect.objectContaining({ status: "PENDING", attempts: 1, lockedUntil: null, lastError: "Teslim başarısız" }),
     });
   });
 });

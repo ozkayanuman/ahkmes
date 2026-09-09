@@ -9,6 +9,7 @@ import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { SkipAudit } from "../common/decorators/skip-audit.decorator";
 
 @Controller("cycle-counts")
 @RequirePage("cycle-counts")
@@ -28,6 +29,7 @@ export class CycleCountsController {
 
   @Post()
   @Roles("ADMIN", "PLANNER", "FOREMAN")
+  @SkipAudit()
   create(
     @CurrentUser() user: AuthUser,
     @Body(new ZodValidationPipe(createCycleCountSchema)) dto: CreateCycleCountDto,
@@ -37,7 +39,8 @@ export class CycleCountsController {
 
   @Patch(":id/post")
   @Roles("ADMIN", "PLANNER")
+  @SkipAudit()
   post(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.post(user.tenantId, id);
+    return this.service.post(user.tenantId, user.userId, id);
   }
 }

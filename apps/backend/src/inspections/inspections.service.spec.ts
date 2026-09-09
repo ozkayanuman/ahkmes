@@ -1,69 +1,76 @@
+import { BadRequestException } from "@nestjs/common";
 import { InspectionsService } from "./inspections.service";
 
+// The service's persistence boundary is deliberately mocked: these tests verify
+// the tenant-scoped quality-plan rules before an inspection is written.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
-  const prisma = {
+  const prisma: any = {
     workOrder: { findFirst: jest.fn().mockResolvedValue({ id: "wo1" }) },
-    $transaction: jest.fn(),
+    qualityPlanCheck: { findFirst: jest.fn() },
+    inspection: { findFirst: jest.fn(), create: jest.fn().mockResolvedValue({ id: "ins1" }) },
+    auditLog: { create: jest.fn().mockResolvedValue({ id: "audit1" }) },
+    $transaction: jest.fn((fn) => fn(prisma)),
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
+  const outbox = { record: jest.fn() };
   const nonConformance = { create: jest.fn().mockResolvedValue({ id: "nc1" }) };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new InspectionsService(prisma as any, realtime as any, nonConformance as any);
-  return { service, prisma, realtime, nonConformance };
+  return { service: new InspectionsService(prisma, nonConformance as any, outbox as any), prisma, outbox, nonConformance };
 }
 
-function buildTx() {
-  return {
-    inspection: {
-      findFirst: jest.fn().mockResolvedValue(null),
-      create: jest.fn().mockResolvedValue({ id: "ins1", insNo: "MUA-2026-0001" }),
-    },
-  };
-}
-
-describe("InspectionsService.create", () => {
-  it("FAIL sonucunda NonConformance oluşturur ve inspection'a bağlar", async () => {
-    const tx = buildTx();
-    const { service, nonConformance, realtime } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
-
-    const result = await service.create("t1", "u1", {
-      workOrderId: "wo1",
-      checkpointName: "İlk Parça Kontrolü",
-      result: "FAIL",
-      notes: "Ölçü dışı",
+describe("InspectionsService quality plan controls", () => {
+  it("rejects a plan check that requires a measurement when none is supplied", async () => {
+    const { service, prisma } = buildService();
+    prisma.qualityPlanCheck.findFirst.mockResolvedValue({
+      checkpointName: "Diameter",
+      unit: "mm",
+      lowerLimit: 9.9,
+      upperLimit: 10.1,
+      requiresMeasurement: true,
     });
 
-    expect(nonConformance.create).toHaveBeenCalledWith(
-      "t1",
-      "u1",
-      expect.objectContaining({ workOrderId: "wo1", failureType: "Muayene hatası: İlk Parça Kontrolü" }),
-    );
-    expect(tx.inspection.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ nonConformanceId: "nc1" }) }),
-    );
-    expect(result.id).toBe("ins1");
-    expect(realtime.emitToTenant).toHaveBeenCalledWith("t1", "inspection.created", {
-      id: "ins1",
-      workOrderId: "wo1",
-      result: "FAIL",
-    });
+    await expect(service.create("tenant1", "user1", {
+      workOrderId: "11111111-1111-4111-8111-111111111111",
+      qualityPlanCheckId: "22222222-2222-4222-8222-222222222222",
+      checkpointName: "Ignored client name",
+      result: "PASS",
+    })).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("PASS sonucunda NonConformance oluşturmaz", async () => {
-    const tx = buildTx();
-    const { service, nonConformance } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
+  it("forces FAIL, creates an NCR, and retains the plan checkpoint when a measurement is out of tolerance", async () => {
+    const { service, prisma, nonConformance, outbox } = buildService();
+    prisma.qualityPlanCheck.findFirst.mockResolvedValue({
+      checkpointName: "Diameter",
+      unit: "mm",
+      lowerLimit: 9.9,
+      upperLimit: 10.1,
+      requiresMeasurement: true,
+    });
+    prisma.inspection.create.mockImplementation(({ data }: { data: Record<string, unknown> }) => Promise.resolve({ id: "ins1", ...data }));
 
-    await service.create("t1", "u1", {
-      workOrderId: "wo1",
-      checkpointName: "Son Kontrol",
+    const created = await service.create("tenant1", "user1", {
+      workOrderId: "11111111-1111-4111-8111-111111111111",
+      qualityPlanCheckId: "22222222-2222-4222-8222-222222222222",
+      checkpointName: "Ignored client name",
+      measurementValue: 10.2,
       result: "PASS",
     });
 
-    expect(nonConformance.create).not.toHaveBeenCalled();
-    expect(tx.inspection.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ nonConformanceId: undefined }) }),
-    );
+    expect(nonConformance.create).toHaveBeenCalledWith("tenant1", "user1", expect.objectContaining({
+      failureType: expect.stringContaining("Diameter"),
+    }));
+    expect(prisma.inspection.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        checkpointName: "Diameter",
+        qualityPlanCheckId: "22222222-2222-4222-8222-222222222222",
+        measurementUnit: "mm",
+        result: "FAIL",
+      }),
+    }));
+    expect(created.result).toBe("FAIL");
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ entity: "inspections", entityId: "ins1", action: "CREATE" }),
+    }));
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "tenant1", "inspection", "ins1", "inspection.created", expect.objectContaining({ result: "FAIL" }));
   });
 });

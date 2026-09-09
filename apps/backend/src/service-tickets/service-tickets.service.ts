@@ -1,7 +1,7 @@
 import { HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateServiceTicketDto, ResolveServiceTicketDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { AppException } from "../common/app-exception";
 import { NotificationsService } from "../notifications/notifications.service";
 
@@ -14,8 +14,8 @@ const INCLUDE = {
 export class ServiceTicketsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, customerId?: string, status?: string) {
@@ -36,11 +36,14 @@ export class ServiceTicketsService {
     const customer = await this.prisma.customer.findFirst({ where: { id: dto.customerId, tenantId } });
     if (!customer) throw new NotFoundException("Müşteri bulunamadı");
 
-    const created = await this.prisma.serviceTicket.create({
-      data: { ...dto, tenantId, createdById },
-      include: INCLUDE,
+    const created = await this.prisma.$transaction(async (tx) => {
+      const ticket = await tx.serviceTicket.create({
+        data: { ...dto, tenantId, createdById },
+        include: INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "serviceticket", ticket.id, "serviceticket.updated", { id: ticket.id, customerId: dto.customerId });
+      return ticket;
     });
-    this.realtime.emitToTenant(tenantId, "serviceticket.updated", { id: created.id, customerId: dto.customerId });
     await this.notifications.notifyRoles(tenantId, ["ADMIN", "SALES"], {
       type: "SERVICE_TICKET_CREATED",
       title: "Yeni servis talebi",
@@ -66,16 +69,19 @@ export class ServiceTicketsService {
       );
     }
 
-    const updated = await this.prisma.serviceTicket.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        resolvedAt: dto.status === "RESOLVED" ? (ticket.resolvedAt ?? new Date()) : ticket.resolvedAt,
-        resolutionNote: dto.resolutionNote?.trim() || ticket.resolutionNote,
-      },
-      include: INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.serviceTicket.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          resolvedAt: dto.status === "RESOLVED" ? (ticket.resolvedAt ?? new Date()) : ticket.resolvedAt,
+          resolutionNote: dto.resolutionNote?.trim() || ticket.resolutionNote,
+        },
+        include: INCLUDE,
+      });
+      await this.outbox.record(tx, tenantId, "serviceticket", id, "serviceticket.updated", { id, customerId: ticket.customerId });
+      return result;
     });
-    this.realtime.emitToTenant(tenantId, "serviceticket.updated", { id, customerId: ticket.customerId });
     return updated;
   }
 }

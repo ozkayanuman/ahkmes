@@ -5,11 +5,12 @@ function buildService(overrides: any = {}) {
   const prisma: any = {
     workOrder: { findFirst: jest.fn().mockResolvedValue({ id: "wo1" }) },
     materialConsumption: { findMany: jest.fn().mockResolvedValue([]) },
+    material: { findMany: jest.fn().mockResolvedValue([]) },
     productionRun: { findMany: jest.fn().mockResolvedValue([]) },
     ...overrides,
   };
-  const realtime = { emitToTenant: jest.fn() };
-  const service = new WorkOrdersService(prisma as any, realtime as any);
+  const outbox = { record: jest.fn() };
+  const service = new WorkOrdersService(prisma as any, outbox as any);
   return { service, prisma };
 }
 
@@ -17,8 +18,9 @@ describe("WorkOrdersService.cost", () => {
   it("tüm maliyet verisi tanımlıysa partial bayrağı false, note yok", async () => {
     const { service, prisma } = buildService();
     prisma.materialConsumption.findMany.mockResolvedValue([
-      { quantity: "10", material: { standardCost: "2.5" } },
+      { quantity: "10", itemType: "MATERIAL", itemId: "m1" },
     ]);
+    prisma.material.findMany.mockResolvedValue([{ id: "m1", standardCost: "2.5" }]);
     prisma.productionRun.findMany.mockResolvedValue([
       {
         startedAt: new Date("2026-01-01T00:00:00Z"),
@@ -42,7 +44,8 @@ describe("WorkOrdersService.cost", () => {
 
   it("standardCost/hourlyRate eksikse partial bayrağı true ve note döner", async () => {
     const { service, prisma } = buildService();
-    prisma.materialConsumption.findMany.mockResolvedValue([{ quantity: "10", material: { standardCost: null } }]);
+    prisma.materialConsumption.findMany.mockResolvedValue([{ quantity: "10", itemType: "MATERIAL", itemId: "m1" }]);
+    prisma.material.findMany.mockResolvedValue([{ id: "m1", standardCost: null }]);
     prisma.productionRun.findMany.mockResolvedValue([
       { startedAt: new Date(), endedAt: new Date(), machine: null, operator: { hourlyRate: null } },
     ]);

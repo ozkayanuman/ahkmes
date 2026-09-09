@@ -1,0 +1,57 @@
+-- CNC-V1-06: immutable production quality requirements, lots, holds and NCR dispositions.
+ALTER TYPE "NonConformanceStatus" ADD VALUE IF NOT EXISTS 'UNDER_REVIEW';
+ALTER TYPE "NonConformanceStatus" ADD VALUE IF NOT EXISTS 'DISPOSITIONED';
+ALTER TYPE "NonConformanceActionType" ADD VALUE IF NOT EXISTS 'USE_AS_IS';
+ALTER TYPE "InventoryMovementType" ADD VALUE IF NOT EXISTS 'QUALITY_SCRAP';
+CREATE TYPE "QualityCharacteristicType" AS ENUM ('NUMERIC','BOOLEAN','QUALITATIVE');
+CREATE TYPE "QualitySamplingMethod" AS ENUM ('HUNDRED_PERCENT','FIXED_COUNT');
+CREATE TYPE "InspectionPoint" AS ENUM ('INCOMING','IN_PROCESS','FINAL');
+CREATE TYPE "InspectionLotStatus" AS ENUM ('OPEN','IN_PROGRESS','PASSED','FAILED','CANCELLED');
+CREATE TYPE "QualityHoldStatus" AS ENUM ('ACTIVE','RELEASED');
+CREATE TYPE "QualityHoldTarget" AS ENUM ('WORK_ORDER','OPERATION','OUTPUT_LOT','INVENTORY_LOT');
+CREATE TYPE "QualityDispositionType" AS ENUM ('ACCEPT','USE_AS_IS','REWORK','SCRAP');
+CREATE TYPE "ReworkRequirementStatus" AS ENUM ('OPEN','RESOLVED','CANCELLED');
+ALTER TABLE "QualityPlan" ADD COLUMN "status" "EngineeringStatus" NOT NULL DEFAULT 'DRAFT', ADD COLUMN "samplingMethod" "QualitySamplingMethod" NOT NULL DEFAULT 'HUNDRED_PERCENT', ADD COLUMN "sampleCount" INTEGER;
+ALTER TABLE "QualityPlanCheck" ADD COLUMN "characteristicType" "QualityCharacteristicType" NOT NULL DEFAULT 'NUMERIC', ADD COLUMN "nominalValue" DECIMAL(18,6), ADD COLUMN "qualitativeExpected" TEXT, ADD COLUMN "isRequired" BOOLEAN NOT NULL DEFAULT true;
+CREATE TABLE "ProductionQualityRequirement" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "workOrderId" TEXT NOT NULL, "operationId" TEXT, "qualityPlanId" TEXT NOT NULL, "planRevision" TEXT NOT NULL, "inspectionPoint" "InspectionPoint" NOT NULL, "samplingMethod" "QualitySamplingMethod" NOT NULL, "sampleCount" INTEGER, "snapshot" JSONB NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ProductionQualityRequirement_pkey" PRIMARY KEY ("id"));
+ALTER TABLE "ProductionQualityRequirement" ADD CONSTRAINT "ProductionQualityRequirement_workOrderId_fkey" FOREIGN KEY ("workOrderId") REFERENCES "WorkOrder"("id") ON DELETE CASCADE, ADD CONSTRAINT "ProductionQualityRequirement_operationId_fkey" FOREIGN KEY ("operationId") REFERENCES "WorkOrderOperation"("id") ON DELETE SET NULL, ADD CONSTRAINT "ProductionQualityRequirement_qualityPlanId_fkey" FOREIGN KEY ("qualityPlanId") REFERENCES "QualityPlan"("id");
+CREATE INDEX "ProductionQualityRequirement_tenantId_workOrderId_operationId_idx" ON "ProductionQualityRequirement"("tenantId","workOrderId","operationId");
+CREATE TABLE "InspectionLot" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "requirementId" TEXT NOT NULL, "workOrderId" TEXT NOT NULL, "operationId" TEXT, "productionRunId" TEXT, "lotId" TEXT, "inspectionPoint" "InspectionPoint" NOT NULL, "status" "InspectionLotStatus" NOT NULL DEFAULT 'OPEN', "requiredSamples" INTEGER NOT NULL DEFAULT 1, "idempotencyKey" TEXT NOT NULL, "inspectorId" TEXT, "completedAt" TIMESTAMP(3), "nonConformanceId" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL, CONSTRAINT "InspectionLot_pkey" PRIMARY KEY ("id"));
+ALTER TABLE "InspectionLot" ADD CONSTRAINT "InspectionLot_requirementId_fkey" FOREIGN KEY ("requirementId") REFERENCES "ProductionQualityRequirement"("id") ON DELETE CASCADE, ADD CONSTRAINT "InspectionLot_workOrderId_fkey" FOREIGN KEY ("workOrderId") REFERENCES "WorkOrder"("id"), ADD CONSTRAINT "InspectionLot_operationId_fkey" FOREIGN KEY ("operationId") REFERENCES "WorkOrderOperation"("id"), ADD CONSTRAINT "InspectionLot_productionRunId_fkey" FOREIGN KEY ("productionRunId") REFERENCES "ProductionRun"("id"), ADD CONSTRAINT "InspectionLot_lotId_fkey" FOREIGN KEY ("lotId") REFERENCES "Lot"("id"), ADD CONSTRAINT "InspectionLot_inspectorId_fkey" FOREIGN KEY ("inspectorId") REFERENCES "User"("id"), ADD CONSTRAINT "InspectionLot_nonConformanceId_fkey" FOREIGN KEY ("nonConformanceId") REFERENCES "NonConformance"("id");
+CREATE UNIQUE INDEX "InspectionLot_tenantId_idempotencyKey_key" ON "InspectionLot"("tenantId","idempotencyKey"); CREATE UNIQUE INDEX "InspectionLot_nonConformanceId_key" ON "InspectionLot"("nonConformanceId"); CREATE INDEX "InspectionLot_tenantId_workOrderId_status_idx" ON "InspectionLot"("tenantId","workOrderId","status");
+CREATE TABLE "InspectionMeasurement" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "inspectionLotId" TEXT NOT NULL, "checkSeq" INTEGER NOT NULL, "sampleNo" INTEGER NOT NULL, "characteristicType" "QualityCharacteristicType" NOT NULL, "numericValue" DECIMAL(18,6), "resultValue" TEXT, "unit" TEXT, "result" "InspectionResult" NOT NULL, "notes" TEXT, "inspectedById" TEXT NOT NULL, "idempotencyKey" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "InspectionMeasurement_pkey" PRIMARY KEY ("id"));
+ALTER TABLE "InspectionMeasurement" ADD CONSTRAINT "InspectionMeasurement_inspectionLotId_fkey" FOREIGN KEY ("inspectionLotId") REFERENCES "InspectionLot"("id") ON DELETE CASCADE, ADD CONSTRAINT "InspectionMeasurement_inspectedById_fkey" FOREIGN KEY ("inspectedById") REFERENCES "User"("id"); CREATE UNIQUE INDEX "InspectionMeasurement_tenantId_idempotencyKey_key" ON "InspectionMeasurement"("tenantId","idempotencyKey"); CREATE UNIQUE INDEX "InspectionMeasurement_inspectionLotId_sampleNo_checkSeq_key" ON "InspectionMeasurement"("inspectionLotId","sampleNo","checkSeq");
+CREATE TABLE "QualityHold" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "target" "QualityHoldTarget" NOT NULL, "workOrderId" TEXT, "operationId" TEXT, "lotId" TEXT, "inspectionLotId" TEXT, "quantity" DECIMAL(18,3), "reason" TEXT NOT NULL, "source" TEXT NOT NULL, "status" "QualityHoldStatus" NOT NULL DEFAULT 'ACTIVE', "idempotencyKey" TEXT NOT NULL, "createdById" TEXT NOT NULL, "releasedById" TEXT, "releasedAt" TIMESTAMP(3), "releaseReason" TEXT, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "QualityHold_pkey" PRIMARY KEY ("id"));
+ALTER TABLE "QualityHold" ADD CONSTRAINT "QualityHold_workOrderId_fkey" FOREIGN KEY ("workOrderId") REFERENCES "WorkOrder"("id"), ADD CONSTRAINT "QualityHold_operationId_fkey" FOREIGN KEY ("operationId") REFERENCES "WorkOrderOperation"("id"), ADD CONSTRAINT "QualityHold_lotId_fkey" FOREIGN KEY ("lotId") REFERENCES "Lot"("id"), ADD CONSTRAINT "QualityHold_inspectionLotId_fkey" FOREIGN KEY ("inspectionLotId") REFERENCES "InspectionLot"("id"), ADD CONSTRAINT "QualityHold_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User"("id"), ADD CONSTRAINT "QualityHold_releasedById_fkey" FOREIGN KEY ("releasedById") REFERENCES "User"("id"); CREATE UNIQUE INDEX "QualityHold_tenantId_idempotencyKey_key" ON "QualityHold"("tenantId","idempotencyKey"); CREATE INDEX "QualityHold_tenantId_status_lotId_idx" ON "QualityHold"("tenantId","status","lotId");
+CREATE TABLE "QualityDisposition" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "nonConformanceId" TEXT NOT NULL, "type" "QualityDispositionType" NOT NULL, "quantity" DECIMAL(18,3), "reason" TEXT NOT NULL, "idempotencyKey" TEXT NOT NULL, "decidedById" TEXT NOT NULL, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "QualityDisposition_pkey" PRIMARY KEY ("id")); ALTER TABLE "QualityDisposition" ADD CONSTRAINT "QualityDisposition_nonConformanceId_fkey" FOREIGN KEY ("nonConformanceId") REFERENCES "NonConformance"("id") ON DELETE CASCADE, ADD CONSTRAINT "QualityDisposition_decidedById_fkey" FOREIGN KEY ("decidedById") REFERENCES "User"("id"); CREATE UNIQUE INDEX "QualityDisposition_tenantId_idempotencyKey_key" ON "QualityDisposition"("tenantId","idempotencyKey"); CREATE INDEX "QualityDisposition_tenantId_nonConformanceId_idx" ON "QualityDisposition"("tenantId","nonConformanceId");
+CREATE UNIQUE INDEX "QualityDisposition_nonConformanceId_key" ON "QualityDisposition"("nonConformanceId");
+CREATE TABLE "ReworkRequirement" ("id" TEXT NOT NULL, "tenantId" TEXT NOT NULL, "nonConformanceId" TEXT NOT NULL, "workOrderId" TEXT NOT NULL, "operationId" TEXT, "quantity" DECIMAL(18,3) NOT NULL, "status" "ReworkRequirementStatus" NOT NULL DEFAULT 'OPEN', "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "ReworkRequirement_pkey" PRIMARY KEY ("id")); ALTER TABLE "ReworkRequirement" ADD CONSTRAINT "ReworkRequirement_nonConformanceId_fkey" FOREIGN KEY ("nonConformanceId") REFERENCES "NonConformance"("id") ON DELETE CASCADE; CREATE INDEX "ReworkRequirement_tenantId_workOrderId_status_idx" ON "ReworkRequirement"("tenantId","workOrderId","status");
+
+-- Tenant-owned quality parents must not be mixed at persistence level.  The
+-- ordinary ID FKs above preserve Prisma's existing relations; these composite
+-- FKs additionally prove that every quality aggregate has the same tenant as
+-- its production / plan / output parent.
+CREATE UNIQUE INDEX "WorkOrder_id_tenantId_key" ON "WorkOrder"("id", "tenantId");
+CREATE UNIQUE INDEX "WorkOrderOperation_id_tenantId_key" ON "WorkOrderOperation"("id", "tenantId");
+CREATE UNIQUE INDEX "QualityPlan_id_tenantId_key" ON "QualityPlan"("id", "tenantId");
+CREATE UNIQUE INDEX "ProductionQualityRequirement_id_tenantId_key" ON "ProductionQualityRequirement"("id", "tenantId");
+CREATE UNIQUE INDEX "InspectionLot_id_tenantId_key" ON "InspectionLot"("id", "tenantId");
+CREATE UNIQUE INDEX "Lot_id_tenantId_key" ON "Lot"("id", "tenantId");
+CREATE UNIQUE INDEX "NonConformance_id_tenantId_key" ON "NonConformance"("id", "tenantId");
+ALTER TABLE "ProductionQualityRequirement"
+  ADD CONSTRAINT "ProductionQualityRequirement_tenant_work_order_fkey" FOREIGN KEY ("workOrderId", "tenantId") REFERENCES "WorkOrder"("id", "tenantId") ON DELETE CASCADE,
+  ADD CONSTRAINT "ProductionQualityRequirement_tenant_quality_plan_fkey" FOREIGN KEY ("qualityPlanId", "tenantId") REFERENCES "QualityPlan"("id", "tenantId");
+ALTER TABLE "InspectionLot"
+  ADD CONSTRAINT "InspectionLot_tenant_requirement_fkey" FOREIGN KEY ("requirementId", "tenantId") REFERENCES "ProductionQualityRequirement"("id", "tenantId") ON DELETE CASCADE,
+  ADD CONSTRAINT "InspectionLot_tenant_work_order_fkey" FOREIGN KEY ("workOrderId", "tenantId") REFERENCES "WorkOrder"("id", "tenantId"),
+  ADD CONSTRAINT "InspectionLot_tenant_lot_fkey" FOREIGN KEY ("lotId", "tenantId") REFERENCES "Lot"("id", "tenantId"),
+  ADD CONSTRAINT "InspectionLot_tenant_ncr_fkey" FOREIGN KEY ("nonConformanceId", "tenantId") REFERENCES "NonConformance"("id", "tenantId");
+ALTER TABLE "QualityHold"
+  ADD CONSTRAINT "QualityHold_tenant_work_order_fkey" FOREIGN KEY ("workOrderId", "tenantId") REFERENCES "WorkOrder"("id", "tenantId"),
+  ADD CONSTRAINT "QualityHold_tenant_lot_fkey" FOREIGN KEY ("lotId", "tenantId") REFERENCES "Lot"("id", "tenantId"),
+  ADD CONSTRAINT "QualityHold_tenant_inspection_lot_fkey" FOREIGN KEY ("inspectionLotId", "tenantId") REFERENCES "InspectionLot"("id", "tenantId");
+ALTER TABLE "QualityDisposition"
+  ADD CONSTRAINT "QualityDisposition_tenant_ncr_fkey" FOREIGN KEY ("nonConformanceId", "tenantId") REFERENCES "NonConformance"("id", "tenantId") ON DELETE CASCADE;
+ALTER TABLE "ReworkRequirement"
+  ADD CONSTRAINT "ReworkRequirement_tenant_ncr_fkey" FOREIGN KEY ("nonConformanceId", "tenantId") REFERENCES "NonConformance"("id", "tenantId") ON DELETE CASCADE,
+  ADD CONSTRAINT "ReworkRequirement_tenant_work_order_fkey" FOREIGN KEY ("workOrderId", "tenantId") REFERENCES "WorkOrder"("id", "tenantId");

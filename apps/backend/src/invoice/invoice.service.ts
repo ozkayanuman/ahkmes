@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateInvoiceDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 
 const INVOICE_INCLUDE = {
@@ -27,7 +27,7 @@ const INVOICE_INCLUDE = {
 export class InvoiceService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, salesOrderId?: string) {
@@ -95,11 +95,12 @@ export class InvoiceService {
         });
       }
 
+      await this.outbox.record(tx, tenantId, "invoice", invoice.id, "invoice.created", { id: invoice.id, salesOrderId: dto.salesOrderId });
+      await this.outbox.record(tx, tenantId, "salesorder", dto.salesOrderId, "salesorder.updated", { id: dto.salesOrderId });
+
       return invoice;
     });
 
-    this.realtime.emitToTenant(tenantId, "invoice.created", { id: created.id, salesOrderId: dto.salesOrderId });
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id: dto.salesOrderId });
     return created;
   }
 
@@ -117,11 +118,12 @@ export class InvoiceService {
           data: { invoicedQty: { decrement: l.qty } },
         });
       }
-      return tx.invoice.update({ where: { id }, data: { status: "CANCELLED" }, include: INVOICE_INCLUDE });
+      const updated = await tx.invoice.update({ where: { id }, data: { status: "CANCELLED" }, include: INVOICE_INCLUDE });
+      await this.outbox.record(tx, tenantId, "invoice", id, "invoice.updated", { id, status: "CANCELLED" });
+      await this.outbox.record(tx, tenantId, "salesorder", invoice.salesOrderId, "salesorder.updated", { id: invoice.salesOrderId });
+      return updated;
     });
 
-    this.realtime.emitToTenant(tenantId, "invoice.updated", { id, status: "CANCELLED" });
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id: invoice.salesOrderId });
     return updated;
   }
 }

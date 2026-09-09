@@ -25,12 +25,23 @@ interface MaterialOption {
   unit: string;
   stockQty: string;
 }
+interface PartOption {
+  id: string;
+  partNo: string;
+  name: string;
+}
+interface BinOption {
+  id: string;
+  code: string;
+  warehouse: { id: string; name: string };
+}
 interface ConsumptionRow {
   id: string;
+  itemType: "MATERIAL" | "PART";
+  itemId: string;
   type: "RESERVED" | "CONSUMED";
   quantity: string;
   date: string;
-  material: MaterialOption;
   createdBy: { name: string };
 }
 interface FinishedGoodsRow {
@@ -78,12 +89,19 @@ export function WorkOrderDetailPage() {
     notes: "",
   });
   const [err, setErr] = useState<string | null>(null);
-  const [consForm, setConsForm] = useState({ materialId: "", type: "CONSUMED", quantity: "" });
+  const [consForm, setConsForm] = useState({
+    itemType: "MATERIAL" as "MATERIAL" | "PART",
+    itemId: "",
+    type: "CONSUMED",
+    quantity: "",
+    binId: "",
+  });
   const [fgQty, setFgQty] = useState("");
+  const [fgBinId, setFgBinId] = useState("");
 
   useInvalidateOn(
     ["workorder.updated", "stock.updated", "productionrun.updated"],
-    ["/work-orders", "/consumptions", "/finished-goods", "/materials"],
+    ["/work-orders", "/consumptions", "/finished-goods", "/materials", "/parts"],
   );
 
   const query = useQuery({
@@ -118,7 +136,7 @@ export function WorkOrderDetailPage() {
   const machines = useQuery({
     queryKey: ["/machines"],
     queryFn: () => apiGet<MachineOption[]>("/machines"),
-    enabled: editOpen,
+    enabled: editOpen || canStatus,
   });
   const consumptions = useQuery({
     queryKey: ["/consumptions", id],
@@ -131,6 +149,16 @@ export function WorkOrderDetailPage() {
   const materials = useQuery({
     queryKey: ["/materials"],
     queryFn: () => apiGet<MaterialOption[]>("/materials"),
+    enabled: canConsume,
+  });
+  const parts = useQuery({
+    queryKey: ["/parts"],
+    queryFn: () => apiGet<PartOption[]>("/parts"),
+    enabled: canConsume,
+  });
+  const bins = useQuery({
+    queryKey: ["/bins"],
+    queryFn: () => apiGet<BinOption[]>("/bins"),
     enabled: canConsume,
   });
 
@@ -146,6 +174,12 @@ export function WorkOrderDetailPage() {
 
   const setStatus = useMutation({
     mutationFn: (status: string) => apiPatch(`/work-orders/${id}/status`, { status }),
+    onSuccess: invalidate,
+    onError,
+  });
+  const assignOperationMachine = useMutation({
+    mutationFn: ({ operationId, machineId }: { operationId: string; machineId: string }) =>
+      apiPatch(`/work-orders/${id}/operations/${operationId}`, { machineId: machineId || null }),
     onSuccess: invalidate,
     onError,
   });
@@ -183,18 +217,21 @@ export function WorkOrderDetailPage() {
     qc.invalidateQueries({ queryKey: ["/consumptions"] });
     qc.invalidateQueries({ queryKey: ["/finished-goods"] });
     qc.invalidateQueries({ queryKey: ["/materials"] });
+    qc.invalidateQueries({ queryKey: ["/parts"] });
   };
   const addConsumption = useMutation({
     mutationFn: () =>
       apiPost("/consumptions", {
         workOrderId: id,
-        materialId: consForm.materialId,
+        itemType: consForm.itemType,
+        itemId: consForm.itemId,
         type: consForm.type,
         quantity: Number(consForm.quantity),
+        ...(consForm.binId ? { binId: consForm.binId } : {}),
       }),
     onSuccess: () => {
       invalidateOps();
-      setConsForm({ materialId: "", type: "CONSUMED", quantity: "" });
+      setConsForm({ itemType: "MATERIAL", itemId: "", type: "CONSUMED", quantity: "", binId: "" });
     },
     onError,
   });
@@ -208,10 +245,12 @@ export function WorkOrderDetailPage() {
       apiPost<{ totalProduced: number; completionSuggested: boolean }>("/finished-goods", {
         workOrderId: id,
         quantity: Number(fgQty),
+        ...(fgBinId ? { binId: fgBinId } : {}),
       }),
     onSuccess: async (res) => {
       invalidateOps();
       setFgQty("");
+      setFgBinId("");
       if (
         res.completionSuggested &&
         (await confirm(`Toplam üretilen (${res.totalProduced}) iş emri miktarına ulaştı. İş emri tamamlansın mı?`))
@@ -357,25 +396,79 @@ export function WorkOrderDetailPage() {
         </Card>
       </div>
 
+      {wo.operations?.length ? (
+        <section className="mt-6">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="text-lg font-semibold">Rota Operasyonları</h2>
+            <span className="text-sm text-slate-500">Revizyon {wo.recipeRevision ?? "—"} iş emrine sabitlendi</span>
+          </div>
+          <Table headers={["Sıra", "Operasyon", "Tezgah", "Durum", "WIP sağlam", "Hurda"]}>
+            {wo.operations.map((operation) => (
+              <tr key={operation.id}>
+                <td className="px-4 py-3">{operation.seq}</td>
+                <td className="px-4 py-3 font-medium">{operation.name}</td>
+                <td className="px-4 py-3">
+                  {canStatus && operation.status === "PENDING" ? (
+                    <Select
+                      value={operation.machine?.id ?? ""}
+                      onChange={(e) => assignOperationMachine.mutate({ operationId: operation.id, machineId: e.target.value })}
+                    >
+                      <option value="">Atanmadı</option>
+                      {machines.data?.filter((machine) => machine.isActive).map((machine) => (
+                        <option key={machine.id} value={machine.id}>{machine.name}</option>
+                      ))}
+                    </Select>
+                  ) : operation.machine?.name ?? "Atanmadı"}
+                </td>
+                <td className="px-4 py-3">{operation.status}</td>
+                <td className="px-4 py-3">{fmtQty(operation.completedQty)}</td>
+                <td className="px-4 py-3">{fmtQty(operation.scrapQty)}</td>
+              </tr>
+            ))}
+          </Table>
+        </section>
+      ) : (
+        <p className="mt-6 text-sm text-slate-500">Bu iş emri için sabitlenmiş rota yok; yeni iş emirlerinde aktif süreç reçetesi otomatik kopyalanır.</p>
+      )}
+
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <div>
           <h2 className="mb-3 text-lg font-semibold">Malzeme Rezervasyon / Tüketim</h2>
           {canConsume && !terminal && (
             <Card className="mb-3">
               <div className="flex flex-wrap items-end gap-2">
+                <div className="w-32">
+                  <Label htmlFor="consItemType">Kalem Tipi</Label>
+                  <Select
+                    id="consItemType"
+                    value={consForm.itemType}
+                    onChange={(e) =>
+                      setConsForm({ ...consForm, itemType: e.target.value as "MATERIAL" | "PART", itemId: "" })
+                    }
+                  >
+                    <option value="MATERIAL">Malzeme</option>
+                    <option value="PART">Parça (alt montaj)</option>
+                  </Select>
+                </div>
                 <div className="min-w-52 flex-1">
-                  <Label htmlFor="consMat">Malzeme</Label>
+                  <Label htmlFor="consMat">Kalem</Label>
                   <Select
                     id="consMat"
-                    value={consForm.materialId}
-                    onChange={(e) => setConsForm({ ...consForm, materialId: e.target.value })}
+                    value={consForm.itemId}
+                    onChange={(e) => setConsForm({ ...consForm, itemId: e.target.value })}
                   >
                     <option value="">Seçin…</option>
-                    {materials.data?.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.code} — {m.name} (stok {fmtQty(m.stockQty)} {m.unit})
-                      </option>
-                    ))}
+                    {consForm.itemType === "MATERIAL"
+                      ? materials.data?.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.code} — {m.name} (stok {fmtQty(m.stockQty)} {m.unit})
+                          </option>
+                        ))
+                      : parts.data?.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.partNo} — {p.name}
+                          </option>
+                        ))}
                   </Select>
                 </div>
                 <div className="w-32">
@@ -400,9 +493,16 @@ export function WorkOrderDetailPage() {
                     onChange={(e) => setConsForm({ ...consForm, quantity: e.target.value })}
                   />
                 </div>
+                <div className="min-w-40 flex-1">
+                  <Label htmlFor="consBin">Kaynak raf</Label>
+                  <Select id="consBin" value={consForm.binId} onChange={(e) => setConsForm({ ...consForm, binId: e.target.value })}>
+                    <option value="">Atanmamış stok</option>
+                    {bins.data?.map((b) => <option key={b.id} value={b.id}>{b.warehouse.name} / {b.code}</option>)}
+                  </Select>
+                </div>
                 <Button
                   disabled={
-                    !consForm.materialId || !(Number(consForm.quantity) > 0) || addConsumption.isPending
+                    !consForm.itemId || !(Number(consForm.quantity) > 0) || addConsumption.isPending
                   }
                   onClick={() => addConsumption.mutate()}
                 >
@@ -411,7 +511,7 @@ export function WorkOrderDetailPage() {
               </div>
             </Card>
           )}
-          <Table headers={["Malzeme", "Tür", "Miktar", "Tarih", "Kaydeden", ""]}>
+          <Table headers={["Kalem", "Tür", "Miktar", "Tarih", "Kaydeden", ""]}>
             {consumptions.data?.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
@@ -419,11 +519,20 @@ export function WorkOrderDetailPage() {
                 </td>
               </tr>
             )}
-            {consumptions.data?.map((c) => (
+            {consumptions.data?.map((c) => {
+              const item =
+                c.itemType === "MATERIAL"
+                  ? materials.data?.find((m) => m.id === c.itemId)
+                  : parts.data?.find((p) => p.id === c.itemId);
+              const itemLabel = item
+                ? c.itemType === "MATERIAL"
+                  ? `${(item as MaterialOption).code} — ${item.name}`
+                  : `${(item as PartOption).partNo} — ${item.name}`
+                : c.itemId;
+              const unit = c.itemType === "MATERIAL" ? (item as MaterialOption | undefined)?.unit ?? "" : "";
+              return (
               <tr key={c.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3">
-                  {c.material.code} — {c.material.name}
-                </td>
+                <td className="px-4 py-3">{itemLabel}</td>
                 <td className="px-4 py-3">
                   <span
                     className={
@@ -436,7 +545,7 @@ export function WorkOrderDetailPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {fmtQty(c.quantity)} {c.material.unit}
+                  {fmtQty(c.quantity)} {unit}
                 </td>
                 <td className="px-4 py-3">{fmtDate(c.date)}</td>
                 <td className="px-4 py-3">{c.createdBy.name}</td>
@@ -458,7 +567,8 @@ export function WorkOrderDetailPage() {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </Table>
         </div>
 
@@ -477,6 +587,13 @@ export function WorkOrderDetailPage() {
                     value={fgQty}
                     onChange={(e) => setFgQty(e.target.value)}
                   />
+                </div>
+                <div className="min-w-40 flex-1">
+                  <Label htmlFor="fgBin">Hedef raf</Label>
+                  <Select id="fgBin" value={fgBinId} onChange={(e) => setFgBinId(e.target.value)}>
+                    <option value="">Atanmamış stok</option>
+                    {bins.data?.map((b) => <option key={b.id} value={b.id}>{b.warehouse.name} / {b.code}</option>)}
+                  </Select>
                 </div>
                 <Button
                   disabled={!(Number(fgQty) > 0) || addFinishedGoods.isPending}

@@ -1,115 +1,247 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PlayCircle } from "lucide-react";
-import { useState } from "react";
-import { Button, Modal, Select, Table } from "../components/ui";
+import { CheckCircle2, PlayCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Button, Input, Modal, Select, Table } from "../components/ui";
 import { useToast } from "../components/toast";
-import { ApiError, apiGet, apiPatch, apiPost } from "../lib/api";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate } from "../lib/format";
-import { useInvalidateOn } from "../lib/socket";
 
-type ProposalStatus = "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "CONVERTED";
+type Policy = "MAKE" | "BUY" | "MAKE_OR_BUY";
+type ProposalStatus = "PROPOSED" | "FIRMED" | "CONVERTED" | "CANCELLED" | "SUPERSEDED";
+type Severity = "CRITICAL" | "WARNING" | "INFO";
+type ExceptionType =
+  | "SHORTAGE"
+  | "RESCHEDULE_IN"
+  | "RESCHEDULE_OUT"
+  | "CANCEL"
+  | "QUANTITY_EXCESS"
+  | "QUANTITY_SHORTAGE"
+  | "MISSING_POLICY";
 
-interface SupplierOption {
+interface Plant {
   id: string;
   name: string;
 }
 
-interface PurchaseProposalLineRow {
-  id: string;
-  qty: string;
-  neededByDate: string | null;
-  material: { id: string; code: string; name: string; unit: string };
+interface Pegging {
+  demandType: string;
+  demandId: string;
+  parentDemandType?: string | null;
+  parentDemandId?: string | null;
+  quantity: string;
+  requiredDate: string;
 }
 
-interface PurchaseProposalRow {
+interface Proposal {
   id: string;
-  ppNo: string;
+  proposalNo: string;
+  itemType: "MATERIAL" | "PART";
+  itemId: string;
+  policy: Policy;
+  quantity: string;
+  receiptDate: string;
+  releaseDate: string;
   status: ProposalStatus;
-  supplier: { id: string; name: string } | null;
-  lines: PurchaseProposalLineRow[];
-  createdAt: string;
+  calculation: Record<string, unknown>;
+  parameterSnapshot: Record<string, unknown>;
+  peggings: Pegging[];
 }
 
-interface ProductionProposalRow {
+interface MrpException {
   id: string;
-  prNo: string;
-  status: ProposalStatus;
-  qty: string;
-  dueDate: string;
-  part: { id: string; partNo: string; name: string };
-  createdAt: string;
+  type: ExceptionType;
+  severity: Severity;
+  itemType: "MATERIAL" | "PART";
+  itemId: string;
+  quantity: string | null;
+  requiredDate: string | null;
+  suggestedDate: string | null;
+  explanation: Record<string, unknown>;
+  acknowledgedAt: string | null;
 }
 
-const STATUS_LABEL: Record<ProposalStatus, string> = {
-  DRAFT: "Taslak",
-  PENDING_APPROVAL: "Onay Bekliyor",
-  APPROVED: "Onaylandı",
-  REJECTED: "Reddedildi",
+interface MrpRun {
+  id: string;
+  status: string;
+  planningDate: string;
+  horizonEnd: string;
+  startedAt: string;
+  summary: { proposalCount?: number; exceptionCount?: number } | null;
+}
+
+const proposalStatusLabel: Record<ProposalStatus, string> = {
+  PROPOSED: "Önerildi",
+  FIRMED: "Firm",
   CONVERTED: "Dönüştürüldü",
+  CANCELLED: "İptal",
+  SUPERSEDED: "Yerine yenisi",
 };
 
-function StatusBadge({ status }: { status: ProposalStatus }) {
-  const cls =
-    status === "REJECTED"
-      ? "bg-red-100 text-red-700"
-      : status === "CONVERTED"
-        ? "bg-green-100 text-green-700"
-        : status === "PENDING_APPROVAL"
-          ? "bg-amber-100 text-amber-700"
-          : "bg-slate-100 text-slate-500";
-  return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{STATUS_LABEL[status]}</span>;
+const proposalStatusClass: Record<ProposalStatus, string> = {
+  PROPOSED: "bg-blue-100 text-blue-700",
+  FIRMED: "bg-violet-100 text-violet-700",
+  CONVERTED: "bg-green-100 text-green-700",
+  CANCELLED: "bg-red-100 text-red-700",
+  SUPERSEDED: "bg-slate-100 text-slate-600",
+};
+
+const severityClass: Record<Severity, string> = {
+  CRITICAL: "bg-red-100 text-red-700",
+  WARNING: "bg-amber-100 text-amber-700",
+  INFO: "bg-slate-100 text-slate-700",
+};
+
+const calculationLabels: Record<string, string> = {
+  openingUsable: "Açılış kullanılabilir stok",
+  grossRequirement: "Brüt ihtiyaç",
+  existingSupplyBeforeDate: "İhtiyaç tarihine kadarki arz",
+  safetyStock: "Emniyet stoğu",
+  netRequirement: "Net ihtiyaç",
+  lotRule: "Lot kuralı",
+  recommendedQuantity: "Önerilen miktar",
+  projectedBalanceBeforeProposal: "Öneri öncesi projeksiyon",
+  requiredReceipt: "Gerekli giriş tarihi",
+  leadTimeWorkingDays: "Çalışma günü lead time",
+  recommendedRelease: "Önerilen serbest bırakma",
+};
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-function ApprovePurchaseModal({
-  proposal,
-  suppliers,
-  onClose,
-  onDone,
-}: {
-  proposal: PurchaseProposalRow;
-  suppliers: SupplierOption[];
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const toast = useToast();
-  const [supplierId, setSupplierId] = useState(proposal.supplier?.id ?? "");
+function plusDays(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
 
-  const approve = useMutation({
-    mutationFn: () =>
-      apiPatch(`/mrp/purchase-proposals/${proposal.id}/approve`, {
-        supplierId: supplierId || undefined,
-      }),
-    onSuccess: () => {
-      onDone();
-      onClose();
-    },
-    onError: (e) => {
-      const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
-      toast(msg ?? "Onaylanamadı", "error");
-    },
-  });
+function dateKey(value: string | null) {
+  return value?.slice(0, 10) ?? "";
+}
+
+function isWithinDateRange(value: string | null, from: string, to: string) {
+  const key = dateKey(value);
+  if (!from && !to) return true;
+  if (!key) return false;
+  return (!from || key >= from) && (!to || key <= to);
+}
+
+function displayValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function ProposalStatusBadge({ status }: { status: ProposalStatus }) {
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs ${proposalStatusClass[status]}`}>
+      {proposalStatusLabel[status]}
+    </span>
+  );
+}
+
+function ProposalDetail({ proposal, onClose }: { proposal: Proposal; onClose: () => void }) {
+  const calculationEntries = Object.entries(proposal.calculation);
+  const leadTime = proposal.parameterSnapshot.leadTimeWorkingDays;
 
   return (
-    <Modal open title={`${proposal.ppNo} — Onayla`} onClose={onClose}>
-      <div className="space-y-4">
-        <p className="text-sm text-slate-500">
-          Onaylanınca bu öneri gerçek bir satınalma siparişine dönüştürülür. Tedarikçi seçilmeli.
+    <Modal
+      open
+      title={`${proposal.proposalNo} — Hesap Açıklaması`}
+      onClose={onClose}
+      className="max-h-[90vh] max-w-3xl overflow-y-auto"
+    >
+      <div className="space-y-5 text-sm">
+        <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-slate-500">Kalem / politika</dt>
+            <dd className="font-medium">{proposal.itemType}: {proposal.itemId} / {proposal.policy}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">Önerilen miktar</dt>
+            <dd className="font-medium">{proposal.quantity}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">İhtiyaç tarihi</dt>
+            <dd>{fmtDate(proposal.receiptDate)}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-slate-500">Serbest bırakma tarihi</dt>
+            <dd>{fmtDate(proposal.releaseDate)}</dd>
+          </div>
+        </dl>
+
+        <section>
+          <h3 className="font-semibold">Saklanan kanonik hesap</h3>
+          <dl className="mt-2 grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-2">
+            {calculationEntries.map(([key, value]) => (
+              <div key={key} className="flex justify-between gap-3 border-b border-slate-200 py-1 last:border-0">
+                <dt className="text-slate-600">{calculationLabels[key] ?? key}</dt>
+                <dd className="text-right font-mono text-xs">{displayValue(value)}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        <section>
+          <h3 className="font-semibold">Parametre snapshotı</h3>
+          <div className="mt-2 rounded-lg border p-3 text-xs">
+            {leadTime !== undefined && <p className="mb-2 font-medium">{displayValue(leadTime)} çalışma günü</p>}
+            <pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(proposal.parameterSnapshot, null, 2)}</pre>
+          </div>
+        </section>
+
+        <section>
+          <h3 className="font-semibold">Pegging</h3>
+          {proposal.peggings.length > 0 ? (
+            <ul className="mt-2 space-y-2">
+              {proposal.peggings.map((pegging, index) => (
+                <li key={`${pegging.demandId}-${index}`} className="rounded-lg border p-3 text-xs">
+                  <p className="font-medium">{pegging.demandType} / {pegging.demandId}</p>
+                  <p className="mt-1 text-slate-600">{pegging.quantity} — {fmtDate(pegging.requiredDate)}</p>
+                  {pegging.parentDemandId && (
+                    <p className="mt-1 text-slate-500">Üst talep: {pegging.parentDemandType} / {pegging.parentDemandId}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-slate-500">Bu öneri için saklanan pegging yok.</p>
+          )}
+        </section>
+      </div>
+    </Modal>
+  );
+}
+
+function ConversionModal({
+  proposal,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  proposal: Proposal;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const isMake = proposal.policy === "MAKE";
+  return (
+    <Modal open title={`${proposal.proposalNo} — Kontrollü Dönüşüm`} onClose={onCancel}>
+      <div className="space-y-4 text-sm">
+        <p>
+          {isMake
+            ? "MAKE önerisi planlı iş emrine dönüştürülecek; mevcut mühendislik release sınırı korunacak."
+            : "BUY önerisi satınalma talebine dönüştürülecek; satınalma siparişi oluşturulmayacak."}
         </p>
-        <Select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-          <option value="">Tedarikçi seçiniz</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </Select>
+        <p className="rounded bg-slate-50 p-3 text-xs text-slate-600">
+          {proposal.itemType}: {proposal.itemId} — {proposal.quantity} — ihtiyaç {fmtDate(proposal.receiptDate)}
+        </p>
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose}>
-            Vazgeç
-          </Button>
-          <Button disabled={!supplierId || approve.isPending} onClick={() => approve.mutate()}>
-            Onayla ve Siparişe Dönüştür
+          <Button variant="outline" disabled={busy} onClick={onCancel}>Vazgeç</Button>
+          <Button disabled={busy} onClick={onConfirm}>
+            {isMake ? "Planlı İş Emrine Dönüştür" : "Satınalma Talebine Dönüştür"}
           </Button>
         </div>
       </div>
@@ -119,181 +251,246 @@ function ApprovePurchaseModal({
 
 export function MrpPage() {
   const { user } = useAuth();
-  const canManage = !!user && ["ADMIN", "PLANNER"].includes(user.role);
-  const qc = useQueryClient();
   const toast = useToast();
-  const [approvingPp, setApprovingPp] = useState<PurchaseProposalRow | null>(null);
+  const queryClient = useQueryClient();
+  const [plantId, setPlantId] = useState("");
+  const [planningDate, setPlanningDate] = useState(today());
+  const [horizonEnd, setHorizonEnd] = useState(plusDays(90));
+  const [policy, setPolicy] = useState("");
+  const [proposalStatus, setProposalStatus] = useState("");
+  const [itemSearch, setItemSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [exceptionType, setExceptionType] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [acknowledgement, setAcknowledgement] = useState("");
+  const [detail, setDetail] = useState<Proposal | null>(null);
+  const [conversion, setConversion] = useState<Proposal | null>(null);
+  const canManage = !!user && ["ADMIN", "PLANNER"].includes(user.role);
 
-  useInvalidateOn(
-    ["mrp.proposal.created", "purchaseproposal.updated", "productionproposal.updated"],
-    ["/mrp/purchase-proposals", "/mrp/production-proposals"],
+  const plants = useQuery({ queryKey: ["/plants"], queryFn: () => apiGet<Plant[]>("/plants") });
+  const selectedPlant = plantId || plants.data?.[0]?.id || "";
+
+  const proposals = useQuery({
+    queryKey: ["/mrp/proposals", selectedPlant, policy, proposalStatus],
+    enabled: !!selectedPlant,
+    queryFn: () => {
+      const params = new URLSearchParams({ plantId: selectedPlant });
+      if (policy) params.set("policy", policy);
+      if (proposalStatus) params.set("status", proposalStatus);
+      return apiGet<Proposal[]>(`/mrp/proposals?${params.toString()}`);
+    },
+  });
+
+  const exceptions = useQuery({
+    queryKey: ["/mrp/exceptions", selectedPlant, severity, exceptionType],
+    enabled: !!selectedPlant,
+    queryFn: () => {
+      const params = new URLSearchParams({ plantId: selectedPlant });
+      if (severity) params.set("severity", severity);
+      if (exceptionType) params.set("type", exceptionType);
+      return apiGet<MrpException[]>(`/mrp/exceptions?${params.toString()}`);
+    },
+  });
+
+  const runs = useQuery({
+    queryKey: ["/mrp/runs", selectedPlant],
+    enabled: !!selectedPlant,
+    queryFn: () => apiGet<MrpRun[]>(`/mrp/runs?plantId=${encodeURIComponent(selectedPlant)}`),
+  });
+
+  const invalidate = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: ["/mrp/proposals"] }),
+    queryClient.invalidateQueries({ queryKey: ["/mrp/exceptions"] }),
+    queryClient.invalidateQueries({ queryKey: ["/mrp/runs"] }),
+  ]);
+
+  const run = useMutation({
+    mutationFn: () => apiPost("/mrp/runs", { plantId: selectedPlant, planningDate, horizonEnd }),
+    onSuccess: () => {
+      void invalidate();
+      toast("MRP günlük planı tamamlandı", "success");
+    },
+    onError: () => toast("MRP planı çalıştırılamadı. Parametre ve takvimi kontrol edin.", "error"),
+  });
+
+  const firm = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      apiPatch(`/mrp/proposals/${id}/${value ? "firm" : "unfirm"}`, {}),
+    onSuccess: () => void invalidate(),
+    onError: () => toast("Firm durumu değiştirilemedi", "error"),
+  });
+
+  const convert = useMutation({
+    mutationFn: (proposal: Proposal) =>
+      apiPost(`/mrp/proposals/${proposal.id}/${proposal.policy === "MAKE" ? "convert-make" : "convert-buy"}`, {}),
+    onSuccess: () => {
+      setConversion(null);
+      void invalidate();
+      toast("Öneri downstream sınıra güvenli biçimde dönüştürüldü", "success");
+    },
+    onError: () => toast("Dönüşüm yapılamadı", "error"),
+  });
+
+  const acknowledge = useMutation({
+    mutationFn: (id: string) => apiPost(`/mrp/exceptions/${id}/acknowledge`, {}),
+    onSuccess: () => {
+      void invalidate();
+      toast("İstisna onaylandı", "success");
+    },
+    onError: () => toast("İstisna onaylanamadı", "error"),
+  });
+
+  const normalizedItemSearch = itemSearch.trim().toLocaleLowerCase("tr-TR");
+  const filteredProposals = useMemo(
+    () => (proposals.data ?? []).filter((item) => {
+      const searchable = `${item.proposalNo} ${item.itemType} ${item.itemId}`.toLocaleLowerCase("tr-TR");
+      return (!policy || item.policy === policy)
+        && (!proposalStatus || item.status === proposalStatus)
+        && (!normalizedItemSearch || searchable.includes(normalizedItemSearch))
+        && isWithinDateRange(item.receiptDate, dateFrom, dateTo);
+    }),
+    [dateFrom, dateTo, normalizedItemSearch, policy, proposalStatus, proposals.data],
   );
 
-  const purchaseProposals = useQuery({
-    queryKey: ["/mrp/purchase-proposals"],
-    queryFn: () => apiGet<PurchaseProposalRow[]>("/mrp/purchase-proposals"),
-  });
-  const productionProposals = useQuery({
-    queryKey: ["/mrp/production-proposals"],
-    queryFn: () => apiGet<ProductionProposalRow[]>("/mrp/production-proposals"),
-  });
-  const suppliers = useQuery({
-    queryKey: ["/suppliers"],
-    queryFn: () => apiGet<SupplierOption[]>("/suppliers"),
-    enabled: canManage,
-  });
-
-  const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["/mrp/purchase-proposals"] }).then(() =>
-      qc.invalidateQueries({ queryKey: ["/mrp/production-proposals"] }),
-    );
-
-  const runMrp = useMutation({
-    mutationFn: () =>
-      apiPost<{ purchaseProposal: unknown; productionProposals: unknown[] }>("/mrp/run", {}),
-    onSuccess: (res) => {
-      invalidate();
-      const ppCount = res.purchaseProposal ? 1 : 0;
-      toast(`MRP çalıştırıldı: ${ppCount} satınalma, ${res.productionProposals.length} üretim önerisi`, "success");
-    },
-    onError: () => toast("MRP çalıştırılamadı", "error"),
-  });
-
-  const submitPp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/purchase-proposals/${id}/submit`, {}),
-    onSuccess: invalidate,
-    onError: () => toast("Onaya gönderilemedi", "error"),
-  });
-  const rejectPp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/purchase-proposals/${id}/reject`, {}),
-    onSuccess: invalidate,
-    onError: () => toast("Reddedilemedi", "error"),
-  });
-  const submitPrp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/production-proposals/${id}/submit`, {}),
-    onSuccess: invalidate,
-    onError: () => toast("Onaya gönderilemedi", "error"),
-  });
-  const approvePrp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/production-proposals/${id}/approve`, {}),
-    onSuccess: invalidate,
-    onError: () => toast("Onaylanamadı", "error"),
-  });
-  const rejectPrp = useMutation({
-    mutationFn: (id: string) => apiPatch(`/mrp/production-proposals/${id}/reject`, {}),
-    onSuccess: invalidate,
-    onError: () => toast("Reddedilemedi", "error"),
-  });
+  const filteredExceptions = useMemo(
+    () => (exceptions.data ?? [])
+      .filter((item) => {
+        const searchable = `${item.itemType} ${item.itemId}`.toLocaleLowerCase("tr-TR");
+        const acknowledgementMatches = !acknowledgement
+          || (acknowledgement === "OPEN" && !item.acknowledgedAt)
+          || (acknowledgement === "ACKNOWLEDGED" && !!item.acknowledgedAt);
+        return (!exceptionType || item.type === exceptionType)
+          && (!severity || item.severity === severity)
+          && acknowledgementMatches
+          && (!normalizedItemSearch || searchable.includes(normalizedItemSearch))
+          && isWithinDateRange(item.requiredDate, dateFrom, dateTo);
+      })
+      .sort((a, b) => `${a.requiredDate ?? ""}${a.severity}`.localeCompare(`${b.requiredDate ?? ""}${b.severity}`)),
+    [acknowledgement, dateFrom, dateTo, exceptionType, exceptions.data, normalizedItemSearch, severity],
+  );
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">MRP — Malzeme İhtiyaç Planlama</h1>
-          <p className="text-sm text-slate-500">
-            Açık iş emirleri + reorder-point'e göre satınalma/üretim önerisi üretir.
-          </p>
+      <header>
+        <h1 className="text-xl font-semibold">MRP — Günlük Planlama</h1>
+        <p className="text-sm text-slate-500">
+          Tarihli ihtiyaç, kullanılabilir arz, istisna, pegging ve önerileri tek kanonik planda gösterir.
+        </p>
+      </header>
+
+      <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-4">
+        <label className="text-sm" htmlFor="mrp-plant">
+          Plant
+          <Select id="mrp-plant" className="mt-1" value={selectedPlant} onChange={(event) => setPlantId(event.target.value)}>
+            {(plants.data ?? []).map((plant) => <option key={plant.id} value={plant.id}>{plant.name}</option>)}
+          </Select>
+        </label>
+        <label className="text-sm" htmlFor="mrp-planning-date">
+          Planlama tarihi
+          <Input id="mrp-planning-date" className="mt-1" type="date" value={planningDate} onChange={(event) => setPlanningDate(event.target.value)} />
+        </label>
+        <label className="text-sm" htmlFor="mrp-horizon-end">
+          Ufuk sonu
+          <Input id="mrp-horizon-end" className="mt-1" type="date" value={horizonEnd} onChange={(event) => setHorizonEnd(event.target.value)} />
+        </label>
+        <div className="self-end">
+          {canManage && (
+            <Button disabled={!selectedPlant || run.isPending || horizonEnd < planningDate} onClick={() => run.mutate()}>
+              <PlayCircle className="h-4 w-4" /> Tam MRP Çalıştır
+            </Button>
+          )}
         </div>
-        {canManage && (
-          <Button disabled={runMrp.isPending} onClick={() => runMrp.mutate()}>
-            <PlayCircle className="mr-1 h-4 w-4" /> MRP Çalıştır
-          </Button>
-        )}
-      </div>
+      </section>
 
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-600">Satınalma Önerileri</h2>
-        <Table headers={["No", "Tedarikçi", "Satır Sayısı", "Durum", "Oluşturulma", "İşlem"]}>
-          {(purchaseProposals.data ?? []).map((pp) => (
-            <tr key={pp.id}>
-              <td className="px-4 py-3 font-medium">{pp.ppNo}</td>
-              <td className="px-4 py-3">{pp.supplier?.name ?? "—"}</td>
-              <td className="px-4 py-3">{pp.lines.length}</td>
+      <section>
+        <h2 className="mb-2 text-sm font-semibold text-slate-700">Çalışma geçmişi</h2>
+        <Table headers={["Durum", "Plan tarihi", "Ufuk", "Öneri / istisna", "Başlangıç"]}>
+          {(runs.data ?? []).slice(0, 5).map((item) => (
+            <tr key={item.id}>
+              <td className="px-4 py-2">{item.status}</td>
+              <td className="px-4 py-2">{fmtDate(item.planningDate)}</td>
+              <td className="px-4 py-2">{fmtDate(item.horizonEnd)}</td>
+              <td className="px-4 py-2">{item.summary?.proposalCount ?? 0} / {item.summary?.exceptionCount ?? 0}</td>
+              <td className="px-4 py-2">{fmtDate(item.startedAt)}</td>
+            </tr>
+          ))}
+          {runs.data?.length === 0 && <tr><td colSpan={5} className="px-4 py-5 text-center text-slate-500">Henüz günlük MRP çalışması yok.</td></tr>}
+        </Table>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Planlayıcı Workbench</h2>
+          <p className="text-xs text-slate-500">Tarihli MAKE/BUY önerileri, durum geçişleri ve kontrollü conversion sınırı.</p>
+        </div>
+        <div className="grid gap-3 rounded-lg border bg-slate-50 p-3 md:grid-cols-3 xl:grid-cols-5">
+          <label className="text-xs" htmlFor="mrp-policy-filter">Politika<Select id="mrp-policy-filter" className="mt-1" value={policy} onChange={(event) => setPolicy(event.target.value)}><option value="">Tümü</option><option value="MAKE">MAKE</option><option value="BUY">BUY</option></Select></label>
+          <label className="text-xs" htmlFor="mrp-item-filter">Kalem ara<Input id="mrp-item-filter" className="mt-1" value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Kod, ID veya öneri no" /></label>
+          <label className="text-xs" htmlFor="mrp-status-filter">Öneri durumu<Select id="mrp-status-filter" className="mt-1" value={proposalStatus} onChange={(event) => setProposalStatus(event.target.value)}><option value="">Tümü</option>{Object.entries(proposalStatusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
+          <label className="text-xs" htmlFor="mrp-date-from">Başlangıç tarihi<Input id="mrp-date-from" className="mt-1" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></label>
+          <label className="text-xs" htmlFor="mrp-date-to">Bitiş tarihi<Input id="mrp-date-to" className="mt-1" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></label>
+        </div>
+        <Table headers={["No", "Kalem", "Politika", "Miktar", "İhtiyaç", "Serbest bırak", "Durum", "İşlem"]}>
+          {filteredProposals.map((item) => (
+            <tr key={item.id}>
+              <td className="px-4 py-3 font-medium"><button className="underline" aria-label={`${item.proposalNo} ayrıntısını aç`} onClick={() => setDetail(item)}>{item.proposalNo}</button></td>
+              <td className="px-4 py-3 text-xs">{item.itemType}: {item.itemId}</td>
+              <td className="px-4 py-3">{item.policy}</td>
+              <td className="px-4 py-3">{item.quantity}</td>
+              <td className="px-4 py-3">{fmtDate(item.receiptDate)}</td>
+              <td className="px-4 py-3">{fmtDate(item.releaseDate)}</td>
+              <td className="px-4 py-3"><ProposalStatusBadge status={item.status} /></td>
               <td className="px-4 py-3">
-                <StatusBadge status={pp.status} />
+                <div className="flex flex-wrap gap-1">
+                  {canManage && item.status === "PROPOSED" && <Button variant="ghost" size="sm" disabled={firm.isPending} onClick={() => firm.mutate({ id: item.id, value: true })}>Firmle</Button>}
+                  {canManage && item.status === "FIRMED" && <Button variant="ghost" size="sm" disabled={firm.isPending} onClick={() => firm.mutate({ id: item.id, value: false })}>Firmi kaldır</Button>}
+                  {canManage && item.status === "FIRMED" && (item.policy === "MAKE" || item.policy === "BUY") && <Button variant="outline" size="sm" disabled={convert.isPending} onClick={() => setConversion(item)}>Dönüştür</Button>}
+                </div>
               </td>
-              <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(pp.createdAt)}</td>
+            </tr>
+          ))}
+          {filteredProposals.length === 0 && <tr><td colSpan={8} className="px-4 py-5 text-center text-slate-500">Bu filtrelerde öneri yok.</td></tr>}
+        </Table>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">İstisna Workbench</h2>
+          <p className="text-xs text-slate-500">Kritik açıkları, reschedule ve lifecycle önerilerini saklanan açıklamalarıyla yönetin.</p>
+        </div>
+        <div className="grid gap-3 rounded-lg border bg-slate-50 p-3 md:grid-cols-3">
+          <label className="text-xs" htmlFor="mrp-exception-type">İstisna türü<Select id="mrp-exception-type" className="mt-1" value={exceptionType} onChange={(event) => setExceptionType(event.target.value)}><option value="">Tümü</option><option value="SHORTAGE">SHORTAGE</option><option value="RESCHEDULE_IN">RESCHEDULE_IN</option><option value="RESCHEDULE_OUT">RESCHEDULE_OUT</option><option value="CANCEL">CANCEL</option><option value="QUANTITY_EXCESS">QUANTITY_EXCESS</option><option value="QUANTITY_SHORTAGE">QUANTITY_SHORTAGE</option><option value="MISSING_POLICY">MISSING_POLICY</option></Select></label>
+          <label className="text-xs" htmlFor="mrp-severity-filter">Önem<Select id="mrp-severity-filter" className="mt-1" value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">Tümü</option><option value="CRITICAL">Kritik</option><option value="WARNING">Uyarı</option><option value="INFO">Bilgi</option></Select></label>
+          <label className="text-xs" htmlFor="mrp-ack-filter">Onay durumu<Select id="mrp-ack-filter" className="mt-1" value={acknowledgement} onChange={(event) => setAcknowledgement(event.target.value)}><option value="">Tümü</option><option value="OPEN">Açık</option><option value="ACKNOWLEDGED">Onaylandı</option></Select></label>
+        </div>
+        <Table headers={["Önem", "Tür", "Kalem", "Miktar", "İhtiyaç", "Önerilen", "Neden", "Durum / işlem"]}>
+          {filteredExceptions.map((item) => (
+            <tr key={item.id}>
+              <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs ${severityClass[item.severity]}`}>{item.severity}</span></td>
+              <td className="px-4 py-3">{item.type}</td>
+              <td className="px-4 py-3 text-xs">{item.itemType}: {item.itemId}</td>
+              <td className="px-4 py-3">{item.quantity ?? "—"}</td>
+              <td className="px-4 py-3">{item.requiredDate ? fmtDate(item.requiredDate) : "—"}</td>
+              <td className="px-4 py-3">{item.suggestedDate ? fmtDate(item.suggestedDate) : "—"}</td>
+              <td className="max-w-sm px-4 py-3 text-xs">{String(item.explanation.message ?? "Saklanan MRP planlama istisnası")}</td>
               <td className="px-4 py-3">
-                {canManage && pp.status === "DRAFT" && (
-                  <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => submitPp.mutate(pp.id)}>
-                    Onaya Gönder
-                  </Button>
-                )}
-                {canManage && pp.status === "PENDING_APPROVAL" && (
-                  <div className="flex gap-1">
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setApprovingPp(pp)}>
-                      Onayla
-                    </Button>
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => rejectPp.mutate(pp.id)}>
-                      Reddet
-                    </Button>
-                  </div>
+                {item.acknowledgedAt ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-green-700"><CheckCircle2 className="h-4 w-4" /> Onaylandı</span>
+                ) : canManage ? (
+                  <Button variant="outline" size="sm" disabled={acknowledge.isPending} onClick={() => acknowledge.mutate(item.id)}>Onayla</Button>
+                ) : (
+                  <span className="text-xs text-amber-700">Açık</span>
                 )}
               </td>
             </tr>
           ))}
-          {purchaseProposals.data?.length === 0 && (
-            <tr>
-              <td colSpan={6} className="px-4 py-6 text-center text-slate-400">
-                Öneri yok.
-              </td>
-            </tr>
-          )}
+          {filteredExceptions.length === 0 && <tr><td colSpan={8} className="px-4 py-5 text-center text-slate-500">Bu filtrelerde istisna yok.</td></tr>}
         </Table>
-      </div>
+      </section>
 
-      <div>
-        <h2 className="mb-2 text-sm font-semibold text-slate-600">Üretim Önerileri</h2>
-        <Table headers={["No", "Parça", "Miktar", "Termin", "Durum", "Oluşturulma", "İşlem"]}>
-          {(productionProposals.data ?? []).map((prp) => (
-            <tr key={prp.id}>
-              <td className="px-4 py-3 font-medium">{prp.prNo}</td>
-              <td className="px-4 py-3">
-                {prp.part.partNo} — {prp.part.name}
-              </td>
-              <td className="px-4 py-3">{Number(prp.qty)}</td>
-              <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(prp.dueDate)}</td>
-              <td className="px-4 py-3">
-                <StatusBadge status={prp.status} />
-              </td>
-              <td className="px-4 py-3 text-xs text-slate-400">{fmtDate(prp.createdAt)}</td>
-              <td className="px-4 py-3">
-                {canManage && prp.status === "DRAFT" && (
-                  <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => submitPrp.mutate(prp.id)}>
-                    Onaya Gönder
-                  </Button>
-                )}
-                {canManage && prp.status === "PENDING_APPROVAL" && (
-                  <div className="flex gap-1">
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => approvePrp.mutate(prp.id)}>
-                      Onayla
-                    </Button>
-                    <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => rejectPrp.mutate(prp.id)}>
-                      Reddet
-                    </Button>
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
-          {productionProposals.data?.length === 0 && (
-            <tr>
-              <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
-                Öneri yok.
-              </td>
-            </tr>
-          )}
-        </Table>
-      </div>
-
-      {approvingPp && (
-        <ApprovePurchaseModal
-          proposal={approvingPp}
-          suppliers={suppliers.data ?? []}
-          onClose={() => setApprovingPp(null)}
-          onDone={invalidate}
-        />
-      )}
+      {detail && <ProposalDetail proposal={detail} onClose={() => setDetail(null)} />}
+      {conversion && <ConversionModal proposal={conversion} busy={convert.isPending} onCancel={() => setConversion(null)} onConfirm={() => convert.mutate(conversion)} />}
     </div>
   );
 }

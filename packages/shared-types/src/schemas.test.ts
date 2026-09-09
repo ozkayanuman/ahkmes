@@ -1,4 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { fixtureCounterAdjustmentSchema, hmiCompleteOperationSchema, hmiOperationQueueQuerySchema, scheduleFixtureMaintenanceSchema } from "./schemas";
+
+describe("fixture maintenance schemas", () => {
+  it("requires a positive version and a non-empty reason for an audited counter override", () => {
+    expect(fixtureCounterAdjustmentSchema.safeParse({ maintenanceCycleCount: 2, maintenancePartCount: 3, version: 1, reason: "verified counter" }).success).toBe(true);
+    expect(fixtureCounterAdjustmentSchema.safeParse({ maintenanceCycleCount: -1, maintenancePartCount: 0, version: 1, reason: "verified counter" }).success).toBe(false);
+    expect(fixtureCounterAdjustmentSchema.safeParse({ maintenanceCycleCount: 0, maintenancePartCount: 0, version: 1, reason: "" }).success).toBe(false);
+  });
+
+  it("accepts optional policy evidence without allowing an invalid idempotency key", () => {
+    expect(scheduleFixtureMaintenanceSchema.safeParse({ physicalFixtureInstanceId: "123e4567-e89b-12d3-a456-426614174000", fixtureMaintenancePolicyId: "123e4567-e89b-12d3-a456-426614174001", maintenanceType: "PM", idempotencyKey: "fixture-maintenance-1" }).success).toBe(true);
+    expect(scheduleFixtureMaintenanceSchema.safeParse({ physicalFixtureInstanceId: "123e4567-e89b-12d3-a456-426614174000", maintenanceType: "PM", idempotencyKey: "short" }).success).toBe(false);
+  });
+});
 import {
   createCustomerSchema,
   createMaterialSchema,
@@ -7,6 +21,10 @@ import {
   loginSchema,
   RoleSchema,
   RunSourceSchema,
+  createToolDefinitionSchema,
+  createToolCompatibilitySchema,
+  manualToolLifeAdjustmentSchema,
+  setupAssignmentSchema,
 } from "./index";
 
 describe("enum şemaları", () => {
@@ -96,5 +114,34 @@ describe("createQuoteSchema", () => {
         lines: [{ partId: uuid, quantity: 0, unitPrice: 1, dueDate: "2026-08-15" }],
       }),
     ).toThrow();
+  });
+});
+
+describe("MES-TOOL-001 tooling DTO guards", () => {
+  it("rejects invalid life policies and unsafe thresholds", () => {
+    expect(createToolDefinitionSchema.safeParse({ code: "T1", name: "Tool", toolType: "END_MILL", lifePolicy: "BAD", maximumLife: 5, warningThreshold: 1, lifeUnit: "cycle" }).success).toBe(false);
+    expect(createToolDefinitionSchema.safeParse({ code: "T1", name: "Tool", toolType: "END_MILL", lifePolicy: "CYCLE", maximumLife: 5, warningThreshold: 6, lifeUnit: "cycle" }).success).toBe(false);
+  });
+
+  it("requires one compatibility subject, unique assignments and an adjustment reason", () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    expect(createToolCompatibilitySchema.safeParse({ machineId: id }).success).toBe(false);
+    expect(setupAssignmentSchema.safeParse({ toolAssignments: [{ requirementId: id, physicalToolInstanceId: id }, { requirementId: "00000000-0000-4000-8000-000000000002", physicalToolInstanceId: id }] }).success).toBe(false);
+    expect(manualToolLifeAdjustmentSchema.safeParse({ consumedLife: 1, version: 1, reason: "" }).success).toBe(false);
+  });
+});
+
+describe("MES-OPERATOR-HMI-001 DTO guards", () => {
+  it("accepts only valid operation queue filters", () => {
+    const id = "00000000-0000-4000-8000-000000000001";
+    expect(hmiOperationQueueQuerySchema.safeParse({ machineId: id, status: "PENDING" }).success).toBe(true);
+    expect(hmiOperationQueueQuerySchema.safeParse({ status: "UNKNOWN" }).success).toBe(false);
+    expect(hmiOperationQueueQuerySchema.safeParse({ machineId: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("requires non-negative HMI completion quantities", () => {
+    expect(hmiCompleteOperationSchema.safeParse({ goodCount: 3, scrapCount: 0, notes: "operator completion" }).success).toBe(true);
+    expect(hmiCompleteOperationSchema.safeParse({ goodCount: -1, scrapCount: 0 }).success).toBe(false);
+    expect(hmiCompleteOperationSchema.safeParse({ goodCount: 1.5, scrapCount: 0 }).success).toBe(false);
   });
 });

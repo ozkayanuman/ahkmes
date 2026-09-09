@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
-import { createLotSchema, type CreateLotDto } from "@ahkmes/shared-types";
+import { createLotSchema, decideLotAcceptanceSchema, type CreateLotDto, type DecideLotAcceptanceDto } from "@ahkmes/shared-types";
 import type { StockItemType } from "@prisma/client";
 import { LotsService } from "./lots.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { PagesGuard } from "../common/guards/pages.guard";
 import { Roles } from "../common/decorators/roles.decorator";
+import { SkipAudit } from "../common/decorators/skip-audit.decorator";
 import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
@@ -50,6 +51,17 @@ export class LotsController {
     @Body(new ZodValidationPipe(createLotSchema)) dto: CreateLotDto,
   ) {
     return this.service.create(user.tenantId, dto);
+  }
+
+  @Post(":id/acceptance")
+  @SkipAudit()
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  decideAcceptance(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(decideLotAcceptanceSchema)) dto: DecideLotAcceptanceDto,
+  ) {
+    return this.service.decideAcceptance(user.tenantId, user.userId, id, dto);
   }
 
   @Delete(":id")

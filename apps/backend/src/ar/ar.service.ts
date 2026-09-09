@@ -1,7 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateCustomerPaymentDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 
 const PAYMENT_INCLUDE = {
@@ -19,7 +19,7 @@ const PAYMENT_INCLUDE = {
 export class ArService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   findPayments(tenantId: string, customerId?: string) {
@@ -58,7 +58,7 @@ export class ArService {
       }
 
       const cpNo = await nextDocNo(tx, "customerPayment", "cpNo", "MO");
-      return tx.customerPayment.create({
+      const payment = await tx.customerPayment.create({
         data: {
           tenantId,
           cpNo,
@@ -73,9 +73,10 @@ export class ArService {
         },
         include: PAYMENT_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "customerpayment", payment.id, "customerpayment.created", { id: payment.id, customerId: dto.customerId });
+      return payment;
     });
 
-    this.realtime.emitToTenant(tenantId, "customerpayment.created", { id: created.id, customerId: dto.customerId });
     return created;
   }
 

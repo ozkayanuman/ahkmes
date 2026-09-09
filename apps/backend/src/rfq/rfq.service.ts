@@ -8,7 +8,7 @@ import type {
   UpdateRfqLineDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
 
 // DRAFT → SENT → CLOSED; CONVERTED sadece convert() ile set edilir (setStatus'tan erişilemez)
@@ -34,7 +34,7 @@ const RFQ_INCLUDE = {
 export class RfqService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, status?: RFQStatus, q?: string) {
@@ -68,7 +68,7 @@ export class RfqService {
 
     const created = await this.prisma.$transaction(async (tx) => {
       const rfqNo = await nextDocNo(tx, "rFQ", "rfqNo", "TAL");
-      return tx.rFQ.create({
+      const rfq = await tx.rFQ.create({
         data: {
           tenantId,
           rfqNo,
@@ -87,16 +87,20 @@ export class RfqService {
         },
         include: RFQ_INCLUDE,
       });
+      await this.outbox.record(tx, tenantId, "rfq", rfq.id, "rfq.updated", { id: rfq.id });
+      return rfq;
     });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id: created.id });
     return created;
   }
 
   async update(tenantId: string, id: string, dto: UpdateRfqDto) {
     const rfq = await this.findOne(tenantId, id);
     this.ensureDraft(rfq.status, "Teklif talebi başlığı sadece taslakken düzenlenebilir");
-    const updated = await this.prisma.rFQ.update({ where: { id }, data: dto, include: RFQ_INCLUDE });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.rFQ.update({ where: { id }, data: dto, include: RFQ_INCLUDE });
+      await this.outbox.record(tx, tenantId, "rfq", id, "rfq.updated", { id });
+      return result;
+    });
     return updated;
   }
 
@@ -105,16 +109,22 @@ export class RfqService {
     if (!TRANSITIONS[rfq.status].includes(status)) {
       throw new ConflictException(`Geçersiz durum geçişi: ${rfq.status} → ${status}`);
     }
-    const updated = await this.prisma.rFQ.update({ where: { id }, data: { status }, include: RFQ_INCLUDE });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id, status });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.rFQ.update({ where: { id }, data: { status }, include: RFQ_INCLUDE });
+      await this.outbox.record(tx, tenantId, "rfq", id, "rfq.updated", { id, status });
+      return result;
+    });
     return updated;
   }
 
   async remove(tenantId: string, id: string) {
     const rfq = await this.findOne(tenantId, id);
     this.ensureDraft(rfq.status, "Sadece taslak teklif talebi silinebilir");
-    const deleted = await this.prisma.rFQ.delete({ where: { id } });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id, deleted: true });
+    const deleted = await this.prisma.$transaction(async (tx) => {
+      const removed = await tx.rFQ.delete({ where: { id } });
+      await this.outbox.record(tx, tenantId, "rfq", id, "rfq.updated", { id, deleted: true });
+      return removed;
+    });
     return deleted;
   }
 
@@ -123,8 +133,10 @@ export class RfqService {
     this.ensureDraft(rfq.status, "Satır sadece taslak teklif talebine eklenebilir");
     const part = await this.prisma.part.findFirst({ where: { id: dto.partId, tenantId } });
     if (!part) throw new NotFoundException("Parça bulunamadı");
-    await this.prisma.rFQLine.create({ data: { tenantId, rfqId, ...dto } });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id: rfqId });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rFQLine.create({ data: { tenantId, rfqId, ...dto } });
+      await this.outbox.record(tx, tenantId, "rfq", rfqId, "rfq.updated", { id: rfqId });
+    });
     return this.findOne(tenantId, rfqId);
   }
 
@@ -133,8 +145,10 @@ export class RfqService {
     this.ensureDraft(rfq.status, "Satır sadece taslak teklif talebinde düzenlenebilir");
     const line = rfq.lines.find((l) => l.id === lineId);
     if (!line) throw new NotFoundException("Teklif talebi satırı bulunamadı");
-    await this.prisma.rFQLine.update({ where: { id: lineId }, data: dto });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id: rfqId });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rFQLine.update({ where: { id: lineId }, data: dto });
+      await this.outbox.record(tx, tenantId, "rfq", rfqId, "rfq.updated", { id: rfqId });
+    });
     return this.findOne(tenantId, rfqId);
   }
 
@@ -144,8 +158,10 @@ export class RfqService {
     const line = rfq.lines.find((l) => l.id === lineId);
     if (!line) throw new NotFoundException("Teklif talebi satırı bulunamadı");
     if (rfq.lines.length <= 1) throw new ConflictException("Teklif talebinde en az bir satır kalmalı");
-    await this.prisma.rFQLine.delete({ where: { id: lineId } });
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id: rfqId });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rFQLine.delete({ where: { id: lineId } });
+      await this.outbox.record(tx, tenantId, "rfq", rfqId, "rfq.updated", { id: rfqId });
+    });
     return this.findOne(tenantId, rfqId);
   }
 
@@ -186,11 +202,11 @@ export class RfqService {
         },
       });
       await tx.rFQ.update({ where: { id: rfq.id }, data: { status: "CONVERTED" } });
+      await this.outbox.record(tx, tenantId, "rfq", rfq.id, "rfq.updated", { id: rfq.id, status: "CONVERTED" });
+      await this.outbox.record(tx, tenantId, "quote", created.id, "quote.updated", { id: created.id });
       return created;
     });
 
-    this.realtime.emitToTenant(tenantId, "rfq.updated", { id: rfq.id, status: "CONVERTED" });
-    this.realtime.emitToTenant(tenantId, "quote.updated", { id: quote.id });
     return { quote };
   }
 

@@ -1,8 +1,10 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { InventoryMovementType } from "@prisma/client";
 import type { CreateDeliveryDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
-import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
+import { InventoryService } from "../inventory/inventory.service";
 
 const DELIVERY_INCLUDE = {
   salesOrder: { select: { id: true, soNo: true } },
@@ -23,7 +25,8 @@ const DELIVERY_INCLUDE = {
 export class DeliveryService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly realtime: RealtimeGateway,
+    private readonly inventory: InventoryService,
+    private readonly outbox: OutboxService,
   ) {}
 
   findAll(tenantId: string, salesOrderId?: string) {
@@ -80,6 +83,8 @@ export class DeliveryService {
               tenantId,
               salesOrderLineId: l.salesOrderLineId,
               qty: l.qty,
+              binId: l.binId,
+              lotId: l.lotId,
             })),
           },
         },
@@ -93,22 +98,29 @@ export class DeliveryService {
           data: { shippedQty: { increment: l.qty } },
         });
 
-        const partStock = await tx.partStock.findFirst({ where: { tenantId, partId: line.partId } });
-        const currentQty = partStock ? Number(partStock.qty) : 0;
-        if (currentQty < l.qty - 1e-9) {
-          throw new ConflictException(
-            `Yetersiz stok: ${line.part.partNo} için ${currentQty} adet mevcut, ${l.qty} adet sevk edilmek isteniyor`,
-          );
-        }
-        await tx.partStock.update({ where: { id: partStock!.id }, data: { qty: { decrement: l.qty } } });
+        const deliveryLine = delivery.lines.find((dl) => dl.salesOrderLine.id === l.salesOrderLineId);
+        await this.inventory.record(tx, {
+          tenantId,
+          itemType: "PART",
+          itemId: line.partId,
+          quantityDelta: -l.qty,
+          movementType: InventoryMovementType.DELIVERY,
+          sourceType: "DELIVERY",
+          sourceId: delivery.id,
+          sourceLineId: deliveryLine?.id,
+          binId: l.binId,
+          lotId: l.lotId,
+          createdById: userId,
+        });
       }
+
+      await this.outbox.record(tx, tenantId, "delivery", delivery.id, "delivery.created", { id: delivery.id, salesOrderId: dto.salesOrderId });
+      await this.outbox.record(tx, tenantId, "delivery", delivery.id, "stock.updated", { reason: "delivery", deliveryId: delivery.id });
+      await this.outbox.record(tx, tenantId, "delivery", delivery.id, "salesorder.updated", { id: dto.salesOrderId });
 
       return delivery;
     });
 
-    this.realtime.emitToTenant(tenantId, "delivery.created", { id: created.id, salesOrderId: dto.salesOrderId });
-    this.realtime.emitToTenant(tenantId, "stock.updated", { reason: "delivery", deliveryId: created.id });
-    this.realtime.emitToTenant(tenantId, "salesorder.updated", { id: dto.salesOrderId });
     return created;
   }
 }

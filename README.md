@@ -1,13 +1,22 @@
-# AHKMES — CNC Talaşlı İmalat MES / Hafif ERP
+# AHKMES — CNC Talaşlı İmalat MES / ERP
 
-Makine bağlantısı olmadan, tamamen web arayüzünden manuel veri girişiyle
-**Teklif → Üretim Emri → Malzeme Tedariği → Malzeme Tüketimi → Ürün (Mamul) Oluşumu**
-akışını uçtan uca takip eden MES/hafif-ERP sistemi. (Faz 0 — makine konektörü Faz 1'de eklenecek.)
+Tek monorepo'da büyüyen bir MES + ERP platformu: **Teklif → Üretim Emri →
+Malzeme Tedariği → Malzeme Tüketimi → Ürün (Mamul) Oluşumu** çekirdek MES
+akışının üzerine Satış/Satınalma/Envanter/Kalite/Bakım/Finans/HR/CRM/Proje
+Yönetimi modülleri ve gerçek bir makine konektörü (OPC-UA/M80 sim, Faz 0
+sonrası eklendi) katmanlanmıştır. Ürünün doğrulanmış kapsamı, hangi
+modüllerin `VERIFIED_DONE`/`PARTIAL`/`NOT_STARTED` olduğu ve bilinen
+teknik borçlar için **kaynak-of-truth her zaman `PLAN.md`'dir** — bu README
+sadece hızlı kurulum/genel bakış içindir, ayrıntılı/güncel durum için
+`PLAN.md`'ye bakın.
 
 ## Teknoloji
 
-- **Backend:** NestJS 10 + Prisma 5 + PostgreSQL 16 + Socket.IO (JWT el sıkışmalı canlı olaylar)
+- **Backend:** NestJS 10 + Prisma 5 + PostgreSQL 16 + Socket.IO (JWT el sıkışmalı canlı olaylar, güvenilir teslim için transactional outbox — bkz. `docs/entegrasyon-kilavuzu.md`)
 - **Web:** React 18 + Vite 5 + Tailwind CSS + TanStack Query
+- **Kimlik doğrulama:** Local (bcrypt) + LDAP + OIDC (çoklu sağlayıcı), rol (RBAC) + sayfa bazlı `PermissionGroup` yetkilendirmesi
+- **Dosya deposu:** MinIO (STEP/talimat/NC program/sertifika, presigned URL + MIME allowlist)
+- **Makine konektörü:** `apps/connector` — protokol-bağımsız adaptör arayüzü (Simulator/OPC-UA üretime hazır, M80/Fanuc FOCAS2 deneysel/iskelet — bkz. `docs/entegrasyon-kilavuzu.md` §3.4)
 - **Ortak paket:** `packages/shared-types` — Zod şemaları + DTO tipleri (backend & web aynı doğrulamayı kullanır)
 - **Monorepo:** pnpm workspaces · **Dağıtım:** Docker Compose
 
@@ -42,8 +51,8 @@ pnpm dev:web        # :5173
 ### Test
 
 ```bash
-pnpm test                                # workspace birim testleri (shared-types 12, web 14, backend 3)
-pnpm --filter @ahkmes/backend test:e2e   # 56 e2e testi (auth, CRUD, Faz 0b, Faz 0c akışları)
+pnpm test                                # workspace birim testleri (shared-types/web/backend)
+pnpm --filter @ahkmes/backend test:e2e   # backend e2e (izole kaynaklara ihtiyaç duyar, bkz. aşağı)
 pnpm typecheck
 ```
 
@@ -51,6 +60,8 @@ pnpm typecheck
 
 ```bash
 pnpm test:e2e
+# yalnızca bir e2e dosyasını izole ortamda çalıştırmak için:
+pnpm test:e2e test/oee-trend.e2e-spec.ts
 ```
 
 Bu komut yalnızca geçici Docker Compose kaynaklarıyla PostgreSQL, MinIO ve LDAP
@@ -62,7 +73,12 @@ durumda olmalıdır.
 Web testleri Vitest + React Testing Library ile çalışır (jsdom); API istemcisinin token
 yenileme akışı ve satınalma teslim alma ekranı davranış olarak kapsanır.
 
-## Kullanım Akışı (uçtan uca)
+## Kullanım Akışı (çekirdek MES döngüsü)
+
+Aşağıdaki, sistemin doğrulanmış çekirdek akışıdır. Satış/satınalma
+derinleştirme, kalite/CAPA, bakım, envanter/WM, finans, HR, CRM, proje
+yönetimi gibi genişletilmiş modüllerin kendi akışları için
+`docs/kullanici-kilavuzu.md`'ye bakın.
 
 1. **Kayıtlar:** Müşteri, Parça, Tedarikçi, Malzeme, Tezgah ekranlarından temel kartları açın.
 2. **Teklif:** Teklifler → Yeni Teklif (satırlar: parça, adet, fiyat, termin) → Gönder → Onayla.
@@ -76,16 +92,32 @@ yenileme akışı ve satınalma teslim alma ekranı davranış olarak kapsanır.
 Belge numaraları otomatiktir: Teklif `TKF-YYYY-NNNN`, İş Emri `IE-YYYY-NNNN`, Sipariş `SAT-YYYY-NNNN`.
 Tüm yazma işlemleri AuditLog'a düşer (kim, neyi, ne zaman, öncesi/sonrası).
 
-## Roller
+## Roller ve Yetkilendirme
 
-`ADMIN`, `SALES` (teklif), `PLANNER` (iş emri/satınalma), `FOREMAN` (teslim alma/tüketim/üretim),
-`OPERATOR` (üretim koşusu). Endpoint'ler rol bazlı korunur.
+Temel roller (`ADMIN`, `SALES`, `PLANNER`, `FOREMAN`, `OPERATOR`) endpoint'leri
+korur; bunun üzerine sayfa bazlı `PermissionGroup` ataması (bir kullanıcıyı
+belirli sayfalarla kısıtlama) ve tenant modül entitlement'ları (bir modülü
+tenant için tamamen kapatma) katmanlanmıştır. HMI operatör terminali
+(`/hmi/operations`) ve makine/connector uçları ayrıca kendi action-grant
+(`HMI_READ`/`HMI_START`/…) ve `X-Machine-Key` mekanizmalarını kullanır.
 
-## Faz Durumu
+## Ürün Durumu ve Kapsamı
 
-- [x] **Faz 0a** — iskelet, auth (JWT+RBAC), temel CRUD, Docker Compose (`faz-0a`)
-- [x] **Faz 0b** — teklif, iş emri, satınalma, Socket.IO realtime (`faz-0b`)
-- [x] **Faz 0c** — tüketim, operasyon takibi, mamul, dashboard (`faz-0c`)
-- [ ] **Faz 1** — Machine Connector (FOCAS2/MQTT), canlı tezgah izleme
+AHKMES, doğrulanmış (`VERIFIED_DONE`) çekirdek MES akışının üzerine geniş bir
+ERP+MES modül setiyle (Satış/Satınalma/Envanter/WM/Kalite/Bakım/Finans/HR/
+CRM/Proje Yönetimi/Servis, ayrıca PLM/tooling/fixture ve makine konektörü)
+genişletilmiş durumdadır. Her modülün gerçek/güncel durumu
+(`VERIFIED_DONE`/`PARTIAL`/`PROTOTYPE`/`NOT_STARTED`/`NEEDS_DECISION`),
+kanıtları ve bilinen açıkları için:
 
-Ayrıntılı plan için `PLAN.md`.
+- **`PLAN.md`** — tek kaynak-of-truth: modül envanteri, öncelikli backlog
+  tablosu (`AHK-XXX`/`CAT-XXX`/`PLM-XXX`/`MES-XXX` kodları), mimari riskler,
+  güvenlik/uyumluluk açıkları.
+- **`docs/kurulum-kilavuzu.md`** — kurulum, ortam değişkenleri, bilinen
+  kısıtlamalar.
+- **`docs/entegrasyon-kilavuzu.md`** — API, makine konektörü, webhook,
+  dosya deposu, gerçek zamanlı olay sözleşmesi.
+- **`docs/kullanici-kilavuzu.md`** — uçtan uca kullanım akışları.
+
+Bu README'ye faz/yüzde gibi hızla eskiyen sayılar bilerek eklenmiyor — güncel
+durum her zaman `PLAN.md`'den okunmalı.
