@@ -18,11 +18,13 @@ describe("HmiService", () => {
   const controllerVerification = { status: jest.fn() };
   const maintenanceAvailability = { status: jest.fn() };
   const maintenance = { createRequest: jest.fn(), declareBreakdown: jest.fn() };
-  const service = new HmiService(prisma as any, production as any, workOrders as any, tooling as any, materials as any, quality as any, controllerVerification as any, maintenanceAvailability as any, maintenance as any);
+  const skills = { findMissingSkills: jest.fn() };
+  const service = new HmiService(prisma as any, production as any, workOrders as any, tooling as any, materials as any, quality as any, controllerVerification as any, maintenanceAvailability as any, maintenance as any, skills as any);
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.productionMaterialRequirement.findMany.mockResolvedValue([]);
+    skills.findMissingSkills.mockResolvedValue([]);
   });
 
   it("delegates operator maintenance reports to the canonical CMMS service", async () => {
@@ -117,6 +119,21 @@ describe("HmiService", () => {
 
     await expect(service.start("tenant-a", "operator-a", "operation-a")).rejects.toThrow("Operator is not qualified for this machine");
 
+    expect(production.start).not.toHaveBeenCalled();
+  });
+
+  it("blocks HMI start when the operator is missing a machine's required skill level", async () => {
+    (service as any).operation = jest.fn().mockResolvedValue({
+      id: "operation-a", workOrderId: "work-order-a", machineId: "machine-a",
+      machine: { id: "machine-a", operatorQualificationRequired: false },
+      workOrder: { machine: null },
+    });
+    materials.requirements.mockResolvedValue([]);
+    skills.findMissingSkills.mockResolvedValue([{ skill: { code: "CNC-5AX", name: "5 Eksen Freze" }, minLevel: "EXPERT" }]);
+
+    await expect(service.start("tenant-a", "operator-a", "operation-a")).rejects.toThrow("CNC-5AX");
+
+    expect(skills.findMissingSkills).toHaveBeenCalledWith("tenant-a", "machine-a", "operator-a");
     expect(production.start).not.toHaveBeenCalled();
   });
 });

@@ -317,6 +317,33 @@ export const grantOperatorMachineQualificationSchema = z.object({
 });
 export type GrantOperatorMachineQualificationDto = z.infer<typeof grantOperatorMachineQualificationSchema>;
 
+// ---- Operatör beceri/yetkinlik matrisi (OperatorMachineQualification'ın
+// tek-makine ikili kapısından bağımsız, makineden bağımsız çapraz-yetkinlik) ----
+export const operatorSkillLevelSchema = z.enum(["TRAINEE", "QUALIFIED", "EXPERT"]);
+export type OperatorSkillLevel = z.infer<typeof operatorSkillLevelSchema>;
+
+export const createSkillSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(500).optional(),
+});
+export type CreateSkillDto = z.infer<typeof createSkillSchema>;
+
+export const grantOperatorSkillSchema = z.object({
+  operatorId: idSchema,
+  skillId: idSchema,
+  level: operatorSkillLevelSchema,
+  certificateReference: z.string().trim().min(1).max(160).optional(),
+  expiresAt: z.coerce.date().optional(),
+});
+export type GrantOperatorSkillDto = z.infer<typeof grantOperatorSkillSchema>;
+
+export const createMachineRequiredSkillSchema = z.object({
+  skillId: idSchema,
+  minLevel: operatorSkillLevelSchema,
+});
+export type CreateMachineRequiredSkillDto = z.infer<typeof createMachineRequiredSkillSchema>;
+
 // ---- Saha hiyerarşisi (Plant > Area > Workplace > Unit) ----
 export const createPlantSchema = z.object({
   name: z.string().min(1),

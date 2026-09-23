@@ -9,6 +9,7 @@ import { QualityExecutionService } from "../quality-execution/quality-execution.
 import { ControllerVerificationService } from "../controller-verification/controller-verification.service";
 import { MachineMaintenanceAvailabilityService, type MachineMaintenanceAvailability } from "../machines/machine-maintenance-availability.service";
 import { MaintenanceOrdersService } from "../maintenance-orders/maintenance-orders.service";
+import { SkillsService } from "../skills/skills.service";
 
 const operationInclude = {
   workOrder: {
@@ -37,6 +38,7 @@ export class HmiService {
     private readonly controllerVerification: ControllerVerificationService,
     private readonly maintenanceAvailability: MachineMaintenanceAvailabilityService,
     private readonly maintenance: MaintenanceOrdersService,
+    private readonly skills: SkillsService,
   ) {}
 
   async list(tenantId: string, query: HmiOperationQueueQueryDto) {
@@ -114,6 +116,12 @@ export class HmiService {
         },
       });
       if (!qualification) throw new ConflictException("Operator is not qualified for this machine");
+    }
+    if (machine?.id) {
+      const missingSkills = await this.skills.findMissingSkills(tenantId, machine.id, userId);
+      if (missingSkills.length > 0) {
+        throw new ConflictException(`Operator is missing required skill(s) for this machine: ${missingSkills.map((requirement) => requirement.skill.code).join(", ")}`);
+      }
     }
     const requirements = await this.materials.requirements(tenantId, operation.workOrderId);
     // Issued stock is no longer reserved at the warehouse, but still fulfils

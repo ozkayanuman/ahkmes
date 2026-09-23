@@ -8,11 +8,12 @@ import { QualityExecutionModule } from "../quality-execution/quality-execution.m
 import { ControllerVerificationModule } from "../controller-verification/controller-verification.module";
 import { MachinesModule } from "../machines/machines.module";
 import { MaintenanceOrdersModule } from "../maintenance-orders/maintenance-orders.module";
+import { SkillsModule } from "../skills/skills.module";
 import { HmiController } from "./hmi.controller";
 import { HmiService } from "./hmi.service";
 
 @Module({
-  imports: [ActionPermissionsModule, ProductionModule, ToolingModule, WorkOrdersModule, ProductionMaterialModule, QualityExecutionModule, ControllerVerificationModule, MachinesModule, MaintenanceOrdersModule],
+  imports: [ActionPermissionsModule, ProductionModule, ToolingModule, WorkOrdersModule, ProductionMaterialModule, QualityExecutionModule, ControllerVerificationModule, MachinesModule, MaintenanceOrdersModule, SkillsModule],
   controllers: [HmiController],
   providers: [HmiService],
 })

@@ -13,6 +13,7 @@ import { PartsModule } from "./parts/parts.module";
 import { SuppliersModule } from "./suppliers/suppliers.module";
 import { MaterialsModule } from "./materials/materials.module";
 import { MachinesModule } from "./machines/machines.module";
+import { SkillsModule } from "./skills/skills.module";
 import { QuotesModule } from "./quotes/quotes.module";
 import { WorkOrdersModule } from "./work-orders/work-orders.module";
 import { PurchasingModule } from "./purchasing/purchasing.module";
@@ -99,6 +100,7 @@ import { CustomerReturnsModule } from "./customer-returns/customer-returns.modul
     SuppliersModule,
     MaterialsModule,
     MachinesModule,
+    SkillsModule,
     RealtimeModule,
     QuotesModule,
     WorkOrdersModule,

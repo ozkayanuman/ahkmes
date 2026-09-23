@@ -1241,6 +1241,9 @@ model User {
   operatorMachineQualifications    OperatorMachineQualification[]    @relation("OperatorMachineQualifiedUser")
   operatorMachineQualificationsGranted OperatorMachineQualification[] @relation("OperatorMachineQualificationGrantedBy")
   operatorMachineQualificationsRevoked OperatorMachineQualification[] @relation("OperatorMachineQualificationRevokedBy")
+  operatorSkills                   OperatorSkill[]                   @relation("OperatorSkillOperator")
+  operatorSkillsGranted            OperatorSkill[]                   @relation("OperatorSkillGrantedBy")
+  operatorSkillsRevoked            OperatorSkill[]                   @relation("OperatorSkillRevokedBy")
   spcMeasurements                  SpcMeasurement[]
   acknowledgedAlarms               MachineStatusEvent[]              @relation("AcknowledgedAlarms")
   downtimeEventsTriggered          DowntimeEvent[]                   @relation("DowntimeTriggeredBy")
@@ -1643,6 +1646,7 @@ model Machine {
   fixtureCompatibilities FixtureMachineCompatibility[]
   setupVerifications     OperationSetupVerification[]
   operatorQualifications OperatorMachineQualification[]
+  requiredSkills         MachineRequiredSkill[]
   plant                  Plant?                         @relation(fields: [plantId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
@@ -1676,6 +1680,79 @@ model OperatorMachineQualification {
 
   @@unique([tenantId, machineId, operatorId])
   @@index([tenantId, machineId, status, expiresAt])
+}
+
+enum OperatorSkillLevel {
+  TRAINEE
+  QUALIFIED
+  EXPERT
+}
+
+/// Machine-independent skill/competency definition (e.g. "5-axis milling",
+/// "CNC turning level 2") — broader than the single-machine binary gate in
+/// OperatorMachineQualification, which this does not replace.
+model Skill {
+  id          String   @id @default(uuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  operatorSkills     OperatorSkill[]
+  requiredByMachines MachineRequiredSkill[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+/// Current controlled record of an operator's proficiency in a skill,
+/// independent of any single machine. Re-granting updates this current
+/// record; the administrative audit trail records every grant/revocation,
+/// mirroring OperatorMachineQualification's pattern.
+model OperatorSkill {
+  id                   String                             @id @default(uuid())
+  tenantId             String
+  operatorId           String
+  skillId              String
+  level                OperatorSkillLevel
+  status               OperatorMachineQualificationStatus @default(ACTIVE)
+  certificateReference String?
+  expiresAt            DateTime?
+  grantedById          String
+  grantedAt            DateTime                           @default(now())
+  revokedById          String?
+  revokedAt            DateTime?
+  createdAt            DateTime                           @default(now())
+  updatedAt            DateTime                           @updatedAt
+
+  operator  User  @relation("OperatorSkillOperator", fields: [operatorId], references: [id], onDelete: Restrict)
+  skill     Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  grantedBy User  @relation("OperatorSkillGrantedBy", fields: [grantedById], references: [id], onDelete: Restrict)
+  revokedBy User? @relation("OperatorSkillRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, operatorId, skillId])
+  @@index([tenantId, skillId, status, expiresAt])
+}
+
+/// Minimum skill level a machine requires before HmiService.start() allows
+/// an operator to run it — additional to, and independent of, the
+/// single-machine OperatorMachineQualification gate.
+model MachineRequiredSkill {
+  id        String             @id @default(uuid())
+  tenantId  String
+  machineId String
+  skillId   String
+  minLevel  OperatorSkillLevel
+  createdAt DateTime           @default(now())
+
+  machine Machine @relation(fields: [machineId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  skill   Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, machineId, skillId])
+  @@index([tenantId, machineId])
 }
 
 /// Append-only controller evidence.  The latest row is the efficient current
