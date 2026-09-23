@@ -32,6 +32,8 @@ export interface WorkOrderRow {
   machine?: { id: string; name: string } | null;
   recipeRevision?: string | null;
   routeSnapshotAt?: string | null;
+  engineeringReleaseRequired?: boolean;
+  plantId?: string | null;
   operations?: {
     id: string;
     seq: number;

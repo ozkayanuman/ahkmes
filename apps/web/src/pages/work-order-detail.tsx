@@ -50,6 +50,34 @@ interface FinishedGoodsRow {
   date: string;
   createdBy: { name: string };
 }
+interface DefinitionOption {
+  id: string;
+  status: string;
+  plant: { id: string; name: string };
+  part: { id: string };
+}
+interface ReservationRow {
+  id: string;
+  binId: string;
+  bin: { id: string; code: string };
+  lot?: { id: string; lotNo: string } | null;
+  quantity: string;
+  issuedQty: string;
+  status: string;
+}
+interface RequirementRow {
+  id: string;
+  itemType: "MATERIAL" | "PART";
+  itemId: string;
+  requiredQty: string;
+  reservedQty: string;
+  issuedQty: string;
+  consumedQty: string;
+  returnedQty: string;
+  scrappedQty: string;
+  item: { code?: string; partNo?: string; name: string; unit: string } | null;
+  reservations: ReservationRow[];
+}
 
 // Backend'deki geçiş kurallarının aynası — butonları buna göre göster
 const NEXT: Record<string, { status: string; label: string; danger?: boolean }[]> = {
@@ -98,6 +126,9 @@ export function WorkOrderDetailPage() {
   });
   const [fgQty, setFgQty] = useState("");
   const [fgBinId, setFgBinId] = useState("");
+  const [releaseDefinitionId, setReleaseDefinitionId] = useState("");
+  const [reserveForm, setReserveForm] = useState<Record<string, { binId: string; quantity: string }>>({});
+  const [txForm, setTxForm] = useState<Record<string, { type: "consume" | "return" | "scrap"; quantity: string }>>({});
 
   useInvalidateOn(
     ["workorder.updated", "stock.updated", "productionrun.updated"],
@@ -167,6 +198,17 @@ export function WorkOrderDetailPage() {
     queryKey: ["/bins"],
     queryFn: () => apiGet<BinOption[]>("/bins"),
     enabled: canConsume,
+  });
+  const routed = !!query.data?.operations?.length;
+  const definitions = useQuery({
+    queryKey: ["/production-definitions", query.data?.part.id],
+    queryFn: () => apiGet<DefinitionOption[]>(`/production-definitions?partId=${query.data!.part.id}`),
+    enabled: !!query.data && !routed,
+  });
+  const requirements = useQuery({
+    queryKey: ["/production-material/work-orders", id],
+    queryFn: () => apiGet<RequirementRow[]>(`/production-material/work-orders/${id}`),
+    enabled: routed,
   });
 
   const toast = useToast();
@@ -265,6 +307,61 @@ export function WorkOrderDetailPage() {
         setStatus.mutate("COMPLETED");
       }
     },
+    onError,
+  });
+  const invalidateMaterial = () => {
+    invalidate();
+    qc.invalidateQueries({ queryKey: ["/production-material/work-orders", id] });
+  };
+  const releaseEngineering = useMutation({
+    mutationFn: (definitionId: string) => {
+      const def = definitions.data!.find((d) => d.id === definitionId)!;
+      return apiPost(`/work-orders/${id}/release-engineering`, {
+        plantId: def.plant.id,
+        productionDefinitionId: definitionId,
+      });
+    },
+    onSuccess: () => {
+      invalidate();
+      setReleaseDefinitionId("");
+    },
+    onError,
+  });
+  const reserveMaterial = useMutation({
+    mutationFn: ({ requirementId, binId, quantity }: { requirementId: string; binId: string; quantity: number }) =>
+      apiPost("/production-material/reservations", {
+        requirementId,
+        binId,
+        quantity,
+        idempotencyKey: `web-reserve-${requirementId}-${Date.now()}`,
+      }),
+    onSuccess: invalidateMaterial,
+    onError,
+  });
+  const issueMaterial = useMutation({
+    mutationFn: ({ requirementId, reservationId, quantity }: { requirementId: string; reservationId: string; quantity: number }) =>
+      apiPost("/production-material/issue", {
+        requirementId,
+        reservationId,
+        quantity,
+        idempotencyKey: `web-issue-${reservationId}-${Date.now()}`,
+      }),
+    onSuccess: invalidateMaterial,
+    onError,
+  });
+  const cancelReservation = useMutation({
+    mutationFn: (reservationId: string) => apiPost(`/production-material/reservations/${reservationId}/cancel`, {}),
+    onSuccess: invalidateMaterial,
+    onError,
+  });
+  const materialTransaction = useMutation({
+    mutationFn: ({ requirementId, type, quantity }: { requirementId: string; type: "consume" | "return" | "scrap"; quantity: number }) =>
+      apiPost(`/production-material/${type}`, {
+        requirementId,
+        quantity,
+        idempotencyKey: `web-${type}-${requirementId}-${Date.now()}`,
+      }),
+    onSuccess: invalidateMaterial,
     onError,
   });
 
@@ -436,13 +533,132 @@ export function WorkOrderDetailPage() {
           </Table>
         </section>
       ) : (
-        <p className="mt-6 text-sm text-slate-500">Bu iş emri için sabitlenmiş rota yok; yeni iş emirlerinde aktif süreç reçetesi otomatik kopyalanır.</p>
+        <section className="mt-6">
+          <p className="text-sm text-slate-500">
+            Bu iş emrine henüz rota bağlanmadı. Operasyon/malzeme akışının çalışabilmesi için
+            önce parçanın yayınlanmış bir üretim tanımıyla mühendislik yayını yapılmalıdır.
+          </p>
+          {canEdit && !terminal && (
+            <Card className="mt-3">
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-64 flex-1">
+                  <Label htmlFor="releaseDef">Yayınlanmış üretim tanımı</Label>
+                  <Select id="releaseDef" value={releaseDefinitionId} onChange={(e) => setReleaseDefinitionId(e.target.value)}>
+                    <option value="">Seçin…</option>
+                    {definitions.data
+                      ?.filter((d) => d.status === "RELEASED")
+                      .map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.plant.name}
+                        </option>
+                      ))}
+                  </Select>
+                </div>
+                <Button
+                  disabled={!releaseDefinitionId || releaseEngineering.isPending}
+                  onClick={() => releaseEngineering.mutate(releaseDefinitionId)}
+                >
+                  Mühendislik Yayınla
+                </Button>
+              </div>
+              {definitions.data && !definitions.data.some((d) => d.status === "RELEASED") && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Bu parça için yayınlanmış bir üretim tanımı yok — Üretim Tanımları sayfasından oluşturup yayınlayın.
+                </p>
+              )}
+            </Card>
+          )}
+        </section>
+      )}
+
+      {routed && (
+        <section className="mt-6">
+          <h2 className="mb-3 text-lg font-semibold">Malzeme Rezervasyon / Verme / Tüketim (kontrollü akış)</h2>
+          <p className="mb-3 text-xs text-slate-500">
+            Rotalı iş emirlerinde malzeme eski Tüketim ekranı yerine bu kontrollü rezerve→ver→tüket akışından yürür.
+          </p>
+          <Table headers={["Kalem", "Gerekli", "Rezerve", "Verilen", "Tüketilen/İade/Hurda", ""]}>
+            {requirements.data?.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Malzeme gereksinimi yok</td>
+              </tr>
+            )}
+            {requirements.data?.map((r) => {
+              const label = r.item ? (r.itemType === "MATERIAL" ? `${r.item.code} — ${r.item.name}` : `${r.item.partNo} — ${r.item.name}`) : r.itemId;
+              const remainingToReserve = Number(r.requiredQty) - Number(r.reservedQty);
+              const rf = reserveForm[r.id] ?? { binId: "", quantity: remainingToReserve > 0 ? String(remainingToReserve) : "" };
+              const tf = txForm[r.id] ?? { type: "consume" as const, quantity: "" };
+              return (
+                <tr key={r.id} className="align-top hover:bg-slate-50">
+                  <td className="px-4 py-3 font-medium">{label}<div className="text-xs font-normal text-slate-400">{r.item?.unit}</div></td>
+                  <td className="px-4 py-3">{fmtQty(r.requiredQty)}</td>
+                  <td className="px-4 py-3">{fmtQty(r.reservedQty)}</td>
+                  <td className="px-4 py-3">{fmtQty(r.issuedQty)}</td>
+                  <td className="px-4 py-3">{fmtQty(r.consumedQty)} / {fmtQty(r.returnedQty)} / {fmtQty(r.scrappedQty)}</td>
+                  <td className="px-4 py-3 space-y-2">
+                    {canConsume && !terminal && remainingToReserve > 0.0001 && (
+                      <div className="flex items-end gap-1">
+                        <Select className="w-28" value={rf.binId} onChange={(e) => setReserveForm({ ...reserveForm, [r.id]: { ...rf, binId: e.target.value } })}>
+                          <option value="">Raf…</option>
+                          {bins.data?.map((b) => <option key={b.id} value={b.id}>{b.warehouse.name}/{b.code}</option>)}
+                        </Select>
+                        <Input className="w-20" type="number" step="any" min="0.001" value={rf.quantity} onChange={(e) => setReserveForm({ ...reserveForm, [r.id]: { ...rf, quantity: e.target.value } })} />
+                        <Button
+                          variant="outline"
+                          disabled={!rf.binId || !(Number(rf.quantity) > 0) || reserveMaterial.isPending}
+                          onClick={() => reserveMaterial.mutate({ requirementId: r.id, binId: rf.binId, quantity: Number(rf.quantity) })}
+                        >
+                          Rezerve
+                        </Button>
+                      </div>
+                    )}
+                    {r.reservations.map((res) => {
+                      const remainingToIssue = Number(res.quantity) - Number(res.issuedQty);
+                      return (
+                        <div key={res.id} className="flex items-center gap-1 text-xs text-slate-600">
+                          <span>{res.bin.code}: {fmtQty(res.quantity)} ({fmtQty(res.issuedQty)} verildi)</span>
+                          {canConsume && !terminal && remainingToIssue > 0.0001 && (
+                            <Button variant="ghost" className="px-2 py-0.5" onClick={() => issueMaterial.mutate({ requirementId: r.id, reservationId: res.id, quantity: remainingToIssue })} disabled={issueMaterial.isPending}>
+                              Ver
+                            </Button>
+                          )}
+                          {canConsume && !terminal && Number(res.issuedQty) === 0 && (
+                            <Button variant="ghost" className="px-2 py-0.5 text-red-600" onClick={() => cancelReservation.mutate(res.id)} disabled={cancelReservation.isPending}>
+                              İptal
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {canConsume && !terminal && Number(r.issuedQty) - Number(r.consumedQty) - Number(r.returnedQty) - Number(r.scrappedQty) > 0.0001 && (
+                      <div className="flex items-end gap-1">
+                        <Select className="w-24" value={tf.type} onChange={(e) => setTxForm({ ...txForm, [r.id]: { ...tf, type: e.target.value as typeof tf.type } })}>
+                          <option value="consume">Tüket</option>
+                          <option value="return">İade</option>
+                          <option value="scrap">Hurda</option>
+                        </Select>
+                        <Input className="w-20" type="number" step="any" min="0.001" value={tf.quantity} onChange={(e) => setTxForm({ ...txForm, [r.id]: { ...tf, quantity: e.target.value } })} />
+                        <Button
+                          variant="outline"
+                          disabled={!(Number(tf.quantity) > 0) || materialTransaction.isPending}
+                          onClick={() => materialTransaction.mutate({ requirementId: r.id, type: tf.type, quantity: Number(tf.quantity) })}
+                        >
+                          Uygula
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </Table>
+        </section>
       )}
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
         <div>
-          <h2 className="mb-3 text-lg font-semibold">Malzeme Rezervasyon / Tüketim</h2>
-          {canConsume && !terminal && (
+          <h2 className="mb-3 text-lg font-semibold">{routed ? "Eski Tüketim Kaydı (rotasız dönem)" : "Malzeme Rezervasyon / Tüketim"}</h2>
+          {!routed && canConsume && !terminal && (
             <Card className="mb-3">
               <div className="flex flex-wrap items-end gap-2">
                 <div className="w-32">
