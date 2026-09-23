@@ -11,7 +11,7 @@ const STAMP = Date.now();
 
 describe("MES-TOOL-001 verified CNC setup (PostgreSQL e2e)", () => {
   let app: INestApplication; let prisma: PrismaService; let token = ""; let crossToken = "";
-  let tenantId = ""; let userId = ""; let partId = ""; let machineId = ""; let ncId = ""; let workOrderId = ""; let operationId = "";
+  let tenantId = ""; let userId = ""; let partId = ""; let plantId = ""; let rawMaterialId = ""; let machineId = ""; let ncId = ""; let workOrderId = ""; let operationId = "";
   let toolDefinitionId = ""; let toolInstanceId = ""; let fixtureDefinitionId = ""; let fixtureInstanceId = ""; let verificationId = "";
   const api = () => request(app.getHttpServer()); const as = (t: string, r: request.Test) => r.set("Authorization", `Bearer ${t}`);
   async function login(email = ADMIN_EMAIL, password = ADMIN_PASSWORD) { return (await api().post("/auth/login").send({ email, password }).expect(201)).body.accessToken as string; }
@@ -24,6 +24,8 @@ describe("MES-TOOL-001 verified CNC setup (PostgreSQL e2e)", () => {
     await prisma.actionPermissionGrant.create({ data: { tenantId: crossTenant.id, action: "TOOL_READ", userId: cross.id, createdById: cross.id } });
     crossToken = await login(cross.email, "Cross1234!");
     partId = (await prisma.part.create({ data: { tenantId, partNo: `TOOL-${STAMP}`, revision: "A", name: "Tooling part" } })).id;
+    plantId = (await prisma.plant.create({ data: { tenantId, name: `Tooling Plant ${STAMP}`, timezone: "Europe/Istanbul" } })).id;
+    rawMaterialId = (await prisma.material.create({ data: { tenantId, code: `TOOL-RAW-${STAMP}`, name: "Tooling raw", type: "RAW", unit: "KG" } })).id;
     machineId = (await prisma.machine.create({ data: { tenantId, name: `CNC-${STAMP}`, model: "VMC", isActive: true } })).id;
     ncId = (await prisma.ncProgram.create({ data: { tenantId, partId, version: 1, fileName: "tooling.nc", fileRef: "tooling.nc", storageKey: `tests/${STAMP}.nc`, mimeType: "text/plain", sizeBytes: 10, checksum: "a".repeat(64), status: "PUBLISHED", createdById: userId, publishedById: userId, publishedAt: new Date() } })).id;
     workOrderId = (await prisma.workOrder.create({ data: { tenantId, woNo: `TOOL-WO-${STAMP}`, partId, quantity: 1, dueDate: new Date(Date.now() + 86400000), machineId } })).id;
@@ -177,16 +179,33 @@ describe("MES-TOOL-001 verified CNC setup (PostgreSQL e2e)", () => {
   });
 
   it("copies RecipeStep requirements into new work-order snapshots without mutating existing operations", async () => {
-    const recipe = await prisma.recipeHeader.create({ data: { tenantId, partId, revision: `TOOL-${STAMP}`, steps: { create: { tenantId, seq: 10, name: "Recipe CNC", ncProgramId: ncId } } }, include: { steps: true } });
-    const step = recipe.steps[0];
-    await as(token, api().post(`/tooling/recipe-steps/${step.id}/tool-requirements`).send({ toolDefinitionId, quantity: 1, sequence: 1 })).expect(201);
-    await as(token, api().post(`/tooling/recipe-steps/${step.id}/fixture-requirements`).send({ fixtureDefinitionId, quantity: 1, sequence: 1 })).expect(201);
-    const first = await as(token, api().post("/work-orders").send({ partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString(), machineId })).expect(201);
+    async function releasedDefinition(revision: string) {
+      const bom = await prisma.bomHeader.create({ data: { tenantId, partId, revision, lines: { create: { tenantId, itemType: "MATERIAL", itemId: rawMaterialId, qtyPer: 1, unit: "KG" } } } });
+      const recipe = await prisma.recipeHeader.create({ data: { tenantId, partId, revision, steps: { create: { tenantId, seq: 10, name: "Recipe CNC", ncProgramId: ncId } } }, include: { steps: true } });
+      await prisma.part.update({ where: { id: partId }, data: { engineeringStatus: "RELEASED" } });
+      await prisma.bomHeader.update({ where: { id: bom.id }, data: { status: "RELEASED" } });
+      await prisma.recipeHeader.update({ where: { id: recipe.id }, data: { status: "RELEASED" } });
+      await prisma.productionDefinition.updateMany({ where: { tenantId, plantId, partId, status: "RELEASED" }, data: { status: "OBSOLETE" } });
+      const definition = await prisma.productionDefinition.create({ data: { tenantId, plantId, partId, bomHeaderId: bom.id, recipeHeaderId: recipe.id, status: "RELEASED" } });
+      return { step: recipe.steps[0], definitionId: definition.id };
+    }
+
+    const r1 = await releasedDefinition(`TOOL-${STAMP}`);
+    await as(token, api().post(`/tooling/recipe-steps/${r1.step.id}/tool-requirements`).send({ toolDefinitionId, quantity: 1, sequence: 1 })).expect(201);
+    await as(token, api().post(`/tooling/recipe-steps/${r1.step.id}/fixture-requirements`).send({ fixtureDefinitionId, quantity: 1, sequence: 1 })).expect(201);
+    const firstCreated = await as(token, api().post("/work-orders").send({ partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString(), machineId })).expect(201);
+    const first = await as(token, api().post(`/work-orders/${firstCreated.body.id}/release-engineering`).send({ plantId, productionDefinitionId: r1.definitionId })).expect(201);
     const firstOperation = first.body.operations[0];
     expect(await prisma.operationToolRequirement.count({ where: { tenantId, workOrderOperationId: firstOperation.id } })).toBe(1);
     const extraDefinition = await prisma.toolDefinition.create({ data: { tenantId, code: `RECIPE-ALT-${STAMP}`, name: "Recipe alternative", toolType: "DRILL", lifePolicy: "CYCLE", maximumLife: 10, warningThreshold: 1, lifeUnit: "cycle" } });
-    await as(token, api().post(`/tooling/recipe-steps/${step.id}/tool-requirements`).send({ toolDefinitionId: extraDefinition.id, quantity: 1, alternativeGroup: "ALT", sequence: 2 })).expect(201);
-    const second = await as(token, api().post("/work-orders").send({ partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString(), machineId })).expect(201);
+    await as(token, api().post(`/tooling/recipe-steps/${r1.step.id}/tool-requirements`).send({ toolDefinitionId: extraDefinition.id, quantity: 1, alternativeGroup: "ALT", sequence: 2 })).expect(201);
+    // Released routing artık immutable; ikinci iş emri için yeni bir revizyon yayınlanır.
+    const r2 = await releasedDefinition(`TOOL-2-${STAMP}`);
+    await as(token, api().post(`/tooling/recipe-steps/${r2.step.id}/tool-requirements`).send({ toolDefinitionId, quantity: 1, sequence: 1 })).expect(201);
+    await as(token, api().post(`/tooling/recipe-steps/${r2.step.id}/fixture-requirements`).send({ fixtureDefinitionId, quantity: 1, sequence: 1 })).expect(201);
+    await as(token, api().post(`/tooling/recipe-steps/${r2.step.id}/tool-requirements`).send({ toolDefinitionId: extraDefinition.id, quantity: 1, alternativeGroup: "ALT", sequence: 2 })).expect(201);
+    const secondCreated = await as(token, api().post("/work-orders").send({ partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString(), machineId })).expect(201);
+    const second = await as(token, api().post(`/work-orders/${secondCreated.body.id}/release-engineering`).send({ plantId, productionDefinitionId: r2.definitionId })).expect(201);
     expect(await prisma.operationToolRequirement.count({ where: { tenantId, workOrderOperationId: firstOperation.id } })).toBe(1);
     expect(await prisma.operationToolRequirement.count({ where: { tenantId, workOrderOperationId: second.body.operations[0].id } })).toBe(2);
   });

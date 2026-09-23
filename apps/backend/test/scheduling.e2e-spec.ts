@@ -20,9 +20,36 @@ describe("AHK-011 — standart süre + kapasite yükü (e2e)", () => {
   let partId: string;
   let machineId: string;
   let workOrderId: string;
+  let plantId: string;
+  let rawMaterialId: string;
 
   const auth = (r: request.Test) => r.set("Authorization", `Bearer ${adminToken}`);
   const api = () => request(app.getHttpServer());
+
+  /** BOM+Recipe+ProductionDefinition'ı yayınlayıp iş emrini release-engineering
+   * ile geçirir — CNC-V1-01'den beri operasyonlar bare create'te dolmaz. */
+  async function releasedWorkOrder(pId: string, mId: string, steps: Array<Record<string, unknown>>, quantity = 1) {
+    const revision = `REL-${Math.random().toString(36).slice(2)}`;
+    const bom = await auth(api().post("/boms").send({
+      partId: pId, revision,
+      lines: [{ itemType: "MATERIAL", itemId: rawMaterialId, qtyPer: 1, unit: "KG" }],
+    })).expect(201);
+    const recipe = await auth(api().post("/recipes").send({ partId: pId, revision, steps })).expect(201);
+    await auth(api().patch(`/parts/${pId}/engineering-status`).send({ status: "RELEASED" })).expect(200);
+    await auth(api().patch(`/boms/${bom.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    await auth(api().patch(`/recipes/${recipe.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    const definition = await auth(api().post("/production-definitions").send({
+      plantId, partId: pId, bomHeaderId: bom.body.id, recipeHeaderId: recipe.body.id,
+    })).expect(201);
+    await auth(api().patch(`/production-definitions/${definition.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    const created = await auth(api().post("/work-orders").send({
+      partId: pId, machineId: mId, quantity,
+      dueDate: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+    })).expect(201);
+    return auth(api().post(`/work-orders/${created.body.id}/release-engineering`).send({
+      plantId, productionDefinitionId: definition.body.id,
+    })).expect(201);
+  }
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -32,35 +59,27 @@ describe("AHK-011 — standart süre + kapasite yükü (e2e)", () => {
 
     adminToken = (await api().post("/auth/login").send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD })).body.accessToken;
 
+    plantId = (await auth(api().post("/hierarchy/plants").send({ name: `Kapasite Plant ${STAMP}` }))).body.id;
+    rawMaterialId = (await auth(api().post("/materials").send({ code: `SCH-RAW-${STAMP}`, name: "Kapasite Hammadde", type: "RAW", unit: "KG" }))).body.id;
     partId = (await auth(api().post("/parts").send({ partNo: `SCH-${STAMP}`, revision: "A", name: "Kapasite Testi" }))).body.id;
     machineId = (await auth(api().post("/machines").send({ name: `Kapasite Tezgah ${STAMP}`, model: "Test" }))).body.id;
     await auth(api().patch(`/machines/${machineId}`).send({ dailyCapacityMinutes: 480 })).expect(200);
 
-    await auth(
-      api().post("/recipes").send({
-        partId,
-        revision: "A",
-        steps: [{ seq: 1, name: "Tornalama", standardMinutes: 100 }],
-      }),
-    ).expect(201);
-
-    const wo = await auth(
-      api().post("/work-orders").send({
-        partId,
-        machineId,
-        quantity: 1,
-        dueDate: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-      }),
-    ).expect(201);
+    const wo = await releasedWorkOrder(partId, machineId, [{ seq: 1, name: "Tornalama", standardMinutes: 100 }]);
     workOrderId = wo.body.id;
   });
 
   afterAll(async () => {
     await prisma.workOrderOperation.deleteMany({ where: { workOrderId } }).catch(() => undefined);
+    await prisma.workOrderCostBaseline.deleteMany({ where: { workOrderId } }).catch(() => undefined);
     await prisma.workOrder.deleteMany({ where: { id: workOrderId } }).catch(() => undefined);
+    await prisma.productionDefinition.deleteMany({ where: { partId } }).catch(() => undefined);
+    await prisma.bomHeader.deleteMany({ where: { partId } }).catch(() => undefined);
     await prisma.recipeHeader.deleteMany({ where: { partId } }).catch(() => undefined);
     await prisma.machine.deleteMany({ where: { id: machineId } }).catch(() => undefined);
     await prisma.part.deleteMany({ where: { id: partId } }).catch(() => undefined);
+    await prisma.material.deleteMany({ where: { id: rawMaterialId } }).catch(() => undefined);
+    await prisma.plant.deleteMany({ where: { id: plantId } }).catch(() => undefined);
     await app.close();
   });
 
@@ -101,20 +120,10 @@ describe("AHK-011 — standart süre + kapasite yükü (e2e)", () => {
     await auth(api().patch(`/machines/${bigMachine}`).send({ dailyCapacityMinutes: 10 })).expect(200);
 
     const bigPart = (await auth(api().post("/parts").send({ partNo: `SCH-BIG-${STAMP}`, revision: "A", name: "Aşım Parça" }))).body.id;
-    await auth(
-      api().post("/recipes").send({ partId: bigPart, revision: "A", steps: [{ seq: 1, name: "Freze", standardMinutes: 500 }] }),
-    ).expect(201);
 
     const day = new Date();
     day.setHours(0, 0, 0, 0);
-    const bigWo = await auth(
-      api().post("/work-orders").send({
-        partId: bigPart,
-        machineId: bigMachine,
-        quantity: 1,
-        dueDate: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
-      }),
-    ).expect(201);
+    const bigWo = await releasedWorkOrder(bigPart, bigMachine, [{ seq: 1, name: "Freze", standardMinutes: 500 }]);
     await auth(
       api().patch(`/work-orders/${bigWo.body.id}/schedule`).send({
         plannedStartDate: day.toISOString(),
@@ -129,7 +138,10 @@ describe("AHK-011 — standart süre + kapasite yükü (e2e)", () => {
     expect(row).toMatchObject({ loadMinutes: 500, capacityMinutes: 10, overloaded: true });
 
     await prisma.workOrderOperation.deleteMany({ where: { workOrderId: bigWo.body.id } });
+    await prisma.workOrderCostBaseline.deleteMany({ where: { workOrderId: bigWo.body.id } });
     await prisma.workOrder.deleteMany({ where: { id: bigWo.body.id } });
+    await prisma.productionDefinition.deleteMany({ where: { partId: bigPart } });
+    await prisma.bomHeader.deleteMany({ where: { partId: bigPart } });
     await prisma.recipeHeader.deleteMany({ where: { partId: bigPart } });
     await prisma.machine.deleteMany({ where: { id: bigMachine } });
     await prisma.part.deleteMany({ where: { id: bigPart } });

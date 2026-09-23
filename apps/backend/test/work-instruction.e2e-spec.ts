@@ -121,17 +121,33 @@ describe("MES-OPERATOR-HMI-002 — iş talimatı editörü (e2e)", () => {
   });
 
   it("WorkOrder oluşturulunca talimat WorkOrderOperation'a immutable snapshot olarak kopyalanır", async () => {
+    const plant = await auth(api().post("/hierarchy/plants").send({ name: `WI Plant ${STAMP}` })).expect(201);
+    const material = await auth(api().post("/materials").send({ code: `WI-RAW-${STAMP}`, name: "WI Hammadde", type: "RAW", unit: "KG" })).expect(201);
+    const bom = await auth(api().post("/boms").send({
+      partId, revision: "D",
+      lines: [{ itemType: "MATERIAL", itemId: material.body.id, qtyPer: 1, unit: "KG" }],
+    })).expect(201);
     const created = await auth(
       api()
         .post("/recipes")
         .send({ partId, revision: "D", steps: [{ seq: 1, name: "Taşlama", instructionHtml: "<p>WO talimatı</p>" }] }),
     ).expect(201);
+    await auth(api().patch(`/parts/${partId}/engineering-status`).send({ status: "RELEASED" })).expect(200);
+    await auth(api().patch(`/boms/${bom.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    await auth(api().patch(`/recipes/${created.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    const definition = await auth(api().post("/production-definitions").send({
+      plantId: plant.body.id, partId, bomHeaderId: bom.body.id, recipeHeaderId: created.body.id,
+    })).expect(201);
+    await auth(api().patch(`/production-definitions/${definition.body.id}/status`).send({ status: "RELEASED" })).expect(200);
 
-    const wo = await auth(
+    const createdWo = await auth(
       api()
         .post("/work-orders")
         .send({ partId, quantity: 1, dueDate: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString() }),
     ).expect(201);
+    const wo = await auth(api().post(`/work-orders/${createdWo.body.id}/release-engineering`).send({
+      plantId: plant.body.id, productionDefinitionId: definition.body.id,
+    })).expect(201);
 
     const operations = await auth(api().get(`/work-orders/${wo.body.id}/operations`)).expect(200);
     expect(operations.body[0].instructionHtml).toBe("<p>WO talimatı</p>");
@@ -140,7 +156,12 @@ describe("MES-OPERATOR-HMI-002 — iş talimatı editörü (e2e)", () => {
     expect(hmiDetail.body.instructionHtml).toBe("<p>WO talimatı</p>");
 
     await prisma.workOrderOperation.deleteMany({ where: { workOrderId: wo.body.id } });
+    await prisma.workOrderCostBaseline.deleteMany({ where: { workOrderId: wo.body.id } });
     await prisma.workOrder.deleteMany({ where: { id: wo.body.id } });
+    await prisma.productionDefinition.deleteMany({ where: { id: definition.body.id } });
+    await prisma.bomHeader.deleteMany({ where: { id: bom.body.id } });
     await prisma.recipeHeader.deleteMany({ where: { id: created.body.id } });
+    await prisma.material.deleteMany({ where: { id: material.body.id } });
+    await prisma.plant.deleteMany({ where: { id: plant.body.id } });
   });
 });

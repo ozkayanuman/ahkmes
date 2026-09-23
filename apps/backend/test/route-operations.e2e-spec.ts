@@ -13,7 +13,10 @@ describe("AHK-004 — iş emri rota snapshot ve operasyon/WIP", () => {
   let prisma: PrismaService;
   let adminToken: string;
   let partId = "";
+  let plantId = "";
+  let rawMaterialId = "";
   let recipeId = "";
+  let recipeTwoId = "";
   let workOrderId = "";
   let machineOneId = "";
   let machineTwoId = "";
@@ -32,6 +35,8 @@ describe("AHK-004 — iş emri rota snapshot ve operasyon/WIP", () => {
     adminToken = login.body.accessToken;
 
     partId = (await auth(api().post("/parts").send({ partNo: `ROUTE-${STAMP}`, revision: "A", name: "Rota Test Parçası" }))).body.id;
+    plantId = (await auth(api().post("/hierarchy/plants").send({ name: `Rota Plant ${STAMP}` }))).body.id;
+    rawMaterialId = (await auth(api().post("/materials").send({ code: `ROUTE-RAW-${STAMP}`, name: "Rota Hammadde", type: "RAW", unit: "KG" }))).body.id;
     machineOneId = (await auth(api().post("/machines").send({ name: `Rota MCV 1 ${STAMP}`, model: "MCV-5500" }))).body.id;
     machineTwoId = (await auth(api().post("/machines").send({ name: `Rota MCV 2 ${STAMP}`, model: "MCV-5500" }))).body.id;
   });
@@ -39,24 +44,45 @@ describe("AHK-004 — iş emri rota snapshot ve operasyon/WIP", () => {
   afterAll(async () => {
     if (workOrderId) {
       await prisma.productionRun.deleteMany({ where: { workOrderId } }).catch(() => undefined);
+      await prisma.workOrderCostBaseline.deleteMany({ where: { workOrderId } }).catch(() => undefined);
       await prisma.workOrder.deleteMany({ where: { id: workOrderId } }).catch(() => undefined);
     }
-    if (recipeId) await prisma.recipeHeader.deleteMany({ where: { id: recipeId } }).catch(() => undefined);
+    if (partId) {
+      await prisma.productionDefinition.deleteMany({ where: { partId } }).catch(() => undefined);
+      await prisma.bomHeader.deleteMany({ where: { partId } }).catch(() => undefined);
+      await prisma.recipeHeader.deleteMany({ where: { partId } }).catch(() => undefined);
+    }
     if (machineOneId || machineTwoId) await prisma.machine.deleteMany({ where: { id: { in: [machineOneId, machineTwoId].filter(Boolean) } } }).catch(() => undefined);
     if (partId) await prisma.part.deleteMany({ where: { id: partId } }).catch(() => undefined);
+    if (rawMaterialId) await prisma.material.deleteMany({ where: { id: rawMaterialId } }).catch(() => undefined);
+    if (plantId) await prisma.plant.deleteMany({ where: { id: plantId } }).catch(() => undefined);
     await app.close();
   });
 
-  it("aktif Recipe'yi iş emrine bağımsız, revizyonlu operasyon snapshot olarak kopyalar", async () => {
-    const recipe = await auth(api().post("/recipes").send({
-      partId,
-      revision: "R1",
-      steps: [
-        { seq: 10, name: "Kaba işleme", parameterName: "Devir", parameterValue: "4500", unit: "rpm" },
-        { seq: 20, name: "Finiş işleme", parameterName: "Devir", parameterValue: "7000", unit: "rpm" },
-      ],
+  /** BOM+Recipe+ProductionDefinition zincirini yayınlar; CNC-V1-01'den beri
+   * operasyonlar yalnızca açık `release-engineering` komutuyla dolar. */
+  async function releasedDefinition(revision: string, steps: Array<Record<string, unknown>>) {
+    const bom = await auth(api().post("/boms").send({
+      partId, revision,
+      lines: [{ itemType: "MATERIAL", itemId: rawMaterialId, qtyPer: 1, unit: "KG" }],
     })).expect(201);
-    recipeId = recipe.body.id;
+    const recipe = await auth(api().post("/recipes").send({ partId, revision, steps })).expect(201);
+    await auth(api().patch(`/parts/${partId}/engineering-status`).send({ status: "RELEASED" })).expect(200);
+    await auth(api().patch(`/boms/${bom.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    await auth(api().patch(`/recipes/${recipe.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    const definition = await auth(api().post("/production-definitions").send({
+      plantId, partId, bomHeaderId: bom.body.id, recipeHeaderId: recipe.body.id,
+    })).expect(201);
+    await auth(api().patch(`/production-definitions/${definition.body.id}/status`).send({ status: "RELEASED" })).expect(200);
+    return { bomId: bom.body.id, recipeId: recipe.body.id, definitionId: definition.body.id };
+  }
+
+  it("aktif Recipe'yi iş emrine bağımsız, revizyonlu operasyon snapshot olarak kopyalar", async () => {
+    const r1 = await releasedDefinition("R1", [
+      { seq: 1, name: "Kaba işleme", parameterName: "Devir", parameterValue: "4500", unit: "rpm" },
+      { seq: 2, name: "Finiş işleme", parameterName: "Devir", parameterValue: "7000", unit: "rpm" },
+    ]);
+    recipeId = r1.recipeId;
 
     const created = await auth(api().post("/work-orders").send({
       partId,
@@ -64,14 +90,23 @@ describe("AHK-004 — iş emri rota snapshot ve operasyon/WIP", () => {
       dueDate: new Date(Date.now() + 86400000).toISOString(),
     })).expect(201);
     workOrderId = created.body.id;
-    expect(created.body.recipeRevision).toBe("R1");
-    expect(created.body.operations.map((operation: { seq: number; name: string }) => [operation.seq, operation.name]))
-      .toEqual([[10, "Kaba işleme"], [20, "Finiş işleme"]]);
+    expect(created.body.recipeRevision).toBeNull();
+    expect(created.body.operations).toHaveLength(0);
 
-    await auth(api().patch(`/recipes/${recipeId}`).send({
-      steps: [{ seq: 10, name: "Sonradan değişen rota" }],
-    })).expect(200);
+    const released = await auth(api().post(`/work-orders/${workOrderId}/release-engineering`).send({
+      plantId, productionDefinitionId: r1.definitionId,
+    })).expect(201);
+    expect(released.body.recipeRevision).toBe("R1");
+    expect(released.body.operations.map((operation: { seq: number; name: string }) => [operation.seq, operation.name]))
+      .toEqual([[1, "Kaba işleme"], [2, "Finiş işleme"]]);
+
+    // Released routing/BOM/production-definition kayıtları artık immutable;
+    // bir sonraki revizyonu yayınlamak, önceki iş emrinin dondurulmuş
+    // snapshot'ını değiştirmediğini kanıtlar.
+    const r2 = await releasedDefinition("R2", [{ seq: 1, name: "Sonradan değişen rota" }]);
+    recipeTwoId = r2.recipeId;
     const frozen = await auth(api().get(`/work-orders/${workOrderId}`)).expect(200);
+    expect(frozen.body.recipeRevision).toBe("R1");
     expect(frozen.body.operations.map((operation: { name: string }) => operation.name))
       .toEqual(["Kaba işleme", "Finiş işleme"]);
   });

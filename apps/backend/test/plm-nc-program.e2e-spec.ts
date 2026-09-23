@@ -23,6 +23,10 @@ describe("PLM-001 controlled NC release (PostgreSQL e2e)", () => {
   let programV4 = "";
   let recipeId = "";
   let workOrderId = "";
+  let plantId = "";
+  let rawMaterialId = "";
+  let bomId = "";
+  let definitionId = "";
   let authorId = "";
   let publisherId = "";
   let crossTenantUserId = "";
@@ -65,17 +69,24 @@ describe("PLM-001 controlled NC release (PostgreSQL e2e)", () => {
     } });
     crossTenantUserId = cross.id;
     crossTenantToken = await login(cross.email, "Cross1234!");
+    plantId = (await as(adminToken, api().post("/hierarchy/plants").send({ name: `PLM Plant ${STAMP}` })).expect(201)).body.id;
+    rawMaterialId = (await as(adminToken, api().post("/materials").send({ code: `PLM-RAW-${STAMP}`, name: "PLM Hammadde", type: "RAW", unit: "KG" })).expect(201)).body.id;
   });
 
   afterAll(async () => {
     if (workOrderId) await prisma.productionRun.deleteMany({ where: { workOrderId } }).catch(() => undefined);
-    if (workOrderId) await prisma.workOrder.deleteMany({ where: { id: workOrderId } }).catch(() => undefined);
+    await prisma.workOrderCostBaseline.deleteMany({ where: { workOrder: { partId } } }).catch(() => undefined);
+    await prisma.workOrder.deleteMany({ where: { partId } }).catch(() => undefined);
+    if (definitionId) await prisma.productionDefinition.deleteMany({ where: { id: definitionId } }).catch(() => undefined);
+    if (bomId) await prisma.bomHeader.deleteMany({ where: { id: bomId } }).catch(() => undefined);
     if (recipeId) await prisma.recipeHeader.deleteMany({ where: { id: recipeId } }).catch(() => undefined);
     const programIds = [programV1, programV2, programV3, programV4].filter(Boolean);
     await prisma.ncProgramSignature.deleteMany({ where: { ncProgramId: { in: programIds } } }).catch(() => undefined);
     await prisma.approvalRequest.deleteMany({ where: { entity: "nc-program", entityId: { in: programIds } } }).catch(() => undefined);
     await prisma.ncProgram.deleteMany({ where: { id: { in: programIds } } }).catch(() => undefined);
     if (partId) await prisma.part.deleteMany({ where: { id: partId } }).catch(() => undefined);
+    if (rawMaterialId) await prisma.material.deleteMany({ where: { id: rawMaterialId } }).catch(() => undefined);
+    if (plantId) await prisma.plant.deleteMany({ where: { id: plantId } }).catch(() => undefined);
     await prisma.user.deleteMany({ where: { id: { in: [authorId, publisherId, crossTenantUserId].filter(Boolean) } } }).catch(() => undefined);
     if (crossTenantId) await prisma.tenant.deleteMany({ where: { id: crossTenantId } }).catch(() => undefined);
     await app.close();
@@ -105,10 +116,24 @@ describe("PLM-001 controlled NC release (PostgreSQL e2e)", () => {
   it("blocks cross-tenant access and only lets a released revision enter route/work-order execution", async () => {
     await as(crossTenantToken, api().get(`/nc-programs/${programV1}/url`)).expect(404);
     recipeId = (await as(adminToken, api().post("/recipes").send({
-      partId, revision: `NC-${STAMP}`, steps: [{ seq: 10, name: "CNC işleme", ncProgramId: programV1 }],
+      partId, revision: `NC-${STAMP}`, steps: [{ seq: 1, name: "CNC işleme", ncProgramId: programV1 }],
     })).expect(201)).body.id;
-    workOrderId = (await as(adminToken, api().post("/work-orders").send({
+    bomId = (await as(adminToken, api().post("/boms").send({
+      partId, revision: `NC-${STAMP}`,
+      lines: [{ itemType: "MATERIAL", itemId: rawMaterialId, qtyPer: 1, unit: "KG" }],
+    })).expect(201)).body.id;
+    await as(adminToken, api().patch(`/parts/${partId}/engineering-status`).send({ status: "RELEASED" })).expect(200);
+    await as(adminToken, api().patch(`/boms/${bomId}/status`).send({ status: "RELEASED" })).expect(200);
+    await as(adminToken, api().patch(`/recipes/${recipeId}/status`).send({ status: "RELEASED" })).expect(200);
+    definitionId = (await as(adminToken, api().post("/production-definitions").send({
+      plantId, partId, bomHeaderId: bomId, recipeHeaderId: recipeId,
+    })).expect(201)).body.id;
+    await as(adminToken, api().patch(`/production-definitions/${definitionId}/status`).send({ status: "RELEASED" })).expect(200);
+    const createdWo = (await as(adminToken, api().post("/work-orders").send({
       partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString(),
+    })).expect(201)).body.id;
+    workOrderId = (await as(adminToken, api().post(`/work-orders/${createdWo}/release-engineering`).send({
+      plantId, productionDefinitionId: definitionId,
     })).expect(201)).body.id;
     const operation = (await as(authorToken, api().get(`/work-orders/${workOrderId}/operations`)).expect(200)).body[0];
     expect(operation.ncProgram).toMatchObject({ id: programV1, status: "PUBLISHED" });
@@ -121,7 +146,10 @@ describe("PLM-001 controlled NC release (PostgreSQL e2e)", () => {
     await as(adminToken, api().post(`/nc-programs/${programV2}/approve`).send({ password: ADMIN_PASSWORD })).expect(201);
     await as(publisherToken, api().post(`/nc-programs/${programV2}/publish`).send({ password: "Publisher1234!" })).expect(201);
 
-    await as(adminToken, api().post("/work-orders").send({ partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString() })).expect(409);
+    // Yayınlı programın süpersedelenmesi geriye dönük çalışan snapshot'ı değil,
+    // aynı (artık geçersiz) rotayı yeniden yayınlama girişimini engeller.
+    const staleAttempt = (await as(adminToken, api().post("/work-orders").send({ partId, quantity: 1, dueDate: new Date(Date.now() + 86400000).toISOString() })).expect(201)).body.id;
+    await as(adminToken, api().post(`/work-orders/${staleAttempt}/release-engineering`).send({ plantId, productionDefinitionId: definitionId })).expect(409);
     await as(adminToken, api().patch(`/work-orders/${workOrderId}/operations/${operation.id}`).send({ ncProgramId: programV1 })).expect(409);
   });
 
