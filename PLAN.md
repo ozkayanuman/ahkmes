@@ -5,6 +5,18 @@
 > PostgreSQL doğrulamaları tekrar karşılaştırıldı.
 > Bu bölüm normatif, güncel plandır. Aşağıdaki tarihsel plan/günlük korunmuştur;
 > ancak oradaki checkbox ve tarihsel iddialar tek başına güncel durum kanıtı değildir.
+>
+> **2026-09-23 güncel durum notu:** Bu dosyanın altındaki AHK-XXX backlog satırları
+> 2026-08-10'da donmuş durumda; o tarihten sonraki tüm gerçek ilerleme
+> (CNC-V1-01 → CNC-V1-11R: rota/mühendislik yayını, MRP, MES, CMMS, OEE,
+> planlanan/gerçekleşen maliyetlendirme, tekrarlanabilir veri onboarding,
+> yönetici operasyon kokpiti, gelen lot muayenesi, tedarikçi lot iadesi,
+> hammadde seri takibi, tool/fixture yaşam döngüsü, sevkiyat/müşteri izi)
+> `docs/CNC-V1-*.md` dosyalarında ve **canlı kaynak-of-truth** olan
+> `docs/CNC_MANUFACTURING_V1_COMMERCIAL_GAP_ANALYSIS.md`'de (en son
+> 2026-09-23'te güncellendi) belgelenmiştir. Güncel modül durumu için önce
+> o dosyaya bakılmalı; buradaki AHK-XXX satırları yalnızca tarihsel bağlam
+> için korunmuştur.
 
 ## 1. Ürün vizyonu ve sınırlar
 
