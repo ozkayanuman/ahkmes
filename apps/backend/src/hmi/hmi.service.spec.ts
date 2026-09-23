@@ -8,6 +8,7 @@ describe("HmiService", () => {
     productionExecutionEvent: { findMany: jest.fn() },
     reworkRequirement: { findMany: jest.fn() },
     operatorMachineQualification: { findFirst: jest.fn() },
+    productionMaterialRequirement: { findMany: jest.fn() },
   };
   const production = { start: jest.fn(), complete: jest.fn() };
   const workOrders = { completeOperation: jest.fn() };
@@ -19,7 +20,10 @@ describe("HmiService", () => {
   const maintenance = { createRequest: jest.fn(), declareBreakdown: jest.fn() };
   const service = new HmiService(prisma as any, production as any, workOrders as any, tooling as any, materials as any, quality as any, controllerVerification as any, maintenanceAvailability as any, maintenance as any);
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.productionMaterialRequirement.findMany.mockResolvedValue([]);
+  });
 
   it("delegates operator maintenance reports to the canonical CMMS service", async () => {
     maintenance.createRequest.mockResolvedValue({ id: "request-a" });
@@ -74,7 +78,23 @@ describe("HmiService", () => {
 
     const rows = await service.list("tenant-a", {});
 
-    expect(rows[0]).toMatchObject({ instructionHtml: "<p>talimat</p>" });
+    expect(rows[0]).toMatchObject({ instructionHtml: "<p>talimat</p>", materialStatus: "NONE" });
+  });
+
+  it("flags a work order as SHORTAGE in the queue when a manual-issue requirement is under-allocated, and READY when fully allocated", async () => {
+    prisma.workOrderOperation.findMany.mockResolvedValue([
+      { id: "operation-a", workOrderId: "work-order-a", seq: 1, name: "Tornalama", status: "PENDING", completedQty: "0", scrapQty: "0", startedAt: null, completedAt: null, instructionHtml: null, machine: null, ncProgram: null, toolRequirements: [], fixtureRequirements: [], setupVerifications: [], workOrder: { machine: null } },
+      { id: "operation-b", workOrderId: "work-order-b", seq: 1, name: "Freze", status: "PENDING", completedQty: "0", scrapQty: "0", startedAt: null, completedAt: null, instructionHtml: null, machine: null, ncProgram: null, toolRequirements: [], fixtureRequirements: [], setupVerifications: [], workOrder: { machine: null } },
+    ]);
+    prisma.productionMaterialRequirement.findMany.mockResolvedValue([
+      { workOrderId: "work-order-a", issueMethod: "MANUAL_ISSUE", requiredQty: "100", reservedQty: "20", issuedQty: "0" },
+      { workOrderId: "work-order-b", issueMethod: "MANUAL_ISSUE", requiredQty: "100", reservedQty: "60", issuedQty: "40" },
+    ]);
+
+    const rows = await service.list("tenant-a", {});
+
+    expect(rows.find((row: any) => row.workOrderId === "work-order-a")).toMatchObject({ materialStatus: "SHORTAGE" });
+    expect(rows.find((row: any) => row.workOrderId === "work-order-b")).toMatchObject({ materialStatus: "READY" });
   });
 
   it("does not silently complete an in-progress operation when its active run is absent", async () => {

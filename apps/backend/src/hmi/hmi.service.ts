@@ -50,7 +50,33 @@ export class HmiService {
       include: operationInclude,
       orderBy: [{ workOrder: { priority: "asc" } }, { workOrder: { dueDate: "asc" } }, { seq: "asc" }],
     });
-    return operations.map((operation) => this.queueRow(operation));
+    const materialStatusByWorkOrder = await this.materialStatusByWorkOrder(tenantId, [...new Set(operations.map((operation) => operation.workOrderId))]);
+    return operations.map((operation) => this.queueRow(operation, materialStatusByWorkOrder.get(operation.workOrderId) ?? "NONE"));
+  }
+
+  private async materialStatusByWorkOrder(tenantId: string, workOrderIds: string[]) {
+    const result = new Map<string, "NONE" | "READY" | "SHORTAGE">();
+    if (workOrderIds.length === 0) return result;
+    const requirements = await this.prisma.productionMaterialRequirement.findMany({
+      where: { tenantId, workOrderId: { in: workOrderIds } },
+      select: { workOrderId: true, issueMethod: true, requiredQty: true, reservedQty: true, issuedQty: true },
+    });
+    const byWorkOrder = new Map<string, typeof requirements>();
+    for (const requirement of requirements) {
+      const bucket = byWorkOrder.get(requirement.workOrderId) ?? [];
+      bucket.push(requirement);
+      byWorkOrder.set(requirement.workOrderId, bucket);
+    }
+    for (const [workOrderId, items] of byWorkOrder) result.set(workOrderId, this.computeMaterialStatus(items));
+    return result;
+  }
+
+  private computeMaterialStatus(items: Array<{ issueMethod: string; requiredQty: unknown; reservedQty: unknown; issuedQty: unknown }>): "NONE" | "READY" | "SHORTAGE" {
+    if (items.length === 0) return "NONE";
+    const shortage = items.some(
+      (item) => item.issueMethod === "MANUAL_ISSUE" && Number(item.reservedQty) + Number(item.issuedQty) < Number(item.requiredQty),
+    );
+    return shortage ? "SHORTAGE" : "READY";
   }
 
   async detail(tenantId: string, operationId: string) {
@@ -70,7 +96,7 @@ export class HmiService {
       machineId ? this.maintenanceAvailability.status(tenantId, machineId) : Promise.resolve(null),
     ]);
     const checklist = this.checklist(operation, setup, Boolean(activeRun), qualityStatus, controllerVerification, maintenanceAvailability);
-    return { ...this.queueRow(operation), setup, activeRun, materialRequirements: requirements, qualityStatus, executionHistory, reworkRequirements, controllerVerification, maintenanceAvailability, checklist };
+    return { ...this.queueRow(operation, this.computeMaterialStatus(requirements)), setup, activeRun, materialRequirements: requirements, qualityStatus, executionHistory, reworkRequirements, controllerVerification, maintenanceAvailability, checklist };
   }
 
   async start(tenantId: string, userId: string, operationId: string) {
@@ -162,11 +188,12 @@ export class HmiService {
     return operation;
   }
 
-  private queueRow(operation: Awaited<ReturnType<HmiService["operation"]>>) {
+  private queueRow(operation: Awaited<ReturnType<HmiService["operation"]>>, materialStatus: "NONE" | "READY" | "SHORTAGE" = "NONE") {
     const verification = operation.setupVerifications[0] ?? null;
     const requiredSetup = operation.toolRequirements.length + operation.fixtureRequirements.length > 0;
     return {
       id: operation.id,
+      materialStatus,
       workOrderId: operation.workOrderId,
       seq: operation.seq,
       name: operation.name,
