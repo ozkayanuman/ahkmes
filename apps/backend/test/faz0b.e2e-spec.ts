@@ -27,6 +27,7 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
   let manualWoId: string;
   let poId: string;
   let poLineIds: string[] = [];
+  let plantId: string;
 
   const auth = (r: request.Test) => r.set("Authorization", `Bearer ${adminToken}`);
   const api = () => request(app.getHttpServer());
@@ -60,12 +61,19 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
           .send({ code: `F0B-MAT-${STAMP}`, name: "Ç1040 Çubuk", type: "RAW", unit: "kg" }),
       )
     ).body.id;
+    plantId = (await auth(api().post("/hierarchy/plants").send({ name: `F0B Plant ${STAMP}` }))).body.id;
   });
 
   afterAll(async () => {
     // Durum kuralları API'den silmeyi engelleyebilir — temizliği doğrudan Prisma ile yap
     const woIds = [...convertedWoIds, manualWoId].filter(Boolean);
+    await prisma.workOrderCostBaseline.deleteMany({ where: { workOrderId: { in: woIds } } }).catch(() => undefined);
     await prisma.workOrder.deleteMany({ where: { id: { in: woIds } } }).catch(() => undefined);
+    if (partId) {
+      await prisma.productionDefinition.deleteMany({ where: { partId } }).catch(() => undefined);
+      await prisma.bomHeader.deleteMany({ where: { partId } }).catch(() => undefined);
+      await prisma.recipeHeader.deleteMany({ where: { partId } }).catch(() => undefined);
+    }
     if (salesOrderId) await prisma.salesOrder.deleteMany({ where: { id: salesOrderId } }).catch(() => undefined);
     if (quoteId) await prisma.quote.deleteMany({ where: { id: quoteId } }).catch(() => undefined);
     if (poId) await prisma.purchaseOrder.deleteMany({ where: { id: poId } }).catch(() => undefined);
@@ -152,6 +160,12 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
       await auth(api().post(`/quotes/${quoteId}/convert`).send({})).expect(409);
     });
 
+    it("satış siparişi satırlarına üretim tesisi atanır", async () => {
+      for (const lineId of salesOrderLineIds) {
+        await auth(api().patch(`/sales-orders/${salesOrderId}/lines/${lineId}/fulfillment-plant`).send({ plantId })).expect(200);
+      }
+    });
+
     it("POST /sales-orders/:id/release — her satırdan IE numaralı iş emri üretir", async () => {
       const res = await auth(api().post(`/sales-orders/${salesOrderId}/release`).send({})).expect(201);
       expect(res.body.workOrders).toHaveLength(2);
@@ -175,6 +189,17 @@ describe("Faz 0b — Teklif, İş Emri, Satınalma (e2e)", () => {
       ).expect(201);
       manualWoId = res.body.id;
       expect(res.body.woNo).toMatch(/^IE-\d{4}-\d{4}$/);
+    });
+
+    it("iş emri mühendislik yayınıyla RELEASED olur", async () => {
+      // Bu describe bloğu durum makinesini (PLANNED/IN_PRODUCTION/COMPLETED)
+      // ve alan kilitlerini doğruluyor, gerçek rotalı üretimi değil — rota
+      // eklemek "tüm operasyonlar tamamlanmadan kapatılamaz" kısıtını da
+      // getirir. engineeringReleaseRequired=false, CNC-V1-01 öncesi
+      // (rotasız) eski akışı temsil eder ve IN_PRODUCTION kapısını
+      // (`wo.engineeringReleaseRequired && wo.status !== "RELEASED"`) devre
+      // dışı bırakır.
+      await prisma.workOrder.update({ where: { id: convertedWoIds[0] }, data: { engineeringReleaseRequired: false } });
     });
 
     it("PLANNED→IN_PRODUCTION geçişi çalışır", async () => {

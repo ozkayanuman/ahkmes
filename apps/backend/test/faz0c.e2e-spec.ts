@@ -92,8 +92,16 @@ describe("Faz 0c — Tüketim, Üretim, Mamul, Dashboard (e2e)", () => {
     await auth(api().patch(`/quotes/${quoteId}/status`).send({ status: "APPROVED" })).expect(200);
     const conv = await auth(api().post(`/quotes/${quoteId}/convert`).send({})).expect(201);
     salesOrderId = conv.body.salesOrder.id;
+    const plantId = (await auth(api().post("/hierarchy/plants").send({ name: `F0C Plant ${STAMP}` }))).body.id;
+    for (const line of conv.body.salesOrder.lines) {
+      await auth(api().patch(`/sales-orders/${salesOrderId}/lines/${line.id}/fulfillment-plant`).send({ plantId })).expect(200);
+    }
     const release = await auth(api().post(`/sales-orders/${salesOrderId}/release`).send({})).expect(201);
     woId = release.body.workOrders[0].id;
+    // Bu senaryo, kasıtlı olarak rota/release-engineering'siz eski
+    // manuel tüketim+koşu akışını doğruluyor (CNC-V1-04 öncesi davranış,
+    // API üzerinden artık üretilemeyen ama hâlâ desteklenen legacy alan).
+    await prisma.workOrder.update({ where: { id: woId }, data: { engineeringReleaseRequired: false } });
   });
 
   it("PO → teslim → hammadde stoğu 30", async () => {

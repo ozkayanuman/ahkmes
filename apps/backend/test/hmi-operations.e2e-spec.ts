@@ -84,8 +84,9 @@ describe("MES-OPERATOR-HMI-001 (PostgreSQL e2e)", () => {
   it("uses canonical start and completion gates for a verified operation", async () => {
     const started = await as(adminToken, api().post(`/hmi/operations/${operationId}/start`).send({})).expect(201);
     expect(started.body.operation.id).toBe(operationId);
-    const completed = await as(adminToken, api().post(`/hmi/operations/${operationId}/complete`).send({ goodCount: 2, scrapCount: 0, notes: "HMI completion" })).expect(201);
-    expect(completed.body.status).toBe("COMPLETED");
+    await as(adminToken, api().post(`/hmi/operations/${operationId}/complete`).send({ goodCount: 2, scrapCount: 0, notes: "HMI completion" })).expect(201);
+    const completedDetail = await as(adminToken, api().get(`/hmi/operations/${operationId}`)).expect(200);
+    expect(completedDetail.body.status).toBe("COMPLETED");
     const run = await prisma.productionRun.findUniqueOrThrow({ where: { id: started.body.id } });
     expect(run.endedAt).not.toBeNull();
     expect(run.goodCount).toBe(2);

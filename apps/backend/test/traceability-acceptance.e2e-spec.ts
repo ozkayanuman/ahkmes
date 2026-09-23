@@ -2,6 +2,7 @@ import { INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
+import { PrismaService } from "../src/prisma/prisma.service";
 
 const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? "admin@ahkmes.local";
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? "Admin1234!";
@@ -10,6 +11,7 @@ const DUE = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
 
 describe("AHK-005 — lot kabulü ve as-built izlenebilirlik (e2e)", () => {
   let app: INestApplication;
+  let prisma: PrismaService;
   let adminToken: string;
   let materialId: string;
   let partId: string;
@@ -24,6 +26,7 @@ describe("AHK-005 — lot kabulü ve as-built izlenebilirlik (e2e)", () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    prisma = app.get(PrismaService);
 
     const login = await api().post("/auth/login").send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }).expect(201);
     adminToken = login.body.accessToken;
@@ -43,6 +46,9 @@ describe("AHK-005 — lot kabulü ve as-built izlenebilirlik (e2e)", () => {
       lotTrackingRequired: true,
     })).expect(201)).body.id;
     workOrderId = (await auth(api().post("/work-orders").send({ partId, quantity: 3, dueDate: DUE })).expect(201)).body.id;
+    // Bu senaryo, rota/release-engineering'siz eski manuel tüketim akışını
+    // (CNC-V1-04 öncesi) kasıtlı olarak doğruluyor.
+    await prisma.workOrder.update({ where: { id: workOrderId }, data: { engineeringReleaseRequired: false } });
   });
 
   afterAll(async () => {
@@ -129,6 +135,7 @@ describe("AHK-005 — lot kabulü ve as-built izlenebilirlik (e2e)", () => {
 
 describe("AHK Faz K (Faz 3) — çok seviyeli (alt montaj) izlenebilirlik zinciri (e2e)", () => {
   let app: INestApplication;
+  let prisma: PrismaService;
   let adminToken: string;
   const api = () => request(app.getHttpServer());
   const auth = (r: request.Test) => r.set("Authorization", `Bearer ${adminToken}`);
@@ -146,6 +153,7 @@ describe("AHK Faz K (Faz 3) — çok seviyeli (alt montaj) izlenebilirlik zincir
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    prisma = app.get(PrismaService);
 
     const login = await api().post("/auth/login").send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }).expect(201);
     adminToken = login.body.accessToken;
@@ -169,6 +177,7 @@ describe("AHK Faz K (Faz 3) — çok seviyeli (alt montaj) izlenebilirlik zincir
 
     // Seviye 1: SUB parçası için iş emri — hammaddeden üretilir.
     subWorkOrderId = (await auth(api().post("/work-orders").send({ partId: subPartId, quantity: 5, dueDate: DUE })).expect(201)).body.id;
+    await prisma.workOrder.update({ where: { id: subWorkOrderId }, data: { engineeringReleaseRequired: false } });
     materialLotId = (await auth(api().post("/lots").send({
       lotNo: `TRACE3-MAT-LOT-${STAMP}`,
       itemType: "MATERIAL",
@@ -205,6 +214,7 @@ describe("AHK Faz K (Faz 3) — çok seviyeli (alt montaj) izlenebilirlik zincir
 
     // Seviye 2: TOP parçası için iş emri — SUB'ı alt montaj (itemType=PART) olarak tüketir.
     topWorkOrderId = (await auth(api().post("/work-orders").send({ partId: topPartId, quantity: 2, dueDate: DUE })).expect(201)).body.id;
+    await prisma.workOrder.update({ where: { id: topWorkOrderId }, data: { engineeringReleaseRequired: false } });
     await auth(api().post("/consumptions").send({
       workOrderId: topWorkOrderId,
       itemType: "PART",
