@@ -130,6 +130,13 @@ export function WorkOrderDetailPage() {
         laborCost: number;
         laborCostPartial: boolean;
         totalCost: number;
+        currency?: string | null;
+        dataQuality?: string;
+        planned?: { total: number | null };
+        actual?: { total: number | null };
+        variance?: { total: number | null; percentage: number | null };
+        unitCost?: number | null;
+        issues?: { code: string }[];
         note?: string;
       }>(`/work-orders/${id}/cost`),
   });
@@ -360,14 +367,15 @@ export function WorkOrderDetailPage() {
         </Card>
         <Card>
           <div className="text-xs uppercase text-slate-500" title={cost.data?.note}>
-            Maliyet {cost.data?.note ? "(eksik veri)" : ""}
+            Maliyet {cost.data?.dataQuality === "PARTIAL" || cost.data?.note ? "(eksik veri)" : ""}
           </div>
-          <div className="mt-1 font-medium">{cost.data ? cost.data.totalCost.toFixed(2) : "—"}</div>
+          <div className="mt-1 font-medium">{cost.data?.actual?.total != null ? cost.data.actual.total.toFixed(2) : cost.data ? cost.data.totalCost.toFixed(2) : "—"} {cost.data?.currency ?? ""}</div>
           <div className="mt-1 text-xs text-slate-400">
             Malzeme: {cost.data ? cost.data.materialCost.toFixed(2) : "—"} · Makine:{" "}
             {cost.data ? cost.data.machineCost.toFixed(2) : "—"} · İşçilik:{" "}
             {cost.data ? cost.data.laborCost.toFixed(2) : "—"}
           </div>
+          {cost.data?.planned && <details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">Plan/fark ayrıntısı</summary><div className="mt-1">Plan: {cost.data.planned.total?.toFixed(2) ?? "Kullanılamıyor"} · Fark: {cost.data.variance?.total?.toFixed(2) ?? "Kullanılamıyor"} · İyi birim: {cost.data.unitCost?.toFixed(2) ?? "Kullanılamıyor"}{cost.data.issues?.length ? ` · ${cost.data.issues.map((issue) => issue.code).join(", ")}` : ""}</div></details>}
         </Card>
       </div>
 

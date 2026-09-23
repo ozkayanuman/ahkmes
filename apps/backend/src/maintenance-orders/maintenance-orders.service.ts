@@ -13,6 +13,7 @@ import { writeTransactionalAudit } from "../common/transactional-audit";
 
 type Tx = Prisma.TransactionClient;
 const ACTIVE_RESERVATIONS = ["OPEN", "PARTIALLY_ALLOCATED", "ALLOCATED", "PARTIALLY_ISSUED", "ISSUED"] as const;
+const ACTIVE_MAINTENANCE_SPARE_RESERVATIONS = ["OPEN", "PARTIALLY_ISSUED"] as const;
 const TRANSITIONS: Record<MaintenanceOrderStatus, MaintenanceOrderStatus[]> = {
   DRAFT: ["PLANNED", "RELEASED", "CANCELLED"], PLANNED: ["RELEASED", "CANCELLED"],
   RELEASED: ["IN_PROGRESS", "CANCELLED"], IN_PROGRESS: ["ON_HOLD", "COMPLETED", "CANCELLED"],
@@ -23,7 +24,7 @@ const ORDER_INCLUDE = {
   technicianAssignments: { include: { technician: { select: { id: true, name: true, email: true } } } },
   tasks: { orderBy: { sequence: "asc" as const }, include: { completedBy: { select: { id: true, name: true } } } },
   laborEntries: { include: { technician: { select: { id: true, name: true } } }, orderBy: { workDate: "desc" as const } },
-  spareLines: { include: { transactions: { orderBy: { createdAt: "asc" as const } } } },
+  spareLines: { include: { transactions: { orderBy: { createdAt: "asc" as const } }, reservations: { orderBy: { createdAt: "asc" as const } } } },
   downtimeEvents: { include: { reason: true }, orderBy: { startedAt: "desc" as const } },
   createdBy: { select: { id: true, name: true } },
 } as const;
@@ -51,8 +52,28 @@ export class MaintenanceOrdersService {
   async assetDetail(tenantId: string, machineId: string) {
     const machine = await this.prisma.machine.findFirst({ where: { id: machineId, tenantId } });
     if (!machine) throw new NotFoundException("Maintainable asset was not found");
-    const history = await this.history(tenantId, machineId);
-    return { ...machine, history };
+    const [history, reliability] = await Promise.all([this.history(tenantId, machineId), this.reliability(tenantId, machineId)]);
+    return { ...machine, history, reliability };
+  }
+  /**
+   * Evidence-based reliability projection. MTTR uses completed corrective
+   * work actuals; failure spacing is deliberately named calendar MTBF because
+   * controller/runtime uptime is not yet a qualified universal source.
+   */
+  async reliability(tenantId: string, machineId?: string, from?: Date, to?: Date) {
+    const failures = await this.prisma.maintenanceBreakdown.findMany({
+      where: { tenantId, status: "RESOLVED", ...(machineId ? { machineId } : {}), ...(from || to ? { failureStartedAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}) },
+      include: { machine: { select: { id: true, name: true, plantId: true } }, maintenanceOrder: { select: { id: true, status: true, actualStart: true, actualFinish: true } } }, orderBy: [{ machineId: "asc" }, { failureStartedAt: "asc" }],
+    });
+    const groups = new Map<string, typeof failures>(); for (const failure of failures) groups.set(failure.machineId, [...(groups.get(failure.machineId) ?? []), failure]);
+    const machines = [...groups.values()].map((items) => {
+      const repairs = items.flatMap((item) => item.maintenanceOrder?.status === "COMPLETED" && item.maintenanceOrder.actualStart && item.maintenanceOrder.actualFinish && item.maintenanceOrder.actualFinish >= item.maintenanceOrder.actualStart ? [(item.maintenanceOrder.actualFinish.getTime() - item.maintenanceOrder.actualStart.getTime()) / 3_600_000] : []);
+      const intervals = items.slice(1).map((item, index) => (item.failureStartedAt.getTime() - items[index].failureStartedAt.getTime()) / 3_600_000).filter((hours) => hours >= 0);
+      const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+      return { machineId: items[0].machineId, machineName: items[0].machine.name, plantId: items[0].machine.plantId, failureCount: items.length, repairSampleCount: repairs.length, mttrHours: mean(repairs), failureIntervalSampleCount: intervals.length, mtbfCalendarHours: mean(intervals), firstFailureAt: items[0].failureStartedAt, lastFailureAt: items.at(-1)?.failureStartedAt };
+    });
+    const mttrValues = machines.flatMap((item) => item.mttrHours === null ? [] : [item.mttrHours]); const mtbfValues = machines.flatMap((item) => item.mtbfCalendarHours === null ? [] : [item.mtbfCalendarHours]); const mean = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    return { definition: { mttr: "Completed corrective work actualStart-to-actualFinish mean", mtbfCalendar: "Mean calendar interval between resolved failure start timestamps; not machine runtime uptime" }, machines, totals: { resolvedFailureCount: failures.length, machines: machines.length, meanMachineMttrHours: mean(mttrValues), meanMachineMtbfCalendarHours: mean(mtbfValues) } };
   }
   async history(tenantId: string, machineId: string) {
     await this.machine(this.prisma, tenantId, machineId);
@@ -64,7 +85,7 @@ export class MaintenanceOrdersService {
       this.prisma.machineMaintenanceStateEvent.findMany({ where: { tenantId, machineId }, orderBy: { occurredAt: "desc" } }),
       this.prisma.returnToServiceEvent.findMany({ where: { tenantId, machineId }, orderBy: { returnedAt: "desc" } }),
       this.prisma.maintenanceLaborEntry.findMany({ where: { tenantId, maintenanceOrder: { machineId } }, include: { technician: { select: { id: true, name: true } } }, orderBy: { workDate: "desc" } }),
-      this.prisma.maintenanceSpareLine.findMany({ where: { tenantId, maintenanceOrder: { machineId } }, include: { transactions: { orderBy: { createdAt: "desc" } } }, orderBy: { createdAt: "desc" } }),
+      this.prisma.maintenanceSpareLine.findMany({ where: { tenantId, maintenanceOrder: { machineId } }, include: { transactions: { orderBy: { createdAt: "desc" } }, reservations: { orderBy: { createdAt: "desc" } } }, orderBy: { createdAt: "desc" } }),
     ]);
     return { requests, breakdowns, orders, downtime, stateEvents, returnToService, labor, spares };
   }
@@ -134,6 +155,7 @@ export class MaintenanceOrdersService {
       await tx.$queryRaw`SELECT "id" FROM "MaintenanceOrder" WHERE "id"=${id} AND "tenantId"=${tenantId} FOR UPDATE`;
       const item = await tx.maintenanceOrder.findFirst({ where: { id, tenantId } }); if (!item) throw new NotFoundException("Maintenance work order was not found");
       if (!TRANSITIONS[item.status].includes(to)) throw new ConflictException(`INVALID_MAINTENANCE_TRANSITION:${item.status}->${to}`);
+      if (to === "CANCELLED" && await tx.maintenanceSpareReservation.count({ where: { tenantId, spareLine: { maintenanceOrderId: id }, status: { in: ACTIVE_MAINTENANCE_SPARE_RESERVATIONS as any } } })) throw new ConflictException("ACTIVE_SPARE_RESERVATIONS_MUST_BE_CANCELLED");
       const updated = await tx.maintenanceOrder.update({ where: { id }, data: { status: to, ...(to === "IN_PROGRESS" && !item.actualStart ? { actualStart: new Date() } : {}), ...(dto.note ? { notes: dto.note } : {}) }, include: ORDER_INCLUDE });
       await this.audit(tx, tenantId, userId, "maintenance-order", id, "STATUS_CHANGE", { status: item.status }, { status: to }); await this.outbox.record(tx, tenantId, "maintenanceorder", id, "maintenanceorder.updated", { id, status: to }); return updated;
     });
@@ -169,18 +191,66 @@ export class MaintenanceOrdersService {
   async completeTask(tenantId: string, userId: string, id: string, taskId: string, completed = true) { await this.findOne(tenantId, id); const result = await this.prisma.maintenanceTask.updateMany({ where: { id: taskId, tenantId, maintenanceOrderId: id }, data: { completed, completedById: completed ? userId : null, completedAt: completed ? new Date() : null } }); if (!result.count) throw new NotFoundException("Maintenance task was not found"); return this.prisma.maintenanceTask.findUniqueOrThrow({ where: { id: taskId } }); }
   async addLabor(tenantId: string, _userId: string, id: string, dto: any) { await this.findOne(tenantId, id); const start = dto.startedAt ? new Date(dto.startedAt) : undefined, end = dto.endedAt ? new Date(dto.endedAt) : undefined; if (start && end && end <= start) throw new ConflictException("LABOR_END_MUST_FOLLOW_START"); const minutes = dto.durationMinutes ?? (start && end ? Math.round((end.getTime() - start.getTime()) / 60000) : 0); if (minutes <= 0) throw new ConflictException("POSITIVE_LABOR_DURATION_REQUIRED"); return this.prisma.maintenanceLaborEntry.upsert({ where: { tenantId_idempotencyKey: { tenantId, idempotencyKey: dto.idempotencyKey } }, update: {}, create: { tenantId, maintenanceOrderId: id, technicianId: dto.technicianId, workDate: new Date(dto.workDate), startedAt: start, endedAt: end, durationMinutes: minutes, category: dto.category, notes: dto.notes, idempotencyKey: dto.idempotencyKey } }); }
   async addSpare(tenantId: string, _userId: string, id: string, dto: any) { await this.findOne(tenantId, id); return this.prisma.maintenanceSpareLine.create({ data: { tenantId, maintenanceOrderId: id, itemType: dto.itemType, itemId: dto.itemId, plannedQuantity: dto.plannedQuantity } }); }
+  async reserveSpare(tenantId: string, userId: string, id: string, lineId: string, dto: any) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.maintenanceSpareReservation.findFirst({ where: { tenantId, idempotencyKey: dto.idempotencyKey } }); if (existing) return existing;
+      await tx.$queryRaw`SELECT "id" FROM "MaintenanceOrder" WHERE "id"=${id} AND "tenantId"=${tenantId} FOR UPDATE`;
+      const order = await this.order(tx, tenantId, id); if (["COMPLETED", "CANCELLED"].includes(order.status)) throw new ConflictException("MAINTENANCE_ORDER_NOT_RESERVABLE");
+      const line = await tx.maintenanceSpareLine.findFirst({ where: { id: lineId, tenantId, maintenanceOrderId: id } }); if (!line) throw new NotFoundException("Maintenance spare line was not found");
+      const qty = new Prisma.Decimal(dto.quantity);
+      await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "tenantId"=${tenantId} AND "binId"=${dto.binId} AND "itemType"=${line.itemType}::"StockItemType" AND "itemId"=${line.itemId} AND "lotId" IS NOT DISTINCT FROM ${dto.lotId ?? null} FOR UPDATE`;
+      const balance = await tx.stockBalance.findFirst({ where: { tenantId, binId: dto.binId, itemType: line.itemType, itemId: line.itemId, lotId: dto.lotId ?? null } }); if (!balance) throw new ConflictException("Selected stock balance was not found");
+      if (dto.lotId && await tx.qualityHold.findFirst({ where: { tenantId, lotId: dto.lotId, status: "ACTIVE" } })) throw new ConflictException("INVENTORY_LOT_QUALITY_HELD");
+      const [production, maintenance] = await Promise.all([
+        tx.productionMaterialReservation.findMany({ where: { tenantId, binId: dto.binId, lotId: dto.lotId ?? null, status: { in: ACTIVE_RESERVATIONS as any }, requirement: { itemType: line.itemType, itemId: line.itemId } }, select: { quantity: true, issuedQty: true } }),
+        tx.maintenanceSpareReservation.findMany({ where: { tenantId, binId: dto.binId, lotId: dto.lotId ?? null, status: { in: ACTIVE_MAINTENANCE_SPARE_RESERVATIONS as any }, spareLine: { itemType: line.itemType, itemId: line.itemId } }, select: { quantity: true, issuedQty: true } }),
+      ]);
+      const allocated = [...production, ...maintenance].reduce((sum, row) => sum.plus(row.quantity).minus(row.issuedQty), new Prisma.Decimal(0));
+      const remainingPlan = new Prisma.Decimal(line.plannedQuantity).minus(line.reservedQty).minus(line.issuedQty);
+      if (qty.gt(remainingPlan) || qty.gt(new Prisma.Decimal(balance.qty).minus(allocated))) throw new ConflictException("INSUFFICIENT_AVAILABLE_SPARE_STOCK_OR_PLAN_ALREADY_ALLOCATED");
+      const reservation = await tx.maintenanceSpareReservation.create({ data: { tenantId, spareLineId: line.id, binId: dto.binId, lotId: dto.lotId, quantity: qty, idempotencyKey: dto.idempotencyKey, createdById: userId } });
+      await tx.maintenanceSpareLine.update({ where: { id: line.id }, data: { reservedQty: { increment: qty } } });
+      await this.audit(tx, tenantId, userId, "maintenance-spare-reservation", reservation.id, "CREATE", null, { ...reservation, maintenanceOrderId: id }); await this.outbox.record(tx, tenantId, "maintenanceorder", id, "maintenanceorder.updated", { id, spareLineId: line.id }); return reservation;
+    });
+  }
+  async cancelSpareReservation(tenantId: string, userId: string, id: string, lineId: string, reservationId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "MaintenanceOrder" WHERE "id"=${id} AND "tenantId"=${tenantId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "MaintenanceSpareReservation" WHERE "id"=${reservationId} AND "tenantId"=${tenantId} FOR UPDATE`;
+      const reservation = await tx.maintenanceSpareReservation.findFirst({ where: { id: reservationId, tenantId, spareLineId: lineId, spareLine: { maintenanceOrderId: id } } }); if (!reservation) throw new NotFoundException("Maintenance spare reservation was not found");
+      if (reservation.status === "CANCELLED") return reservation;
+      if (new Prisma.Decimal(reservation.issuedQty).gt(0)) throw new ConflictException("ISSUED_SPARE_RESERVATION_CANNOT_BE_CANCELLED");
+      const cancelled = await tx.maintenanceSpareReservation.update({ where: { id: reservation.id }, data: { status: "CANCELLED" } }); await tx.maintenanceSpareLine.update({ where: { id: lineId }, data: { reservedQty: { decrement: reservation.quantity } } });
+      await this.audit(tx, tenantId, userId, "maintenance-spare-reservation", reservation.id, "STATUS_CHANGE", { status: reservation.status }, { status: "CANCELLED" }); await this.outbox.record(tx, tenantId, "maintenanceorder", id, "maintenanceorder.updated", { id, spareLineId: lineId }); return cancelled;
+    });
+  }
   issueSpare(tenantId: string, userId: string, id: string, lineId: string, dto: any) { return this.spareMovement("ISSUE", tenantId, userId, id, lineId, dto); }
   returnSpare(tenantId: string, userId: string, id: string, lineId: string, dto: any) { return this.spareMovement("RETURN", tenantId, userId, id, lineId, dto); }
   private async spareMovement(type: "ISSUE" | "RETURN", tenantId: string, userId: string, id: string, lineId: string, dto: any) {
     const inventory = this.inventory;
     if (!inventory) throw new ConflictException("INVENTORY_SERVICE_UNAVAILABLE"); return this.prisma.$transaction(async (tx) => {
       const prior = await tx.maintenanceSpareTransaction.findFirst({ where: { tenantId, idempotencyKey: dto.idempotencyKey } }); if (prior) return prior;
-      await this.order(tx, tenantId, id); const line = await tx.maintenanceSpareLine.findFirst({ where: { id: lineId, tenantId, maintenanceOrderId: id } }); if (!line) throw new NotFoundException("Maintenance spare line was not found"); const qty = new Prisma.Decimal(dto.quantity);
+      await tx.$queryRaw`SELECT "id" FROM "MaintenanceOrder" WHERE "id"=${id} AND "tenantId"=${tenantId} FOR UPDATE`;
+      const order = await this.order(tx, tenantId, id); if (type === "ISSUE" && ["COMPLETED", "CANCELLED"].includes(order.status)) throw new ConflictException("MAINTENANCE_ORDER_NOT_EXECUTING"); const line = await tx.maintenanceSpareLine.findFirst({ where: { id: lineId, tenantId, maintenanceOrderId: id } }); if (!line) throw new NotFoundException("Maintenance spare line was not found"); const qty = new Prisma.Decimal(dto.quantity);
       await tx.$queryRaw`SELECT "id" FROM "StockBalance" WHERE "tenantId"=${tenantId} AND "binId"=${dto.binId} AND "itemType"=${line.itemType}::"StockItemType" AND "itemId"=${line.itemId} AND "lotId" IS NOT DISTINCT FROM ${dto.lotId ?? null} FOR UPDATE`;
-      if (type === "ISSUE") { if (dto.lotId && await tx.qualityHold.findFirst({ where: { tenantId, lotId: dto.lotId, status: "ACTIVE" } })) throw new ConflictException("INVENTORY_LOT_QUALITY_HELD"); const balance = await tx.stockBalance.findFirst({ where: { tenantId, binId: dto.binId, itemType: line.itemType, itemId: line.itemId, lotId: dto.lotId ?? null } }); const reserved = await tx.productionMaterialReservation.findMany({ where: { tenantId, binId: dto.binId, lotId: dto.lotId ?? null, status: { in: ACTIVE_RESERVATIONS as any }, requirement: { itemType: line.itemType, itemId: line.itemId } }, select: { quantity: true, issuedQty: true } }); const allocated = reserved.reduce((s, r) => s.plus(r.quantity).minus(r.issuedQty), new Prisma.Decimal(0)); if (!balance || new Prisma.Decimal(balance.qty).minus(allocated).lt(qty)) throw new ConflictException("INSUFFICIENT_AVAILABLE_SPARE_STOCK"); }
+      let reservation: any = null;
+      if (type === "ISSUE") {
+        if (dto.lotId && await tx.qualityHold.findFirst({ where: { tenantId, lotId: dto.lotId, status: "ACTIVE" } })) throw new ConflictException("INVENTORY_LOT_QUALITY_HELD");
+        const balance = await tx.stockBalance.findFirst({ where: { tenantId, binId: dto.binId, itemType: line.itemType, itemId: line.itemId, lotId: dto.lotId ?? null } });
+        if (dto.reservationId) { await tx.$queryRaw`SELECT "id" FROM "MaintenanceSpareReservation" WHERE "id"=${dto.reservationId} AND "tenantId"=${tenantId} FOR UPDATE`; reservation = await tx.maintenanceSpareReservation.findFirst({ where: { id: dto.reservationId, tenantId, spareLineId: line.id, binId: dto.binId, lotId: dto.lotId ?? null, status: { in: ACTIVE_MAINTENANCE_SPARE_RESERVATIONS as any } } }); if (!reservation || qty.gt(new Prisma.Decimal(reservation.quantity).minus(reservation.issuedQty))) throw new ConflictException("ISSUE_EXCEEDS_ACTIVE_SPARE_RESERVATION"); }
+        else {
+          const [production, maintenance] = await Promise.all([
+            tx.productionMaterialReservation.findMany({ where: { tenantId, binId: dto.binId, lotId: dto.lotId ?? null, status: { in: ACTIVE_RESERVATIONS as any }, requirement: { itemType: line.itemType, itemId: line.itemId } }, select: { quantity: true, issuedQty: true } }),
+            tx.maintenanceSpareReservation.findMany({ where: { tenantId, binId: dto.binId, lotId: dto.lotId ?? null, status: { in: ACTIVE_MAINTENANCE_SPARE_RESERVATIONS as any }, spareLine: { itemType: line.itemType, itemId: line.itemId } }, select: { quantity: true, issuedQty: true } }),
+          ]);
+          const allocated = [...production, ...maintenance].reduce((sum, row) => sum.plus(row.quantity).minus(row.issuedQty), new Prisma.Decimal(0)); if (!balance || new Prisma.Decimal(balance.qty).minus(allocated).lt(qty)) throw new ConflictException("INSUFFICIENT_AVAILABLE_SPARE_STOCK");
+        }
+      }
       else if (new Prisma.Decimal(line.issuedQty).minus(line.returnedQty).lt(qty)) throw new ConflictException("SPARE_RETURN_EXCEEDS_NET_ISSUE");
-      const movement = await inventory.record(tx, { tenantId, itemType: line.itemType, itemId: line.itemId, quantityDelta: type === "ISSUE" ? -Number(qty) : Number(qty), movementType: type === "ISSUE" ? InventoryMovementType.MAINTENANCE_ISSUE : InventoryMovementType.MAINTENANCE_RETURN, sourceType: "MAINTENANCE_SPARE", sourceId: line.id, sourceLineId: line.id, binId: dto.binId, lotId: dto.lotId, createdById: userId, note: dto.note });
-      const event = await tx.maintenanceSpareTransaction.create({ data: { tenantId, spareLineId: line.id, type, quantity: qty, binId: dto.binId, lotId: dto.lotId, idempotencyKey: dto.idempotencyKey, createdById: userId } }); await tx.maintenanceSpareLine.update({ where: { id: line.id }, data: type === "ISSUE" ? { issuedQty: { increment: qty } } : { returnedQty: { increment: qty } } }); await this.audit(tx, tenantId, userId, "maintenance-spare", event.id, "CREATE", null, { event, movementId: movement.id }); return event;
+      const movement = await inventory.record(tx, { tenantId, itemType: line.itemType, itemId: line.itemId, quantityDelta: type === "ISSUE" ? -Number(qty) : Number(qty), movementType: type === "ISSUE" ? InventoryMovementType.MAINTENANCE_ISSUE : InventoryMovementType.MAINTENANCE_RETURN, sourceType: "MAINTENANCE_SPARE", sourceId: line.id, sourceLineId: reservation?.id ?? line.id, binId: dto.binId, lotId: dto.lotId, createdById: userId, note: dto.note });
+      const event = await tx.maintenanceSpareTransaction.create({ data: { tenantId, spareLineId: line.id, type, quantity: qty, binId: dto.binId, lotId: dto.lotId, idempotencyKey: dto.idempotencyKey, createdById: userId } });
+      if (reservation) await tx.maintenanceSpareReservation.update({ where: { id: reservation.id }, data: { issuedQty: { increment: qty }, status: new Prisma.Decimal(reservation.issuedQty).plus(qty).gte(reservation.quantity) ? "ISSUED" : "PARTIALLY_ISSUED" } });
+      await tx.maintenanceSpareLine.update({ where: { id: line.id }, data: type === "ISSUE" ? { issuedQty: { increment: qty }, ...(reservation ? { reservedQty: { decrement: qty } } : {}) } : { returnedQty: { increment: qty } } }); await this.audit(tx, tenantId, userId, "maintenance-spare", event.id, "CREATE", null, { event, movementId: movement.id, reservationId: reservation?.id }); return event;
     });
   }
 
@@ -192,6 +262,7 @@ export class MaintenanceOrdersService {
       if (!["IN_PROGRESS", "ON_HOLD"].includes(item.status)) throw new ConflictException("MAINTENANCE_ORDER_NOT_EXECUTING"); if (item.tasks.some((t) => t.required && !t.completed)) throw new ConflictException("REQUIRED_MAINTENANCE_TASKS_INCOMPLETE");
       if (item.breakdown && (!(dto as any).resolution || (!(dto as any).remedy && !(dto as any).remedyCode) || !(dto as any).machineDisposition)) throw new ConflictException("BREAKDOWN_CLOSURE_DATA_REQUIRED"); const now = new Date();
       const updated = await tx.maintenanceOrder.update({ where: { id }, data: { status: "COMPLETED", completedAt: now, actualFinish: now, completionNotes: (dto as any).completionNotes ?? dto.notes, resolution: (dto as any).resolution, remedy: (dto as any).remedy ?? (dto as any).remedyCode, machineDisposition: (dto as any).machineDisposition }, include: ORDER_INCLUDE });
+      if (item.runtimeTriggerHours != null) { await tx.$queryRaw`SELECT "id" FROM "Machine" WHERE "id"=${item.machineId} AND "tenantId"=${tenantId} FOR UPDATE`; const machine = await this.machine(tx, tenantId, item.machineId); if (new Prisma.Decimal(machine.runtimeHours).gt(machine.lastPmRuntimeHours)) await tx.machine.update({ where: { id: machine.id }, data: { lastPmRuntimeHours: machine.runtimeHours } }); }
       if (item.breakdown) { await tx.maintenanceBreakdown.update({ where: { id: item.breakdown.id }, data: { status: "RESOLVED" } }); const machine = await this.machine(tx, tenantId, item.machineId); await this.changeMachineState(tx, tenantId, userId, machine, "OUT_OF_SERVICE", "Repair completed; explicit return to service required", id, item.breakdown.id); }
       await this.audit(tx, tenantId, userId, "maintenance-order", id, "STATUS_CHANGE", { status: item.status }, { status: "COMPLETED" }); return updated;
     });
@@ -213,8 +284,28 @@ export class MaintenanceOrdersService {
     return rows.map((row) => ({ id: row.id, tenantId: row.tenantId, machineId: row.machineId, plantId: row.machine.plantId, machineName: row.machine.name, start: row.startedAt, end: row.endedAt, durationSeconds: row.endedAt ? Math.max(0, Math.floor((row.endedAt.getTime() - row.startedAt.getTime()) / 1000)) : null, planned: row.maintenanceCategory === "PLANNED_MAINTENANCE", category: row.maintenanceCategory, source: row.maintenanceBreakdownId ? "BREAKDOWN" : "MAINTENANCE_ORDER", relatedBreakdownId: row.maintenanceBreakdownId, relatedMaintenanceOrderId: row.maintenanceOrderId, note: row.note }));
   }
 
-  /** Legacy MES-derived elapsed runtime is not a qualified machine meter and is not used by released time-based PM generation. */
-  async predictiveCheck(tenantId: string, _userId: string) { const machines = await this.prisma.machine.findMany({ where: { tenantId, isActive: true, pmIntervalHours: { not: null } } }); const due = machines.filter((m) => Number(m.runtimeHours) - Number(m.lastPmRuntimeHours) >= Number(m.pmIntervalHours)); return { checked: machines.length, due: due.length, created: 0, orders: [] as string[], qualification: "METER_BASED_PM_NOT_INCLUDED_IN_V1" }; }
+  /**
+   * Operator-authorized runtime PM generation. Runtime is accumulated from
+   * completed production runs; this endpoint does not infer a controller meter
+   * reading or change machine availability.
+   */
+  async predictiveCheck(tenantId: string, userId: string) {
+    const candidates = await this.prisma.machine.findMany({ where: { tenantId, isActive: true, pmIntervalHours: { not: null } } }); const orders: string[] = []; let due = 0; let created = 0; let skippedWithoutPlant = 0;
+    for (const candidate of candidates) {
+      const result = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "Machine" WHERE "id"=${candidate.id} AND "tenantId"=${tenantId} FOR UPDATE`;
+        const machine = await this.machine(tx, tenantId, candidate.id); if (!machine.isActive || !machine.pmIntervalHours) return { due: false, created: false, orderId: null, skippedWithoutPlant: false };
+        const triggerHours = new Prisma.Decimal(machine.lastPmRuntimeHours).plus(machine.pmIntervalHours); if (new Prisma.Decimal(machine.runtimeHours).lt(triggerHours)) return { due: false, created: false, orderId: null, skippedWithoutPlant: false };
+        if (!machine.plantId) return { due: true, created: false, orderId: null, skippedWithoutPlant: true };
+        const existing = await tx.maintenanceOrder.findFirst({ where: { tenantId, machineId: machine.id, runtimeTriggerHours: triggerHours }, include: ORDER_INCLUDE }); if (existing) return { due: true, created: false, orderId: existing.id, skippedWithoutPlant: false };
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('cmms-maintenance-order-number'))`; const bakNo = await nextDocNo(tx, "maintenanceOrder", "bakNo", "BAK");
+        const order = await tx.maintenanceOrder.create({ data: { tenantId, plantId: machine.plantId, bakNo, machineId: machine.id, type: "PREVENTIVE", priority: "MEDIUM", status: "DRAFT", scheduledDate: new Date(), runtimeTriggerHours: triggerHours, description: `Runtime PM due at ${triggerHours.toString()} h`, idempotencyKey: `runtime-pm:${machine.id}:${triggerHours.toString()}`, createdById: userId }, include: ORDER_INCLUDE });
+        await this.audit(tx, tenantId, userId, "maintenance-order", order.id, "CREATE", null, { ...order, runtimePm: true }); await this.outbox.record(tx, tenantId, "maintenanceorder", order.id, "maintenanceorder.updated", { id: order.id, runtimePm: true }); return { due: true, created: true, orderId: order.id, skippedWithoutPlant: false };
+      });
+      if (result.due) due += 1; if (result.created) created += 1; if (result.orderId) orders.push(result.orderId); if (result.skippedWithoutPlant) skippedWithoutPlant += 1;
+    }
+    return { checked: candidates.length, due, created, orders, skippedWithoutPlant, qualification: "PRODUCTION_RUNTIME_DERIVED_PM" };
+  }
 
   private async machine(db: Tx | PrismaService, tenantId: string, id: string) { const item = await db.machine.findFirst({ where: { id, tenantId } }); if (!item) throw new NotFoundException("Maintainable asset was not found"); return item; }
   private async order(db: Tx | PrismaService, tenantId: string, id: string) { const item = await db.maintenanceOrder.findFirst({ where: { id, tenantId } }); if (!item) throw new NotFoundException("Maintenance work order was not found"); return item; }

@@ -18,6 +18,8 @@ function buildTx() {
         id: "to1", toNo: "TRF-2026-0001", lines: [{ id: "tol1", itemType: "MATERIAL", itemId: "m1", lotId: null, qty: "5" }],
       }),
     },
+    $executeRaw: jest.fn().mockResolvedValue(0),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
   };
 }
 

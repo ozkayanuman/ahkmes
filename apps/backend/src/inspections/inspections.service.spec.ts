@@ -11,6 +11,8 @@ function buildService(overrides: any = {}) {
     inspection: { findFirst: jest.fn(), create: jest.fn().mockResolvedValue({ id: "ins1" }) },
     auditLog: { create: jest.fn().mockResolvedValue({ id: "audit1" }) },
     $transaction: jest.fn((fn) => fn(prisma)),
+    $executeRaw: jest.fn().mockResolvedValue(0),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
   const outbox = { record: jest.fn() };

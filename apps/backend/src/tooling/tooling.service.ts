@@ -3,18 +3,21 @@ import { Prisma, SetupVerificationStatus } from "@prisma/client";
 import type {
   CreateFixtureDefinitionDto, CreatePhysicalFixtureDto, CreatePhysicalToolDto, CreateToolAssemblyDto,
   CreateToolComponentDto, CreateToolDefinitionDto, SetupAssignmentDto, UpdateToolDefinitionDto,
+  FixtureCustodyDto, RecordToolPresetDto, UpdatePhysicalToolStateDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { PartsService } from "../parts/parts.service";
 import { FixtureMaintenanceService } from "../fixture-maintenance/fixture-maintenance.service";
+import { OutboxService } from "../outbox/outbox.service";
 
 type Tx = Prisma.TransactionClient;
 const TOOL_UNAVAILABLE = ["BROKEN", "QUARANTINED", "RETIRED", "EXPIRED"] as const;
-const FIXTURE_UNAVAILABLE = ["MAINTENANCE", "QUARANTINED", "RETIRED"] as const;
+const FIXTURE_UNAVAILABLE = ["CHECKED_OUT", "MAINTENANCE", "QUARANTINED", "RETIRED"] as const;
+const isUniqueViolation = (error: unknown) => typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 
 @Injectable()
 export class ToolingService {
-  constructor(private readonly prisma: PrismaService, private readonly parts: PartsService, private readonly fixtureMaintenance: FixtureMaintenanceService) {}
+  constructor(private readonly prisma: PrismaService, private readonly parts: PartsService, private readonly fixtureMaintenance: FixtureMaintenanceService, private readonly outbox: OutboxService) {}
 
   list(tenantId: string) {
     return Promise.all([
@@ -65,15 +68,40 @@ export class ToolingService {
     return this.prisma.physicalFixtureInstance.create({ data: { tenantId, ...dto } });
   }
 
+  async fixtureCustodyHistory(tenantId: string, fixtureId: string) {
+    const fixture = await this.prisma.physicalFixtureInstance.findFirst({ where: { id: fixtureId, tenantId }, select: { id: true } });
+    if (!fixture) throw new NotFoundException("Fiziksel fikstür bulunamadı");
+    return this.prisma.fixtureCustodyEvent.findMany({ where: { tenantId, physicalFixtureInstanceId: fixtureId }, orderBy: { createdAt: "desc" } });
+  }
+
+  async checkOutPhysicalFixture(tenantId: string, userId: string, fixtureId: string, input: FixtureCustodyDto) {
+    return this.transitionFixtureCustody(tenantId, userId, fixtureId, input, "CHECK_OUT");
+  }
+
+  async checkInPhysicalFixture(tenantId: string, userId: string, fixtureId: string, input: FixtureCustodyDto) {
+    return this.transitionFixtureCustody(tenantId, userId, fixtureId, input, "CHECK_IN");
+  }
+
   async addToolCompatibility(tenantId: string, dto: { machineId: string; toolDefinitionId?: string; toolAssemblyId?: string }) {
+    if (Boolean(dto.toolDefinitionId) === Boolean(dto.toolAssemblyId)) throw new ConflictException("Tam olarak bir takım tanımı veya assembly seçilmelidir");
     await this.assertMachine(tenantId, dto.machineId);
     if (dto.toolDefinitionId) await this.assertToolDefinition(tenantId, dto.toolDefinitionId);
     if (dto.toolAssemblyId) await this.assertAssembly(tenantId, dto.toolAssemblyId);
-    return this.prisma.toolMachineCompatibility.create({ data: { tenantId, ...dto } });
+    try {
+      return await this.prisma.toolMachineCompatibility.create({ data: { tenantId, ...dto } });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException("Bu makine-takım uyumluluğu zaten kayıtlı");
+      throw error;
+    }
   }
   async addFixtureCompatibility(tenantId: string, dto: { machineId: string; fixtureDefinitionId: string }) {
     await this.assertMachine(tenantId, dto.machineId); await this.assertFixtureDefinition(tenantId, dto.fixtureDefinitionId);
-    return this.prisma.fixtureMachineCompatibility.create({ data: { tenantId, ...dto } });
+    try {
+      return await this.prisma.fixtureMachineCompatibility.create({ data: { tenantId, ...dto } });
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ConflictException("Bu makine-fikstür uyumluluğu zaten kayıtlı");
+      throw error;
+    }
   }
 
   async createRecipeToolRequirement(tenantId: string, recipeStepId: string, dto: { toolDefinitionId?: string; toolAssemblyId?: string; isRequired: boolean; quantity: number; alternativeGroup?: string; sequence: number }) {
@@ -186,6 +214,68 @@ export class ToolingService {
     return { operation, verification, fixtureCompliance };
   }
   async lifeHistory(tenantId: string, toolId: string) { await this.assertPhysicalTool(tenantId, toolId); return this.prisma.toolLifeEvent.findMany({ where: { tenantId, physicalToolInstanceId: toolId }, orderBy: { createdAt: "desc" } }); }
+
+  async updatePhysicalToolState(tenantId: string, userId: string, toolId: string, input: UpdatePhysicalToolStateDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const tool = await tx.physicalToolInstance.findFirst({ where: { id: toolId, tenantId } });
+      if (!tool) throw new NotFoundException("Fiziksel takım bulunamadı");
+      if (tool.version !== input.version) throw new ConflictException("Takım durumu başka bir işlemde değişti; güncel sürümü kullanın");
+      if (tool.status === "RESERVED" || tool.status === "IN_USE") throw new ConflictException("Setup için rezerve edilmiş veya kullanımda olan takım doğrudan güncellenemez");
+      const status = Number(tool.remainingLife) <= 0 ? "EXPIRED" : input.status;
+      const before = { location: tool.location, status: tool.status, version: tool.version };
+      const after = { location: input.location, status, version: tool.version + 1, reason: input.reason };
+      const result = await tx.physicalToolInstance.updateMany({ where: { id: toolId, tenantId, version: input.version }, data: { location: input.location, status, version: { increment: 1 } } });
+      if (!result.count) throw new ConflictException("Takım durumu başka bir işlemde değişti; tekrar deneyin");
+      await this.audit(tx, tenantId, userId, "PhysicalToolInstance", toolId, "STATUS_CHANGE", before, after);
+      await this.outbox.record(tx, tenantId, "physicalToolInstance", toolId, "physical-tool.state-updated", { id: toolId, location: input.location ?? null, status, version: tool.version + 1, reason: input.reason });
+      return tx.physicalToolInstance.findFirstOrThrow({ where: { id: toolId, tenantId } });
+    });
+  }
+
+  private async transitionFixtureCustody(tenantId: string, userId: string, fixtureId: string, input: FixtureCustodyDto, action: "CHECK_OUT" | "CHECK_IN") {
+    const expectedStatus = action === "CHECK_OUT" ? "AVAILABLE" : "CHECKED_OUT";
+    const nextStatus = action === "CHECK_OUT" ? "CHECKED_OUT" : "AVAILABLE";
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "PhysicalFixtureInstance" WHERE "id" = ${fixtureId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      const fixture = await tx.physicalFixtureInstance.findFirst({ where: { id: fixtureId, tenantId } });
+      if (!fixture) throw new NotFoundException("Fiziksel fikstür bulunamadı");
+      if (fixture.version !== input.version) throw new ConflictException("Fikstür durumu başka bir işlemde değişti; güncel sürümü kullanın");
+      if (fixture.status !== expectedStatus) throw new ConflictException(action === "CHECK_OUT" ? "Yalnızca kullanılabilir fikstür teslim edilebilir" : "Yalnızca teslimdeki fikstür iade alınabilir");
+      const before = { location: fixture.location, status: fixture.status, version: fixture.version };
+      const after = { location: input.location, status: nextStatus, version: fixture.version + 1, reason: input.reason };
+      const updated = await tx.physicalFixtureInstance.updateMany({ where: { id: fixtureId, tenantId, version: input.version, status: expectedStatus }, data: { location: input.location, status: nextStatus, version: { increment: 1 } } });
+      if (!updated.count) throw new ConflictException("Fikstür durumu başka bir işlemde değişti; tekrar deneyin");
+      const custody = await tx.fixtureCustodyEvent.create({ data: { tenantId, physicalFixtureInstanceId: fixtureId, action, fromLocation: fixture.location, toLocation: input.location, reason: input.reason, createdById: userId } });
+      await this.audit(tx, tenantId, userId, "PhysicalFixtureInstance", fixtureId, "STATUS_CHANGE", before, after);
+      await this.outbox.record(tx, tenantId, "physicalFixtureInstance", fixtureId, action === "CHECK_OUT" ? "physical-fixture.checked-out" : "physical-fixture.checked-in", { id: fixtureId, custodyEventId: custody.id, action, location: input.location, status: nextStatus, version: fixture.version + 1, reason: input.reason });
+      return tx.physicalFixtureInstance.findFirstOrThrow({ where: { id: fixtureId, tenantId } });
+    });
+  }
+
+  async presetHistory(tenantId: string, toolId: string) {
+    await this.assertPhysicalTool(tenantId, toolId);
+    return this.prisma.toolPresetRecord.findMany({ where: { tenantId, physicalToolInstanceId: toolId }, include: { machine: { select: { id: true, name: true } } }, orderBy: { measuredAt: "desc" } });
+  }
+
+  async recordToolPreset(tenantId: string, userId: string, toolId: string, input: RecordToolPresetDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "PhysicalToolInstance" WHERE "id" = ${toolId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      const [tool, machine] = await Promise.all([
+        tx.physicalToolInstance.findFirst({ where: { id: toolId, tenantId } }),
+        tx.machine.findFirst({ where: { id: input.machineId, tenantId, isActive: true } }),
+      ]);
+      if (!tool) throw new NotFoundException("Fiziksel takım bulunamadı");
+      if (!machine) throw new NotFoundException("Makine bulunamadı");
+      if (tool.status !== "AVAILABLE") throw new ConflictException("Yalnızca kullanılabilir durumdaki takım için preset kaydı yapılabilir");
+      const previous = await tx.toolPresetRecord.findMany({ where: { tenantId, physicalToolInstanceId: toolId, machineId: input.machineId, offsetNumber: input.offsetNumber, status: "ACTIVE" }, select: { id: true } });
+      const measuredAt = input.measuredAt ?? new Date();
+      if (previous.length) await tx.toolPresetRecord.updateMany({ where: { id: { in: previous.map((record) => record.id) }, tenantId, status: "ACTIVE" }, data: { status: "SUPERSEDED", supersededAt: measuredAt } });
+      const preset = await tx.toolPresetRecord.create({ data: { tenantId, physicalToolInstanceId: toolId, machineId: input.machineId, offsetNumber: input.offsetNumber, lengthOffset: input.lengthOffset, radiusOffset: input.radiusOffset, measuredAt, status: "ACTIVE", reason: input.reason, createdById: userId } });
+      await this.audit(tx, tenantId, userId, "ToolPresetRecord", preset.id, "CREATE", previous.length ? { supersededPresetIds: previous.map((record) => record.id) } : null, { physicalToolInstanceId: toolId, machineId: input.machineId, offsetNumber: input.offsetNumber, lengthOffset: input.lengthOffset, radiusOffset: input.radiusOffset ?? null, measuredAt, status: "ACTIVE", reason: input.reason });
+      await this.outbox.record(tx, tenantId, "toolPresetRecord", preset.id, "tool-preset.recorded", { id: preset.id, physicalToolInstanceId: toolId, machineId: input.machineId, offsetNumber: input.offsetNumber, status: "ACTIVE", measuredAt: measuredAt.toISOString() });
+      return preset;
+    });
+  }
 
   async adjustLife(tenantId: string, userId: string, toolId: string, input: { consumedLife: number; version: number; reason: string }) {
     return this.prisma.$transaction(async (tx) => {

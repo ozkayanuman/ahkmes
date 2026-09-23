@@ -7,6 +7,7 @@ import {
   machineTelemetrySchema,
   connectorStatusSchema,
   controllerObservationSchema,
+  grantOperatorMachineQualificationSchema,
   updateMachineSchema,
   updateMachineTagSchema,
   type AssignActiveWorkOrderDto,
@@ -16,6 +17,7 @@ import {
   type MachineTelemetryDto,
   type ConnectorStatusDto,
   type ControllerObservationDto,
+  type GrantOperatorMachineQualificationDto,
   type UpdateMachineDto,
   type UpdateMachineTagDto,
 } from "@ahkmes/shared-types";
@@ -31,6 +33,7 @@ import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { CurrentMachine } from "../common/decorators/current-machine.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { SkipAudit } from "../common/decorators/skip-audit.decorator";
 
 @Controller("machines")
 @RequirePage("machines", "automation-gateway")
@@ -46,6 +49,30 @@ export class MachinesController {
   @Get(":id")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);
+  }
+
+  @Get(":id/operator-qualifications")
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  listOperatorQualifications(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.listOperatorQualifications(user.tenantId, id);
+  }
+
+  @Post(":id/operator-qualifications")
+  @Roles("ADMIN")
+  @SkipAudit()
+  grantOperatorQualification(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(grantOperatorMachineQualificationSchema)) dto: GrantOperatorMachineQualificationDto,
+  ) {
+    return this.service.grantOperatorQualification(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post(":id/operator-qualifications/:qualificationId/revoke")
+  @Roles("ADMIN")
+  @SkipAudit()
+  revokeOperatorQualification(@CurrentUser() user: AuthUser, @Param("id") id: string, @Param("qualificationId") qualificationId: string) {
+    return this.service.revokeOperatorQualification(user.tenantId, user.userId, id, qualificationId);
   }
 
   @Post()

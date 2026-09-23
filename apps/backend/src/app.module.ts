@@ -26,6 +26,7 @@ import { NonConformanceModule } from "./non-conformance/non-conformance.module";
 import { HierarchyModule } from "./hierarchy/hierarchy.module";
 import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
+import { CostingModule } from "./costing/costing.module";
 import { SchedulingModule } from "./scheduling/scheduling.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
@@ -79,6 +80,9 @@ import { ProductionCalendarModule } from "./production-calendar/production-calen
 import { ProductionDefinitionsModule } from "./production-definitions/production-definitions.module";
 import { ProductionMaterialModule } from "./production-material/production-material.module";
 import { QualityExecutionModule } from "./quality-execution/quality-execution.module";
+import { OnboardingImportModule } from "./onboarding-import/onboarding-import.module";
+import { MaterialSerialNumbersModule } from "./material-serial-numbers/material-serial-numbers.module";
+import { CustomerReturnsModule } from "./customer-returns/customer-returns.module";
 
 @Module({
   imports: [
@@ -108,6 +112,7 @@ import { QualityExecutionModule } from "./quality-execution/quality-execution.mo
     HierarchyModule,
     DigitalTwinModule,
     OeeModule,
+    CostingModule,
     SchedulingModule,
     AuditLogModule,
     ShiftReportModule,
@@ -159,6 +164,9 @@ import { QualityExecutionModule } from "./quality-execution/quality-execution.mo
     ProductionDefinitionsModule,
     ProductionMaterialModule,
     QualityExecutionModule,
+    OnboardingImportModule,
+    MaterialSerialNumbersModule,
+    CustomerReturnsModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
-import { createDeliverySchema, type CreateDeliveryDto } from "@ahkmes/shared-types";
+import { confirmDeliverySchema, createDeliverySchema, type ConfirmDeliveryDto, type CreateDeliveryDto } from "@ahkmes/shared-types";
 import { DeliveryService } from "./delivery.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
@@ -9,6 +9,7 @@ import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
 import type { AuthUser } from "../common/types";
+import { SkipAudit } from "../common/decorators/skip-audit.decorator";
 
 @Controller("deliveries")
 @RequirePage("sales-orders")
@@ -33,5 +34,16 @@ export class DeliveryController {
     @Body(new ZodValidationPipe(createDeliverySchema)) dto: CreateDeliveryDto,
   ) {
     return this.service.create(user.tenantId, user.userId, dto);
+  }
+
+  @Post(":id/confirm-delivery")
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  @SkipAudit()
+  confirmDelivery(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(confirmDeliverySchema)) dto: ConfirmDeliveryDto,
+  ) {
+    return this.service.confirmDelivery(user.tenantId, user.userId, id, dto);
   }
 }

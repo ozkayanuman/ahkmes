@@ -37,7 +37,7 @@ describe("SalesOrdersService.release", () => {
   });
 
   it("henüz üretime alınmamış satırlardan WorkOrder üretir, alınmışları skipler", async () => {
-    const tx = { workOrder: { findFirst: jest.fn().mockResolvedValue(null) } };
+    const tx = { workOrder: { findFirst: jest.fn().mockResolvedValue(null) }, $executeRaw: jest.fn().mockResolvedValue(0), $queryRawUnsafe: jest.fn().mockResolvedValue([]) };
     const { service, prisma, workOrders } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     workOrders.createWithRoute.mockResolvedValue({ id: "wo-new", woNo: "IE-2026-0001" });
     prisma.salesOrder.findFirst.mockResolvedValue(soFixture());

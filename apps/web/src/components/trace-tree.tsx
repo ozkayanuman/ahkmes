@@ -20,6 +20,20 @@ export interface ForwardTraceNode {
       forward: ForwardTraceNode | null;
     }[];
   }[];
+  customerDeliveries?: {
+    id: string;
+    qty: string;
+    customerReturnLines?: { customerReturn: { rmaNo: string; status: string; receivedAt: string | null } }[];
+    delivery: {
+      id: string;
+      dlvNo: string;
+      shippedDate: string;
+      deliveredAt: string | null;
+      carrierName: string | null;
+      trackingReference: string | null;
+      salesOrder: { soNo: string; customer: { id: string; name: string } };
+    };
+  }[];
 }
 
 export interface BackwardTraceNode {
@@ -38,7 +52,7 @@ export interface BackwardTraceNode {
 const INDENT = 16;
 
 export function ForwardTree({ node, depth = 0 }: { node: ForwardTraceNode; depth?: number }) {
-  if (node.consumedByWorkOrders.length === 0) return null;
+  if (node.consumedByWorkOrders.length === 0 && (node.customerDeliveries?.length ?? 0) === 0) return null;
   return (
     <div className="space-y-2" style={{ marginLeft: depth * INDENT }}>
       {node.consumedByWorkOrders.map((c) => (
@@ -54,6 +68,14 @@ export function ForwardTree({ node, depth = 0 }: { node: ForwardTraceNode; depth
               {p.forward && <ForwardTree node={p.forward} depth={depth + 1} />}
             </div>
           ))}
+        </div>
+      ))}
+      {(node.customerDeliveries ?? []).map((line) => (
+        <div key={`delivery-${line.id}`} className="rounded-md border border-sky-100 bg-sky-50 p-2">
+          <div className="font-medium">Müşteri sevkiyatı: {line.delivery.dlvNo} · {line.delivery.salesOrder.soNo}</div>
+          <div className="text-slate-600">{line.delivery.salesOrder.customer.name} · sevk {line.qty}</div>
+          <div className="text-slate-500">{line.delivery.deliveredAt ? "Teslim alındı" : "Yolda"}{line.delivery.carrierName ? ` · ${line.delivery.carrierName}` : ""}{line.delivery.trackingReference ? ` · ${line.delivery.trackingReference}` : ""}</div>
+          {(line.customerReturnLines ?? []).map(({ customerReturn }) => <div key={customerReturn.rmaNo} className="mt-1 text-amber-700">↩ RMA {customerReturn.rmaNo} · {customerReturn.status === "RECEIVED" ? "Karantinada" : customerReturn.status === "CANCELLED" ? "İptal" : "Kabul bekliyor"}</div>)}
         </div>
       ))}
     </div>

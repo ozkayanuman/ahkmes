@@ -8,6 +8,8 @@ function buildService(overrides: any = {}) {
     supplierInvoice: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn() },
     supplier: { findFirst: jest.fn().mockResolvedValue({ id: "s1" }) },
     supplierPayment: { create: jest.fn(), findFirst: jest.fn().mockResolvedValue(null) },
+    $executeRaw: jest.fn().mockResolvedValue(0),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
   prisma.$transaction = jest.fn((cb: any) => cb(prisma));

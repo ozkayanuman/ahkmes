@@ -40,6 +40,8 @@ function buildTx(overrides: Record<string, unknown> = {}) {
       update: jest.fn().mockResolvedValue({ id: "inv1", status: "CANCELLED" }),
     },
     salesOrderLine: { update: jest.fn().mockResolvedValue({}) },
+    $executeRaw: jest.fn().mockResolvedValue(0),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
 }

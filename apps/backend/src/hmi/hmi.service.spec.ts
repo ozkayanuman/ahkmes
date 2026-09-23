@@ -7,12 +7,13 @@ describe("HmiService", () => {
     productionRun: { findFirst: jest.fn() },
     productionExecutionEvent: { findMany: jest.fn() },
     reworkRequirement: { findMany: jest.fn() },
+    operatorMachineQualification: { findFirst: jest.fn() },
   };
   const production = { start: jest.fn(), complete: jest.fn() };
   const workOrders = { completeOperation: jest.fn() };
   const tooling = { getSetup: jest.fn() };
   const materials = { requirements: jest.fn(), backflush: jest.fn() };
-  const quality = { operationStatus: jest.fn() };
+  const quality = { operationStatus: jest.fn(), assertNoActiveHold: jest.fn() };
   const controllerVerification = { status: jest.fn() };
   const maintenanceAvailability = { status: jest.fn() };
   const maintenance = { createRequest: jest.fn(), declareBreakdown: jest.fn() };
@@ -83,5 +84,19 @@ describe("HmiService", () => {
     await expect(service.complete("tenant-a", "user-a", "operation-a", { goodCount: 1, scrapCount: 0 })).rejects.toBeInstanceOf(ConflictException);
     expect(production.complete).not.toHaveBeenCalled();
     expect(workOrders.completeOperation).not.toHaveBeenCalled();
+  });
+
+  it("blocks HMI start when an opted-in machine lacks an active operator qualification", async () => {
+    (service as any).operation = jest.fn().mockResolvedValue({
+      id: "operation-a", workOrderId: "work-order-a", machineId: "machine-a",
+      machine: { id: "machine-a", operatorQualificationRequired: true },
+      workOrder: { machine: null },
+    });
+    materials.requirements.mockResolvedValue([]);
+    prisma.operatorMachineQualification.findFirst.mockResolvedValue(null);
+
+    await expect(service.start("tenant-a", "operator-a", "operation-a")).rejects.toThrow("Operator is not qualified for this machine");
+
+    expect(production.start).not.toHaveBeenCalled();
   });
 });

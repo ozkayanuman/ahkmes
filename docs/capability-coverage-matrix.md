@@ -69,7 +69,7 @@ olduğu anlamına gelmez.
 | QMS_SPC_CALIBRATION | QMS | SPC/calibration | Hayır | Hayır | FUNCTIONAL_PARTIAL | `SpcMeasurement`, `Calibration` | SPC/calibration pages | Cp/Cpk, MSA/Gage R&R, equipment block/impact | P2 |
 | QMS_ADVANCED | QMS | Advanced quality | Hayır | Hayır | MISSING | — | — | FAI/AS9102, PPAP/APQP, supplier quality, complaint | P2 |
 | EAM_MAINTENANCE | EAM | Maintenance execution | Hayır | Evet* | FUNCTIONAL_PARTIAL | `MaintenanceOrder`, machine runtime/energy | maintenance page | asset hierarchy, PM plans, labor/cost/spares/downtime integration | P2 |
-| EAM_RELIABILITY | EAM | Reliability/spares | Hayır | Hayır | MISSING | — | — | condition/predictive, MTBF/MTTR, spare reservation | P2 |
+| EAM_RELIABILITY | EAM | Reliability/spares | Hayır | Hayır | FUNCTIONAL_PARTIAL | `MaintenanceSpareReservation`, runtime PM, evidence-based MTTR/calendar failure spacing | maintenance asset detail/API | condition/telemetry, qualified uptime MTBF and advanced reliability analytics | P2 |
 | APS_MRP | APS | Net MRP | Hayır | Hayır | FUNCTIONAL_PARTIAL | `mrp/*`, BOM/proposals | MRP page | multi-level, forecast/MPS, pegging, exception history | P2 |
 | APS_SCHEDULING | APS | Finite APS | Hayır | Hayır | MISSING | manual scheduling only | scheduling page | capacity calendars, finite solver, Gantt dispatch/what-if | P3 |
 | IIOT_MACHINE_CONNECT | IIOT | Edge/machine connect | Hayır | Hayır | PROTOTYPE | connector, OPC-UA, M80 adapter/simulator | machines/automation gateway pages | production M80 evidence, MTConnect/MQTT/Modbus policy, command approvals | P2 |

@@ -15,6 +15,8 @@ describe("CycleCountsService", () => {
       stockBalance: { findFirst: jest.fn().mockResolvedValue({ id: "sb1", qty: "8" }) },
       cycleCount: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn().mockResolvedValue({ id: "cc1" }) },
       auditLog: { create: jest.fn().mockResolvedValue({ id: "audit1" }) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     };
     const { service } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     await service.create("t1", "u1", { binId: "bin1", lines: [{ itemType: "MATERIAL", itemId: "m1", countedQty: 5 }] });

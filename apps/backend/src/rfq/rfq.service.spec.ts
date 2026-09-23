@@ -42,6 +42,8 @@ describe("RfqService.convert", () => {
         findFirst: jest.fn().mockResolvedValue(null),
       },
       rFQ: { update: jest.fn().mockResolvedValue({}) },
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     };
     const { service, prisma, outbox } = buildService({ $transaction: jest.fn((cb) => cb(tx)) });
     prisma.rFQ.findFirst.mockResolvedValue(rfqFixture());

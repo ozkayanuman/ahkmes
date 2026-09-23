@@ -88,6 +88,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/ar", label: "Alacaklar (AR)", icon: Landmark, page: "ar" },
       { to: "/ap", label: "Borçlar (AP)", icon: Receipt, page: "ap" },
       { to: "/users", label: "Kullanıcılar", icon: Wrench, page: "users", adminOnly: true },
+      { to: "/onboarding-import", label: "Veri Onboarding", icon: FileDown, adminOnly: true },
       { to: "/labor", label: "İşçilik Takibi", icon: Clock, page: "labor" },
       { to: "/permission-groups", label: "Rol Grupları", icon: Users2, adminOnly: true },
       { to: "/audit-log", label: "Denetim İzi", icon: History, page: "audit-log", adminOnly: true },
@@ -103,6 +104,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Boxes,
     items: [
       { to: "/work-orders", label: "İş Emirleri", icon: ClipboardList, page: "work-orders" },
+      { to: "/costing", label: "Üretim Maliyetleri", icon: Receipt, page: "work-orders" },
       { to: "/mrp", label: "MRP Planlama", icon: Boxes, page: "mrp" },
       { to: "/parts", label: "Parçalar", icon: Cog, page: "parts" },
       { to: "/suppliers", label: "Tedarikçiler", icon: Truck, page: "suppliers" },

@@ -11,6 +11,7 @@ import {
   createMaintenancePlanSchema,
   createMaintenanceRequestSchema,
   declareMaintenanceBreakdownSchema,
+  maintenanceSpareReservationSchema,
   maintenanceSpareMovementSchema,
   returnToServiceSchema,
   type CompleteMaintenanceOrderDto,
@@ -74,6 +75,9 @@ export class MaintenanceOrdersController {
   @Get("downtime-facts") @RequireActionPermissions("CMMS_READ")
   facts(@CurrentUser() u: AuthUser, @Query("machineId") machineId?: string, @Query("from") from?: string, @Query("to") to?: string) { return this.service.downtimeFacts(u.tenantId, machineId, from ? new Date(from) : undefined, to ? new Date(to) : undefined); }
 
+  @Get("reliability") @RequireActionPermissions("CMMS_READ")
+  reliability(@CurrentUser() u: AuthUser, @Query("machineId") machineId?: string, @Query("from") from?: string, @Query("to") to?: string) { return this.service.reliability(u.tenantId, machineId, from ? new Date(from) : undefined, to ? new Date(to) : undefined); }
+
   @Post("codes") @RequireActionPermissions("CMMS_CODE_ADMIN")
   code(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createMaintenanceCodeSchema)) dto: z.infer<typeof createMaintenanceCodeSchema>) { return this.service.createCode(u.tenantId, u.userId, dto); }
 
@@ -85,6 +89,9 @@ export class MaintenanceOrdersController {
 
   @Post("predictive-check") @RequireActionPermissions("CMMS_PM_ADMIN")
   predictive(@CurrentUser() u: AuthUser) { return this.service.predictiveCheck(u.tenantId, u.userId); }
+
+  @Post(":id/plan") @RequireActionPermissions("CMMS_WO_PLAN")
+  planOrder(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(commandSchema)) dto: z.infer<typeof commandSchema>) { return this.service.transition(u.tenantId, u.userId, id, "PLANNED", dto); }
 
   @Post(":id/release") @RequireActionPermissions("CMMS_WO_PLAN")
   release(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(commandSchema)) dto: z.infer<typeof commandSchema>) { return this.service.transition(u.tenantId, u.userId, id, "RELEASED", dto); }
@@ -118,6 +125,12 @@ export class MaintenanceOrdersController {
 
   @Post(":id/spares") @RequireActionPermissions("CMMS_WO_PLAN")
   spare(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(addMaintenanceSpareSchema)) dto: z.infer<typeof addMaintenanceSpareSchema>) { return this.service.addSpare(u.tenantId, u.userId, id, dto); }
+
+  @Post(":id/spares/:lineId/reservations") @RequireActionPermissions("CMMS_WO_PLAN")
+  reserveSpare(@CurrentUser() u: AuthUser, @Param("id") id: string, @Param("lineId") lineId: string, @Body(new ZodValidationPipe(maintenanceSpareReservationSchema)) dto: z.infer<typeof maintenanceSpareReservationSchema>) { return this.service.reserveSpare(u.tenantId, u.userId, id, lineId, dto); }
+
+  @Post(":id/spares/:lineId/reservations/:reservationId/cancel") @RequireActionPermissions("CMMS_WO_PLAN")
+  cancelSpareReservation(@CurrentUser() u: AuthUser, @Param("id") id: string, @Param("lineId") lineId: string, @Param("reservationId") reservationId: string) { return this.service.cancelSpareReservation(u.tenantId, u.userId, id, lineId, reservationId); }
 
   @Post(":id/spares/:lineId/issue") @RequireActionPermissions("CMMS_SPARE_ISSUE")
   issue(@CurrentUser() u: AuthUser, @Param("id") id: string, @Param("lineId") lineId: string, @Body(new ZodValidationPipe(maintenanceSpareMovementSchema)) dto: z.infer<typeof maintenanceSpareMovementSchema>) { return this.service.issueSpare(u.tenantId, u.userId, id, lineId, dto); }

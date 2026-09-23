@@ -13,6 +13,7 @@ const COCKPIT = {
   summary: { metrics: { oee: { value: 0.5 }, availability: { value: 0.8 }, performance: { value: 0.75 }, quality: { value: 0.9 }, dataQuality: "PARTIAL", issues: [{ code: "STALE_SOURCE" }] } },
   machines: [{ id: "m1", name: "CNC-1", currentStatus: "RUNNING", activeWorkOrder: { id: "wo-1", woNo: "WO-1", status: "IN_PROGRESS" }, oee: { value: null, dataQuality: "INSUFFICIENT_DATA", facts: { goodCount: 0, scrapCount: 0 }, issues: [] }, maintenanceOrderIds: [] }],
   blockers: { maintenance: [], qualityHolds: [], materialExceptions: [] },
+  workOrders: { currentStateAt: "2026-08-26T12:00:00.000Z", summary: { openCount: 3, inProductionCount: 2, waitingMaterialCount: 1, overdueCount: 0, blockedOperationCount: 0 }, overdue: [] },
 };
 
 function renderPage() {
@@ -29,7 +30,7 @@ describe("OeeCockpitPage", () => {
     await screen.findByRole("option", { name: "Ana Fabrika" });
     await user.selectOptions(await screen.findByLabelText("Tesis"), "p1");
 
-    await screen.findByText("OEE Cockpit");
+    await screen.findByText("Operasyon Cockpit");
     await waitFor(() => expect(apiGet).toHaveBeenCalledWith(expect.stringMatching(/^\/oee\/cockpit\?/)));
     expect(screen.getByText("Veri yetersiz")).toBeInTheDocument();
     expect(screen.getByText("%50")).toBeInTheDocument();

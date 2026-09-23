@@ -2,9 +2,9 @@ import { Body, Controller, Get, Param, Patch, Post, UseGuards } from "@nestjs/co
 import {
   createFixtureCompatibilitySchema, createFixtureDefinitionSchema, createOperationFixtureRequirementSchema, createOperationToolRequirementSchema,
   createPhysicalFixtureSchema, createPhysicalToolSchema, createToolAssemblySchema, createToolCompatibilitySchema, createToolComponentSchema,
-  createToolDefinitionSchema, invalidateSetupSchema, manualToolLifeAdjustmentSchema, setupAssignmentSchema, updateToolDefinitionSchema,
+  createToolDefinitionSchema, fixtureCustodySchema, invalidateSetupSchema, manualToolLifeAdjustmentSchema, recordToolPresetSchema, setupAssignmentSchema, updatePhysicalToolStateSchema, updateToolDefinitionSchema,
   type CreateFixtureDefinitionDto, type CreatePhysicalFixtureDto, type CreatePhysicalToolDto, type CreateToolAssemblyDto, type CreateToolComponentDto,
-  type CreateToolDefinitionDto, type SetupAssignmentDto, type UpdateToolDefinitionDto,
+  type CreateToolDefinitionDto, type FixtureCustodyDto, type RecordToolPresetDto, type SetupAssignmentDto, type UpdatePhysicalToolStateDto, type UpdateToolDefinitionDto,
 } from "@ahkmes/shared-types";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { RequirePage } from "../common/decorators/require-page.decorator";
@@ -35,11 +35,17 @@ export class ToolingController {
   @Post("tool-components") @RequireActionPermissions("TOOL_MANAGE") createToolComponent(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createToolComponentSchema)) dto: CreateToolComponentDto) { return this.service.createToolComponent(u.tenantId, dto); }
   @Post("tool-assemblies") @RequireActionPermissions("TOOL_ASSEMBLY_MANAGE") createToolAssembly(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createToolAssemblySchema)) dto: CreateToolAssemblyDto) { return this.service.createToolAssembly(u.tenantId, dto); }
   @Post("physical-tools") @RequireActionPermissions("TOOL_MANAGE") createPhysicalTool(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createPhysicalToolSchema)) dto: CreatePhysicalToolDto) { return this.service.createPhysicalTool(u.tenantId, dto); }
+  @Post("physical-tools/:id/state") @RequireActionPermissions("TOOL_MANAGE") updatePhysicalToolState(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(updatePhysicalToolStateSchema)) dto: UpdatePhysicalToolStateDto) { return this.service.updatePhysicalToolState(u.tenantId, u.userId, id, dto); }
+  @Get("physical-tools/:id/presets") @RequireActionPermissions("TOOL_READ") presetHistory(@CurrentUser() u: AuthUser, @Param("id") id: string) { return this.service.presetHistory(u.tenantId, id); }
+  @Post("physical-tools/:id/presets") @RequireActionPermissions("TOOL_MANAGE") recordToolPreset(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(recordToolPresetSchema)) dto: RecordToolPresetDto) { return this.service.recordToolPreset(u.tenantId, u.userId, id, dto); }
   @Get("physical-tools/:id/life-events") @RequireActionPermissions("TOOL_READ") lifeHistory(@CurrentUser() u: AuthUser, @Param("id") id: string) { return this.service.lifeHistory(u.tenantId, id); }
   @Post("physical-tools/:id/life-adjustments") @RequireActionPermissions("TOOL_LIFE_ADJUST") adjustLife(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(manualToolLifeAdjustmentSchema)) dto: { consumedLife: number; version: number; reason: string }) { return this.service.adjustLife(u.tenantId, u.userId, id, dto); }
 
   @Post("fixture-definitions") @RequireActionPermissions("FIXTURE_MANAGE") createFixtureDefinition(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createFixtureDefinitionSchema)) dto: CreateFixtureDefinitionDto) { return this.service.createFixtureDefinition(u.tenantId, dto); }
   @Post("physical-fixtures") @RequireActionPermissions("FIXTURE_MANAGE") createPhysicalFixture(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createPhysicalFixtureSchema)) dto: CreatePhysicalFixtureDto) { return this.service.createPhysicalFixture(u.tenantId, dto); }
+  @Get("physical-fixtures/:id/custody-events") @RequireActionPermissions("FIXTURE_READ") fixtureCustodyHistory(@CurrentUser() u: AuthUser, @Param("id") id: string) { return this.service.fixtureCustodyHistory(u.tenantId, id); }
+  @Post("physical-fixtures/:id/check-out") @RequireActionPermissions("FIXTURE_MANAGE") checkOutPhysicalFixture(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(fixtureCustodySchema)) dto: FixtureCustodyDto) { return this.service.checkOutPhysicalFixture(u.tenantId, u.userId, id, dto); }
+  @Post("physical-fixtures/:id/check-in") @RequireActionPermissions("FIXTURE_MANAGE") checkInPhysicalFixture(@CurrentUser() u: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(fixtureCustodySchema)) dto: FixtureCustodyDto) { return this.service.checkInPhysicalFixture(u.tenantId, u.userId, id, dto); }
   @Post("tool-compatibilities") @RequireActionPermissions("TOOL_MANAGE") addToolCompatibility(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createToolCompatibilitySchema)) dto: { machineId: string; toolDefinitionId?: string; toolAssemblyId?: string }) { return this.service.addToolCompatibility(u.tenantId, dto); }
   @Post("fixture-compatibilities") @RequireActionPermissions("FIXTURE_MANAGE") addFixtureCompatibility(@CurrentUser() u: AuthUser, @Body(new ZodValidationPipe(createFixtureCompatibilitySchema)) dto: { machineId: string; fixtureDefinitionId: string }) { return this.service.addFixtureCompatibility(u.tenantId, dto); }
 

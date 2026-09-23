@@ -93,9 +93,13 @@ warning window, priority and default checklist. `UPCOMING`, `DUE` and
 `OVERDUE` are derived from the exact plant-local due timestamp. Generation is
 idempotent per plan occurrence and replay-safe under PostgreSQL concurrency.
 
-The legacy MES-run wall-clock counter is not trustworthy universal machine
-runtime. Therefore `METER_BASED_PM = P1 / NOT_INCLUDED_IN_V1`; CNC-V1-07R does
-not claim controller-runtime preventive maintenance.
+Completed production runs increment `Machine.runtimeHours`. An authorized
+runtime-PM check creates one draft PREVENTIVE work order for the next configured
+threshold, keyed by the threshold rather than by wall-clock time. Repeated or
+concurrent checks therefore reuse the same order; completion advances
+`lastPmRuntimeHours` to the then-current recorded runtime. This is explicitly a
+production-runtime-derived PM signal, not a claim that an unobserved controller
+meter was read.
 
 ## Technicians, labor, checklist and spares
 
@@ -105,18 +109,19 @@ records a technician, work date, start/end or positive derived duration and
 notes. Required ordered checklist tasks block completion until an actor and
 timestamp are recorded.
 
-Planned spare lines record planned, issued and returned quantities. Actual
-issue/return uses distinct `MAINTENANCE_ISSUE` and `MAINTENANCE_RETURN`
-movements through the canonical inventory service. The command locks the
-physical balance, rejects held lots, respects active production allocations,
-prevents negative stock and writes material history atomically and
-idempotently.
+Planned spare lines record planned, reserved, issued and returned quantities.
+`MaintenanceSpareReservation` holds a specific bin/lot allocation without
+moving physical on-hand. Reservation and direct issue lock the physical balance,
+reject held lots, respect both active production and active maintenance
+allocations, and write tenant-scoped idempotent audit/outbox evidence.
 
-Production reservations are currently owned by immutable
-`ProductionMaterialRequirement`. CNC-V1-07R deliberately does not create a
-parallel CMMS reservation engine. Maintenance spare reservation is
-`NOT_INCLUDED_IN_V1`; a future implementation must generalize the common
-allocation boundary without weakening CNC-V1-02.
+Reservation-backed issue consumes only the named reservation and reduces the
+line's open reserved quantity. A partially or fully issued reservation cannot be
+cancelled; an open reservation can be cancelled, releasing its allocation.
+Cancelling a maintenance order is blocked until its open spare reservations are
+explicitly released. `ProductionMaterialService.availability()` and production
+reservation creation include the same CMMS holds, so neither workflow can
+over-allocate a shared stock balance.
 
 ## Return to service and concurrency
 
@@ -129,16 +134,19 @@ inconsistent machine/downtime/work-order combination.
 
 Critical PostgreSQL evidence is defined in
 `apps/backend/test/cnc-v1-07r.e2e-spec.ts`: simultaneous breakdown declaration,
-breakdown conversion, limited-stock spare issues, PM replay, return to service,
-restart durability, tenant/plant rejection and forced transaction rollback.
+breakdown conversion, CMMS spare reservation/idempotency/issue/cancellation,
+limited-stock spare issues, PM replay, return to service, restart durability,
+tenant/plant rejection and forced transaction rollback.
 
 ## Reliability reality and known V1 limits
 
 Repair duration/MTTR input is the explicit maintenance work
 `actualStart → actualFinish` interval; downtime is reported separately and is
-not relabelled as repair time. Production-grade MTBF is not claimed because a
-trustworthy operating-time denominator is not universally available. Failure
-counts, history and raw intervals are exposed for the future OEE/runtime layer.
+not relabelled as repair time. The asset projection exposes MTTR with its repair
+sample count and the mean calendar interval between resolved failure starts with
+its interval sample count. This latter value is intentionally labelled
+`mtbfCalendarHours`, not operating-time MTBF: a trustworthy universal uptime
+denominator is not yet available.
 
 Advanced EAM accounting, depreciation, predictive/AI maintenance, workforce
 scheduling, contractors, procurement, spare-parts MRP, telemetry-created

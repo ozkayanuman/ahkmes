@@ -1,6 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { Lot, LotAcceptanceStatus, Prisma, StockItemType } from "@prisma/client";
-import type { CreateLotDto, DecideLotAcceptanceDto } from "@ahkmes/shared-types";
+import { IncomingLotInspectionDecision, Lot, LotAcceptanceStatus, Prisma, StockItemType } from "@prisma/client";
+import type { CreateLotDto, CreateSupplierLotReturnDto, DecideLotAcceptanceDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { writeTransactionalAudit } from "../common/transactional-audit";
 
@@ -39,22 +39,27 @@ export class LotsService {
   }
 
   async decideAcceptance(tenantId: string, userId: string, id: string, dto: DecideLotAcceptanceDto) {
-    const lot = await this.findOne(tenantId, id);
-    if (dto.status === "PENDING") throw new ConflictException("Kabul kararı PENDING olamaz");
-    if (lot.acceptanceStatus === "ACCEPTED" || lot.acceptanceStatus === "REJECTED") {
-      throw new ConflictException("Nihai kabul/red kararı değiştirilmez; düzeltme için yeni lot açın");
-    }
-    if (dto.status === "ACCEPTED" && lot.itemType === "MATERIAL") {
-      const material = await this.prisma.material.findFirst({ where: { id: lot.itemId, tenantId } });
-      if (!material) throw new NotFoundException("Lot malzemesi bulunamadı");
-      if (material.certificateRequired && !lot.certificateNo) {
-        throw new ConflictException("Bu malzeme için sertifika numarası olmadan kabul verilemez");
-      }
-    }
     return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Lot" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      const lot = await tx.lot.findFirst({ where: { id, tenantId } });
+      if (!lot) throw new NotFoundException("Lot bulunamadı");
+      if (dto.status === "PENDING") throw new ConflictException("Kabul kararı PENDING olamaz");
+      if (lot.acceptanceStatus === "ACCEPTED" || lot.acceptanceStatus === "REJECTED") {
+        throw new ConflictException("Nihai kabul/red kararı değiştirilmez; düzeltme için yeni lot açın");
+      }
+      if (dto.status === "ACCEPTED" && lot.itemType === "MATERIAL") {
+        const material = await tx.material.findFirst({ where: { id: lot.itemId, tenantId } });
+        if (!material) throw new NotFoundException("Lot malzemesi bulunamadı");
+        if (material.certificateRequired && !lot.certificateNo) {
+          throw new ConflictException("Bu malzeme için sertifika numarası olmadan kabul verilemez");
+        }
+      }
       const updated = await tx.lot.update({
         where: { id: lot.id },
         data: { acceptanceStatus: dto.status as LotAcceptanceStatus, acceptanceNote: dto.note, acceptedById: userId, acceptedAt: new Date() },
+      });
+      await tx.incomingLotInspection.create({
+        data: { tenantId, lotId: lot.id, decision: dto.status as IncomingLotInspectionDecision, note: dto.note, inspectedById: userId },
       });
       await writeTransactionalAudit(tx, {
         tenantId,
@@ -66,6 +71,45 @@ export class LotsService {
         after: updated,
       });
       return updated;
+    });
+  }
+
+  async incomingInspectionHistory(tenantId: string, lotId: string) {
+    await this.findOne(tenantId, lotId);
+    return this.prisma.incomingLotInspection.findMany({
+      where: { tenantId, lotId },
+      include: { inspectedBy: { select: { id: true, name: true } } },
+      orderBy: { inspectedAt: "desc" },
+    });
+  }
+
+  async supplierReturnHistory(tenantId: string, lotId: string) {
+    await this.findOne(tenantId, lotId);
+    return this.prisma.supplierLotReturn.findMany({
+      where: { tenantId, lotId },
+      include: { supplier: { select: { id: true, name: true } }, returnedBy: { select: { id: true, name: true } } },
+      orderBy: { returnedAt: "desc" },
+    });
+  }
+
+  async recordSupplierLotReturn(tenantId: string, userId: string, lotId: string, dto: CreateSupplierLotReturnDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Lot" WHERE "id" = ${lotId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      const lot = await tx.lot.findFirst({ where: { id: lotId, tenantId } });
+      if (!lot) throw new NotFoundException("Lot bulunamadı");
+      if (lot.itemType !== "MATERIAL" || lot.acceptanceStatus !== "REJECTED") throw new ConflictException("Yalnızca reddedilmiş malzeme lotu tedarikçiye iade edilebilir");
+      const supplier = await tx.supplier.findFirst({ where: { id: dto.supplierId, tenantId } });
+      if (!supplier) throw new NotFoundException("Tedarikçi bulunamadı");
+      if (await tx.supplierLotReturn.findFirst({ where: { tenantId, lotId } })) throw new ConflictException("Bu lot için tedarikçi iadesi zaten kaydedilmiş");
+      let returned;
+      try {
+        returned = await tx.supplierLotReturn.create({ data: { tenantId, lotId, supplierId: supplier.id, quantity: dto.quantity, shipmentReference: dto.shipmentReference, reason: dto.reason, returnedById: userId } });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new ConflictException("Bu lot için tedarikçi iadesi zaten kaydedilmiş");
+        throw error;
+      }
+      await writeTransactionalAudit(tx, { tenantId, userId, entity: "supplier-lot-returns", entityId: returned.id, action: "CREATE", after: returned });
+      return returned;
     });
   }
 
@@ -105,8 +149,8 @@ export class LotsService {
     lot: Lot,
     depth: number,
     visited: Set<string>,
-  ): Promise<{ consumedByWorkOrders: unknown[] }> {
-    if (depth >= LotsService.MAX_TRACE_DEPTH) return { consumedByWorkOrders: [] };
+  ): Promise<{ consumedByWorkOrders: unknown[]; customerDeliveries: unknown[] }> {
+    if (depth >= LotsService.MAX_TRACE_DEPTH) return { consumedByWorkOrders: [], customerDeliveries: [] };
 
     const consumptions = await this.prisma.materialConsumption.findMany({
       where: { tenantId, lotId: lot.id },
@@ -141,7 +185,24 @@ export class LotsService {
         ),
       })),
     );
-    return { consumedByWorkOrders };
+    // DeliveryLine carries the physical lot selected at shipment. Keeping this
+    // query beside the production genealogy closes lot → customer traceability
+    // without inferring a shipment from aggregate stock balances.
+    const customerDeliveries = await this.prisma.deliveryLine.findMany({
+      where: { tenantId, lotId: lot.id },
+      select: {
+        id: true,
+        qty: true,
+        customerReturnLines: { select: { customerReturn: { select: { rmaNo: true, status: true, receivedAt: true } } } },
+        delivery: {
+          select: {
+            id: true, dlvNo: true, shippedDate: true, deliveredAt: true, carrierName: true, trackingReference: true,
+            salesOrder: { select: { soNo: true, customer: { select: { id: true, name: true } } } },
+          },
+        },
+      },
+    });
+    return { consumedByWorkOrders, customerDeliveries };
   }
 
   /** Bu lotu üreten WorkOrder + tükettiği lot(lar) — tüketilen bir PART lotu varsa

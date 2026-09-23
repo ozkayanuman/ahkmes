@@ -3,12 +3,14 @@ import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "../src/app.module";
 import { OeeCalculationService } from "../src/oee/oee-calculation.service";
+import { CostingService } from "../src/costing/costing.service";
 import { PrismaService } from "../src/prisma/prisma.service";
 
 describe("CNC-V1-00 restored deployment verification", () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let calculation: OeeCalculationService;
+  let costing: CostingService;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -16,6 +18,7 @@ describe("CNC-V1-00 restored deployment verification", () => {
     await app.init();
     prisma = app.get(PrismaService);
     calculation = app.get(OeeCalculationService);
+    costing = app.get(CostingService);
   });
   afterAll(async () => app.close());
 
@@ -97,5 +100,14 @@ describe("CNC-V1-00 restored deployment verification", () => {
     expect(result.metrics.facts.goodCount).toBe(700);
     expect(result.timeline.durationByBucket.UNPLANNED_BREAKDOWN).toBe(30 * 60);
     expect(result.timeline.durationByBucket.QUALITY_HOLD).toBe(15 * 60);
+  });
+
+  it("preserves the pinned costing baseline and recalculates it after isolated restore", async () => {
+    const workOrder = await prisma.workOrder.findFirst({ where: { costBaseline: { is: { rateCardId: { not: null } } } }, select: { id: true, tenantId: true, costBaseline: { select: { id: true, rateCardId: true } } }, orderBy: { createdAt: "desc" } });
+    expect(workOrder?.costBaseline?.rateCardId).toBeTruthy();
+    const result = await costing.calculate(workOrder!.tenantId, workOrder!.id, new Date("2026-09-09T11:00:00.000Z"));
+    expect(result.baseline).toEqual(expect.objectContaining({ id: workOrder!.costBaseline!.id, rateCardId: workOrder!.costBaseline!.rateCardId }));
+    expect(result.actual.total).toBe(315);
+    expect(result.unitCost).toBe(157.5);
   });
 });

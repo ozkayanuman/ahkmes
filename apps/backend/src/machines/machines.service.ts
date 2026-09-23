@@ -13,12 +13,14 @@ import type {
   ControllerObservationDto,
   UpdateMachineDto,
   UpdateMachineTagDto,
+  GrantOperatorMachineQualificationDto,
 } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { DowntimeService } from "../downtime/downtime.service";
 import { OutboxService } from "../outbox/outbox.service";
 import { MachineMaintenanceAvailabilityService } from "./machine-maintenance-availability.service";
+import { writeTransactionalAudit } from "../common/transactional-audit";
 
 const CONNECTOR_USER_EMAIL = "machine-connector@ahkmes.local";
 
@@ -53,6 +55,7 @@ export class MachinesService {
     connectorConfig: true,
     controllerVerificationRequired: true,
     controllerFreshnessSeconds: true,
+    operatorQualificationRequired: true,
     unitId: true,
     runtimeHours: true,
     pmIntervalHours: true,
@@ -108,6 +111,66 @@ export class MachinesService {
       where: { id },
       data: { isActive: false },
       select: MachinesService.PUBLIC_SELECT,
+    });
+  }
+
+  async listOperatorQualifications(tenantId: string, machineId: string) {
+    await this.findOne(tenantId, machineId);
+    return this.prisma.operatorMachineQualification.findMany({
+      where: { tenantId, machineId },
+      include: {
+        operator: { select: { id: true, name: true, role: true, isActive: true } },
+        grantedBy: { select: { id: true, name: true } },
+        revokedBy: { select: { id: true, name: true } },
+      },
+      orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+    });
+  }
+
+  async grantOperatorQualification(tenantId: string, grantedById: string, machineId: string, dto: GrantOperatorMachineQualificationDto) {
+    if (dto.expiresAt && dto.expiresAt <= new Date()) throw new ConflictException("Qualification expiry must be in the future");
+    return this.prisma.$transaction(async (tx) => {
+      const machine = await tx.machine.findFirst({ where: { id: machineId, tenantId } });
+      if (!machine) throw new NotFoundException("Tezgah bulunamadı");
+      const operator = await tx.user.findFirst({ where: { id: dto.operatorId, tenantId, isActive: true } });
+      if (!operator) throw new NotFoundException("Aktif kullanıcı bulunamadı");
+      const before = await tx.operatorMachineQualification.findFirst({ where: { tenantId, machineId, operatorId: operator.id } });
+      const qualification = await tx.operatorMachineQualification.upsert({
+        where: { tenantId_machineId_operatorId: { tenantId, machineId, operatorId: operator.id } },
+        create: {
+          tenantId, machineId, operatorId: operator.id, status: "ACTIVE",
+          qualificationReference: dto.qualificationReference ?? null, expiresAt: dto.expiresAt,
+          grantedById, grantedAt: new Date(), revokedById: null, revokedAt: null,
+        },
+        update: {
+          status: "ACTIVE", qualificationReference: dto.qualificationReference ?? null, expiresAt: dto.expiresAt,
+          grantedById, grantedAt: new Date(), revokedById: null, revokedAt: null,
+        },
+      });
+      await writeTransactionalAudit(tx, {
+        tenantId, userId: grantedById, entity: "operator-machine-qualifications", entityId: qualification.id,
+        action: before ? "UPDATE" : "CREATE", before: before ?? undefined, after: qualification,
+      });
+      await this.outbox.record(tx, tenantId, "machine", machineId, "machine.updated", { id: machineId, operatorQualificationRequired: machine.operatorQualificationRequired });
+      return qualification;
+    });
+  }
+
+  async revokeOperatorQualification(tenantId: string, revokedById: string, machineId: string, qualificationId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const qualification = await tx.operatorMachineQualification.findFirst({ where: { id: qualificationId, tenantId, machineId } });
+      if (!qualification) throw new NotFoundException("Operatör yetkinlik kaydı bulunamadı");
+      if (qualification.status === "REVOKED") return qualification;
+      const revoked = await tx.operatorMachineQualification.update({
+        where: { id: qualification.id },
+        data: { status: "REVOKED", revokedById, revokedAt: new Date() },
+      });
+      await writeTransactionalAudit(tx, {
+        tenantId, userId: revokedById, entity: "operator-machine-qualifications", entityId: revoked.id,
+        action: "STATUS_CHANGE", before: qualification, after: revoked,
+      });
+      await this.outbox.record(tx, tenantId, "machine", machineId, "machine.updated", { id: machineId, operatorQualificationRequired: true });
+      return revoked;
     });
   }
 

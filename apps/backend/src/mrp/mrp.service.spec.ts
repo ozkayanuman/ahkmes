@@ -22,6 +22,8 @@ function buildPrismaMock(overrides: any = {}) {
     },
     approvalRequest: { findFirst: jest.fn().mockResolvedValue(null) },
     $transaction: jest.fn(),
+    $executeRaw: jest.fn().mockResolvedValue(0),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
 }
@@ -36,6 +38,8 @@ function buildTxMock() {
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({ id: "prp1", prNo: "PRP-2026-0001" }),
     },
+    $executeRaw: jest.fn().mockResolvedValue(0),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([]),
   };
 }
 

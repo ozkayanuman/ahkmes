@@ -7,6 +7,7 @@ import { AppModule } from "../src/app.module";
 import { InventoryService } from "../src/inventory/inventory.service";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { ProductionService } from "../src/production/production.service";
+import { ProductionMaterialService } from "../src/production-material/production-material.service";
 
 const stamp = Date.now();
 
@@ -15,6 +16,7 @@ describe("CNC-V1-07R commercial CMMS closure (PostgreSQL e2e)", () => {
   let prisma: PrismaService;
   let inventory: InventoryService;
   let production: ProductionService;
+  let materials: ProductionMaterialService;
   let token: string;
   let tenantId: string;
   let userId: string;
@@ -34,6 +36,7 @@ describe("CNC-V1-07R commercial CMMS closure (PostgreSQL e2e)", () => {
     prisma = app.get(PrismaService);
     inventory = app.get(InventoryService);
     production = app.get(ProductionService);
+    materials = app.get(ProductionMaterialService);
 
     tenantId = `cnc-v1-07r-${stamp}`;
     await prisma.tenant.create({ data: { id: tenantId, name: `CMMS ${stamp}`, timezone: "Europe/Istanbul" } });
@@ -117,8 +120,33 @@ describe("CNC-V1-07R commercial CMMS closure (PostgreSQL e2e)", () => {
     expect(await prisma.maintenanceOrder.count({ where: { tenantId, maintenancePlanId: plan.body.id, occurrenceDueAt: new Date(dueAt) } })).toBe(1);
   });
 
-  it("N is intentionally not implemented: V1 does not duplicate production reservation ownership", async () => {
-    expect("MAINTENANCE_SPARE_RESERVATION_NOT_INCLUDED").toContain("NOT_INCLUDED");
+  it("N creates one runtime-PM work order per threshold and advances the baseline only on completion", async () => {
+    await prisma.machine.update({ where: { id: machineId }, data: { runtimeHours: 120, lastPmRuntimeHours: 0, pmIntervalHours: 100 } });
+    const first = await auth(api().post("/maintenance-orders/predictive-check").send({})).expect(201);
+    expect(first.body).toMatchObject({ checked: 1, due: 1, created: 1, skippedWithoutPlant: 0, qualification: "PRODUCTION_RUNTIME_DERIVED_PM" });
+    const runtimeOrderId = first.body.orders[0];
+    const replay = await auth(api().post("/maintenance-orders/predictive-check").send({})).expect(201);
+    expect(replay.body).toMatchObject({ due: 1, created: 0, orders: [runtimeOrderId] });
+    await auth(api().post(`/maintenance-orders/${runtimeOrderId}/release`).send({ idempotencyKey: `runtime-release-${stamp}` })).expect(201);
+    await auth(api().post(`/maintenance-orders/${runtimeOrderId}/start`).send({ idempotencyKey: `runtime-start-${stamp}` })).expect(201);
+    await auth(api().post(`/maintenance-orders/${runtimeOrderId}/complete`).send({ idempotencyKey: `runtime-complete-${stamp}` })).expect(201);
+    expect((await prisma.machine.findUniqueOrThrow({ where: { id: machineId } })).lastPmRuntimeHours.toString()).toBe("120");
+  });
+
+  it("N2 reserves CMMS spares idempotently, exposes the hold to generic availability, and consumes the hold on issue", async () => {
+    const breakdownOrder = await prisma.maintenanceOrder.findFirstOrThrow({ where: { tenantId, breakdownId: { not: null } } });
+    const spare = await auth(api().post(`/maintenance-orders/${breakdownOrder.id}/spares`).send({ itemType: "MATERIAL", itemId: materialId, plannedQuantity: 3 })).expect(201);
+    const reservePayload = { quantity: 2, binId, idempotencyKey: `reserve-${stamp}` };
+    const reservation = await auth(api().post(`/maintenance-orders/${breakdownOrder.id}/spares/${spare.body.id}/reservations`).send(reservePayload)).expect(201);
+    const replay = await auth(api().post(`/maintenance-orders/${breakdownOrder.id}/spares/${spare.body.id}/reservations`).send(reservePayload)).expect(201);
+    expect(replay.body.id).toBe(reservation.body.id);
+    expect(await materials.availability(tenantId, materialId, binId)).toMatchObject({ onHand: "10", reserved: "2", available: "8" });
+    await auth(api().post(`/maintenance-orders/${breakdownOrder.id}/spares/${spare.body.id}/issue`).send({ quantity: 1, binId, reservationId: reservation.body.id, idempotencyKey: `reserved-issue-a-${stamp}` })).expect(201);
+    expect(await prisma.maintenanceSpareLine.findUniqueOrThrow({ where: { id: spare.body.id } })).toMatchObject({ reservedQty: expect.anything(), issuedQty: expect.anything() });
+    expect((await prisma.maintenanceSpareLine.findUniqueOrThrow({ where: { id: spare.body.id } })).reservedQty.toString()).toBe("1");
+    await auth(api().post(`/maintenance-orders/${breakdownOrder.id}/spares/${spare.body.id}/reservations/${reservation.body.id}/cancel`).send({})).expect(409);
+    await auth(api().post(`/maintenance-orders/${breakdownOrder.id}/spares/${spare.body.id}/issue`).send({ quantity: 1, binId, reservationId: reservation.body.id, idempotencyKey: `reserved-issue-b-${stamp}` })).expect(201);
+    expect(await materials.availability(tenantId, materialId, binId)).toMatchObject({ onHand: "8", reserved: "0", available: "8" });
   });
 
   it("O-Q issues and returns ledger-backed spares idempotently and serializes a shortage race", async () => {

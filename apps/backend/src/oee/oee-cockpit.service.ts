@@ -15,7 +15,7 @@ export class OeeCockpitService {
 
   async read(request: CockpitRequest) {
     const cutoff = new Date(Math.min(request.to.getTime(), request.asOf.getTime()));
-    const [plant, machines, maintenanceOrders, qualityHolds, materialExceptions, summary] = await Promise.all([
+    const [plant, machines, maintenanceOrders, qualityHolds, materialExceptions, workOrders, summary] = await Promise.all([
       this.prisma.plant.findFirst({ where: { id: request.plantId, tenantId: request.tenantId }, select: { id: true, name: true } }),
       this.prisma.machine.findMany({
         where: { tenantId: request.tenantId, plantId: request.plantId },
@@ -37,6 +37,17 @@ export class OeeCockpitService {
         select: { id: true, type: true, severity: true, itemType: true, itemId: true, requiredDate: true, explanation: true },
         orderBy: [{ severity: "desc" }, { requiredDate: "asc" }],
       }),
+      // Work-order state is intentionally a current WIP projection, not an
+      // as-of reconstruction like the timestamped OEE facts above.
+      this.prisma.workOrder.findMany({
+        where: { tenantId: request.tenantId, plantId: request.plantId, status: { in: ["PLANNED", "RELEASED", "WAITING_MATERIAL", "IN_PRODUCTION"] } },
+        select: {
+          id: true, woNo: true, dueDate: true, quantity: true, status: true,
+          part: { select: { id: true, partNo: true, name: true } },
+          operations: { select: { status: true } },
+        },
+        orderBy: [{ dueDate: "asc" }, { woNo: "asc" }],
+      }),
       this.calculation.calculate(request),
     ]);
 
@@ -50,9 +61,11 @@ export class OeeCockpitService {
     const byWorkOrder = await this.calculation.calculateForWorkOrders(request, [...machineByWorkOrder.keys()]);
 
     const maintenanceByMachine = groupIds(maintenanceOrders, (item) => item.machineId);
+    const overdueWorkOrders = workOrders.filter((order) => order.dueDate < cutoff);
+    const workOrderStateAt = new Date();
     return {
       plant,
-      context: { plantId: request.plantId, from: request.from, to: request.to, asOf: cutoff, lastRefreshedAt: new Date() },
+      context: { plantId: request.plantId, from: request.from, to: request.to, asOf: cutoff, lastRefreshedAt: workOrderStateAt, workOrderStateAt },
       summary: { metrics: summary.metrics, sources: summary.sources, timeline: summary.timeline },
       machines: machines.map((machine) => {
         const calculation = machine.activeWorkOrder ? byWorkOrder.get(machine.activeWorkOrder.id) : undefined;
@@ -67,6 +80,25 @@ export class OeeCockpitService {
         maintenance: maintenanceOrders,
         qualityHolds: qualityHolds.map((hold) => ({ ...hold, quantity: numberValue(hold.quantity) })),
         materialExceptions,
+      },
+      workOrders: {
+        currentStateAt: workOrderStateAt,
+        summary: {
+          openCount: workOrders.length,
+          inProductionCount: workOrders.filter((order) => order.status === "IN_PRODUCTION").length,
+          waitingMaterialCount: workOrders.filter((order) => order.status === "WAITING_MATERIAL").length,
+          overdueCount: overdueWorkOrders.length,
+          blockedOperationCount: workOrders.reduce((total, order) => total + order.operations.filter((operation) => operation.status === "BLOCKED").length, 0),
+        },
+        overdue: overdueWorkOrders.slice(0, 20).map((order) => ({
+          id: order.id,
+          woNo: order.woNo,
+          status: order.status,
+          dueDate: order.dueDate,
+          quantity: numberValue(order.quantity),
+          part: { id: order.part.id, code: order.part.partNo, name: order.part.name },
+          blockedOperationCount: order.operations.filter((operation) => operation.status === "BLOCKED").length,
+        })),
       },
     };
   }

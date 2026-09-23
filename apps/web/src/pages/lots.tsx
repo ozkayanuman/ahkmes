@@ -19,6 +19,10 @@ interface PartOption {
   partNo: string;
   name: string;
 }
+interface SupplierOption {
+  id: string;
+  name: string;
+}
 interface LotRow {
   id: string;
   lotNo: string;
@@ -145,8 +149,16 @@ export function LotsPage() {
   const [supplierLotNo, setSupplierLotNo] = useState("");
   const [certificateNo, setCertificateNo] = useState("");
   const [docsFor, setDocsFor] = useState<LotRow | null>(null);
+  const [inspectionLot, setInspectionLot] = useState<LotRow | null>(null);
+  const [acceptanceDecision, setAcceptanceDecision] = useState<"ACCEPTED" | "QUARANTINED" | "REJECTED" | null>(null);
+  const [acceptanceNote, setAcceptanceNote] = useState("");
+  const [supplierReturnLot, setSupplierReturnLot] = useState<LotRow | null>(null);
+  const [supplierReturn, setSupplierReturn] = useState({ supplierId: "", quantity: "", shipmentReference: "", reason: "" });
 
   const lots = useQuery({ queryKey: ["/lots"], queryFn: () => apiGet<LotRow[]>("/lots") });
+  const incomingInspectionHistory = useQuery({ queryKey: ["/lots", inspectionLot?.id, "incoming-inspections"], queryFn: () => apiGet<any[]>(`/lots/${inspectionLot?.id}/incoming-inspections`), enabled: !!inspectionLot, retry: false });
+  const supplierReturnHistory = useQuery({ queryKey: ["/lots", supplierReturnLot?.id, "supplier-returns"], queryFn: () => apiGet<any[]>(`/lots/${supplierReturnLot?.id}/supplier-returns`), enabled: !!supplierReturnLot, retry: false });
+  const suppliers = useQuery({ queryKey: ["/suppliers"], queryFn: () => apiGet<SupplierOption[]>("/suppliers"), enabled: !!supplierReturnLot, retry: false });
   const materials = useQuery({
     queryKey: ["/materials"],
     queryFn: () => apiGet<MaterialOption[]>("/materials"),
@@ -237,12 +249,20 @@ export function LotsPage() {
     },
   });
   const decideAcceptance = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: LotRow["acceptanceStatus"] }) =>
-      apiPost(`/lots/${id}/acceptance`, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/lots"] }),
+    mutationFn: ({ id, status, note }: { id: string; status: "ACCEPTED" | "QUARANTINED" | "REJECTED"; note: string }) =>
+      apiPost(`/lots/${id}/acceptance`, { status, note: note.trim() || undefined }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/lots"] }); incomingInspectionHistory.refetch(); setAcceptanceDecision(null); setAcceptanceNote(""); },
     onError: (e) => {
       const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
       toast(msg ?? "Kabul kararı kaydedilemedi", "error");
+    },
+  });
+  const recordSupplierReturn = useMutation({
+    mutationFn: () => apiPost(`/lots/${supplierReturnLot?.id}/supplier-returns`, { supplierId: supplierReturn.supplierId, quantity: Number(supplierReturn.quantity), shipmentReference: supplierReturn.shipmentReference.trim(), reason: supplierReturn.reason.trim() }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/lots"] }); supplierReturnHistory.refetch(); setSupplierReturn({ supplierId: "", quantity: "", shipmentReference: "", reason: "" }); },
+    onError: (e) => {
+      const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
+      toast(msg ?? "Tedarikçi iadesi kaydedilemedi", "error");
     },
   });
 
@@ -287,11 +307,13 @@ export function LotsPage() {
               <div className="flex flex-wrap gap-1">
                 <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => printLabel(row)}><Printer className="h-4 w-4" /> QR</Button>
                 <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setDocsFor(row)}><FileText className="h-4 w-4" /> Belge</Button>
+                <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => { setInspectionLot(row); setAcceptanceDecision(null); setAcceptanceNote(""); }}>Muayene</Button>
+                {canWrite && row.itemType === "MATERIAL" && row.acceptanceStatus === "REJECTED" && <Button variant="ghost" className="px-2 py-1 text-xs text-red-700" onClick={() => { setSupplierReturnLot(row); setSupplierReturn({ supplierId: "", quantity: "", shipmentReference: "", reason: "" }); }}>Tedarikçiye iade</Button>}
                 {canWrite && row.acceptanceStatus !== "ACCEPTED" && row.acceptanceStatus !== "REJECTED" && (
                   <>
-                    <Button variant="ghost" className="px-2 py-1 text-xs text-emerald-700" onClick={() => decideAcceptance.mutate({ id: row.id, status: "ACCEPTED" })}><Check className="h-4 w-4" /> Kabul</Button>
-                    <Button variant="ghost" className="px-2 py-1 text-xs text-amber-700" onClick={() => decideAcceptance.mutate({ id: row.id, status: "QUARANTINED" })}><ShieldAlert className="h-4 w-4" /> Karantina</Button>
-                    <Button variant="ghost" className="px-2 py-1 text-xs text-red-700" onClick={() => decideAcceptance.mutate({ id: row.id, status: "REJECTED" })}><X className="h-4 w-4" /> Red</Button>
+                    <Button variant="ghost" className="px-2 py-1 text-xs text-emerald-700" onClick={() => { setInspectionLot(row); setAcceptanceDecision("ACCEPTED"); setAcceptanceNote(""); }}><Check className="h-4 w-4" /> Kabul</Button>
+                    <Button variant="ghost" className="px-2 py-1 text-xs text-amber-700" onClick={() => { setInspectionLot(row); setAcceptanceDecision("QUARANTINED"); setAcceptanceNote(""); }}><ShieldAlert className="h-4 w-4" /> Karantina</Button>
+                    <Button variant="ghost" className="px-2 py-1 text-xs text-red-700" onClick={() => { setInspectionLot(row); setAcceptanceDecision("REJECTED"); setAcceptanceNote(""); }}><X className="h-4 w-4" /> Red</Button>
                   </>
                 )}
               </div>
@@ -375,6 +397,12 @@ export function LotsPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+      <Modal open={inspectionLot !== null} title={inspectionLot ? `${inspectionLot.lotNo} — Gelen kabul muayenesi` : "Gelen kabul muayenesi"} onClose={() => { setInspectionLot(null); setAcceptanceDecision(null); setAcceptanceNote(""); }}>
+        {inspectionLot && <div className="space-y-4"><p className="text-sm text-slate-600">Bu kayıt kabul/karantina/red kararının değişmez kanıtıdır. Ayrıntılı numune ve ölçüm planları ayrı QMS akışında yönetilir.</p>{acceptanceDecision && <form onSubmit={(e) => { e.preventDefault(); decideAcceptance.mutate({ id: inspectionLot.id, status: acceptanceDecision, note: acceptanceNote }); }} className="space-y-3 rounded border p-3"><div className="text-sm font-medium">Karar: {acceptanceDecision}</div><div><Label htmlFor="acceptanceNote">Muayene notu (opsiyonel)</Label><Input id="acceptanceNote" value={acceptanceNote} onChange={(e) => setAcceptanceNote(e.target.value)} /></div><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAcceptanceDecision(null)}>Vazgeç</Button><Button type="submit" disabled={decideAcceptance.isPending}>Kararı kaydet</Button></div></form>}<div><h3 className="mb-2 text-sm font-medium">Karar geçmişi</h3>{incomingInspectionHistory.isLoading ? <p className="text-sm text-slate-500">Yükleniyor…</p> : <div className="space-y-2">{(incomingInspectionHistory.data ?? []).map((entry) => <div key={entry.id} className="rounded border p-2 text-sm"><b>{entry.decision}</b> · {new Date(entry.inspectedAt).toLocaleString("tr-TR")} · {entry.inspectedBy?.name ?? "Bilinmeyen kullanıcı"}<div className="mt-1 text-slate-600">{entry.note ?? "Not girilmedi"}</div></div>)}{!incomingInspectionHistory.data?.length && <p className="text-sm text-slate-500">Henüz kabul muayenesi kararı yok.</p>}</div>}</div></div>}
+      </Modal>
+      <Modal open={supplierReturnLot !== null} title={supplierReturnLot ? `${supplierReturnLot.lotNo} — Tedarikçiye iade` : "Tedarikçiye iade"} onClose={() => { setSupplierReturnLot(null); setSupplierReturn({ supplierId: "", quantity: "", shipmentReference: "", reason: "" }); }}>
+        {supplierReturnLot && <div className="space-y-4"><p className="text-sm text-slate-600">Bu kayıt reddedilen ve henüz stoğa alınmamış lotun fiziksel tedarikçi iadesini belgelendirir. Kabul edilmiş stok için hareket oluşturmaz.</p>{!supplierReturnHistory.data?.length && <form onSubmit={(e) => { e.preventDefault(); recordSupplierReturn.mutate(); }} className="space-y-3"><div><Label htmlFor="supplierReturnSupplier">Tedarikçi</Label><Select id="supplierReturnSupplier" value={supplierReturn.supplierId} onChange={(e) => setSupplierReturn({ ...supplierReturn, supplierId: e.target.value })}><option value="">Tedarikçi seçin</option>{suppliers.data?.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}</Select></div><div><Label htmlFor="supplierReturnQuantity">İade miktarı</Label><Input id="supplierReturnQuantity" type="number" min="0.001" step="0.001" value={supplierReturn.quantity} onChange={(e) => setSupplierReturn({ ...supplierReturn, quantity: e.target.value })} /></div><div><Label htmlFor="supplierReturnShipment">Sevk / RMA referansı</Label><Input id="supplierReturnShipment" value={supplierReturn.shipmentReference} onChange={(e) => setSupplierReturn({ ...supplierReturn, shipmentReference: e.target.value })} /></div><div><Label htmlFor="supplierReturnReason">Zorunlu iade gerekçesi</Label><Input id="supplierReturnReason" value={supplierReturn.reason} onChange={(e) => setSupplierReturn({ ...supplierReturn, reason: e.target.value })} /></div><div className="flex justify-end"><Button type="submit" disabled={recordSupplierReturn.isPending || !supplierReturn.supplierId || !(Number(supplierReturn.quantity) > 0) || !supplierReturn.shipmentReference.trim() || !supplierReturn.reason.trim()}>İadeyi kaydet</Button></div></form>}<div><h3 className="mb-2 text-sm font-medium">İade geçmişi</h3>{supplierReturnHistory.isLoading ? <p className="text-sm text-slate-500">Yükleniyor…</p> : <div className="space-y-2">{(supplierReturnHistory.data ?? []).map((entry) => <div key={entry.id} className="rounded border p-2 text-sm"><b>{entry.supplier?.name ?? "Tedarikçi"}</b> · {entry.quantity} · {new Date(entry.returnedAt).toLocaleString("tr-TR")}<div className="mt-1">Sevk/RMA: {entry.shipmentReference}</div><div className="mt-1 text-slate-600">{entry.reason}</div></div>)}{!supplierReturnHistory.data?.length && <p className="text-sm text-slate-500">Henüz iade kaydı yok.</p>}</div>}</div></div>}
       </Modal>
       <Modal
         open={docsFor !== null}

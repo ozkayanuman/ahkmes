@@ -19,6 +19,7 @@ import { UomService } from "../uom/uom.service";
 import { QualityExecutionService } from "../quality-execution/quality-execution.service";
 import { OeeCalculationService } from "../oee/oee-calculation.service";
 import type { OeeCalculationContext } from "../oee/oee-request";
+import { CostingService } from "../costing/costing.service";
 
 const TRANSITIONS: Record<WorkOrderStatus, WorkOrderStatus[]> = {
   PLANNED: ["RELEASED", "WAITING_MATERIAL", "IN_PRODUCTION", "CANCELLED"],
@@ -57,6 +58,7 @@ export class WorkOrdersService {
     private readonly uom?: UomService,
     private readonly quality?: QualityExecutionService,
     private readonly canonicalOee?: OeeCalculationService,
+    private readonly costing?: CostingService,
   ) {}
 
   /**
@@ -159,7 +161,11 @@ export class WorkOrdersService {
    * (aslında makine maliyetiydi) — Faz H'de gerçek operatör-bazlı işçilik eklenince
    * `machineCost` olarak düzeltildi, `laborCost` artık gerçekten işçilik demek.
    */
-  async cost(tenantId: string, workOrderId: string) {
+  async cost(tenantId: string, workOrderId: string, asOf?: Date) {
+    if (this.costing) {
+      const calculated = await this.costing.calculate(tenantId, workOrderId, asOf);
+      return { ...calculated.legacy, ...calculated };
+    }
     const wo = await this.findOne(tenantId, workOrderId);
 
     const consumptions = await this.prisma.materialConsumption.findMany({
@@ -400,6 +406,15 @@ export class WorkOrdersService {
         return points.map(({ operationSeq, inspectionPoint }) => ({ tenantId, qualityPlanId: plan.id, planRevision: plan.revision, inspectionPoint, samplingMethod: plan.samplingMethod, sampleCount: plan.sampleCount, snapshot: { planId: plan.id, revision: plan.revision, inspectionPoint, operationSeq, samplingMethod: plan.samplingMethod, sampleCount: plan.sampleCount, checks: plan.checks.filter((check) => operationSeq === undefined ? check.operationSeq === null : check.operationSeq === operationSeq).map((check) => ({ seq: check.seq, checkpointName: check.checkpointName, unit: check.unit, lowerLimit: check.lowerLimit?.toString(), upperLimit: check.upperLimit?.toString(), characteristicType: check.characteristicType, qualitativeExpected: check.qualitativeExpected, isRequired: check.isRequired })) } }));
       });
       const updated = await tx.workOrder.update({ where: { id }, data: { plantId: dto.plantId, productionDefinitionId: definition.id, recipeHeaderId: definition.recipeHeader.id, recipeRevision: definition.recipeHeader.revision, routeSnapshotAt: now, engineeringReleasedAt: now, engineeringReleaseRequired: true, status: "RELEASED", engineeringSnapshot: { part: { id: definition.part.id, partNo: definition.part.partNo, revision: definition.part.revision, unit: definition.part.unit, drawingFileRef: definition.part.drawingFileRef, stepFileRef: definition.part.stepFileRef }, bom: { id: definition.bomHeader.id, revision: definition.bomHeader.revision, lines: snapshotLines }, routing: { id: definition.recipeHeader.id, revision: definition.recipeHeader.revision, operations: definition.recipeHeader.steps.map((step) => ({ seq: step.seq, name: step.name, standardMinutes: step.standardMinutes?.toString() ?? null, idealCycleTimeSec: step.idealCycleTimeSec?.toString() ?? null, ncProgramId: step.ncProgramId, toolRequirements: step.toolRequirements, fixtureRequirements: step.fixtureRequirements })) }, quality: qualityRequirements.map((item) => item.snapshot) }, materialRequirements: { create: materialRequirements }, operations: { create: definition.recipeHeader.steps.map((step) => { const nc = step.ncProgramId ? ncSnapshots.get(step.ncProgramId)! : null; return { tenantId, seq: step.seq, name: step.name, parameterName: step.parameterName, parameterValue: step.parameterValue, unit: step.unit, standardMinutes: step.standardMinutes, idealCycleTimeSec: step.idealCycleTimeSec, instructionHtml: step.instructionHtml, machineId: wo.machineId ?? undefined, ...(nc ? { ncProgramId: nc.id, ncProgramVersion: nc.version, ncProgramChecksum: nc.checksum, ncProgramFileName: nc.fileName, ncProgramStorageKey: nc.storageKey } : {}) }; }) } }, include: WO_INCLUDE });
+      if (this.costing) {
+        await this.costing.captureBaseline(tx, tenantId, userId, {
+          workOrderId: updated.id,
+          plantId: dto.plantId,
+          materialRequirements,
+          operations: updated.operations.map((operation) => ({ id: operation.id, seq: operation.seq, name: operation.name, machineId: operation.machineId, standardMinutes: operation.standardMinutes })),
+          capturedAt: now,
+        });
+      }
       for (const quality of qualityRequirements) {
         const operationId = quality.snapshot.operationSeq ? updated.operations.find((operation) => operation.seq === quality.snapshot.operationSeq)?.id : undefined;
         await tx.productionQualityRequirement.create({ data: { ...quality, workOrderId: wo.id, operationId } });

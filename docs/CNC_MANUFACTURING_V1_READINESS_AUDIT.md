@@ -1,12 +1,14 @@
 # CNC Manufacturing V1 Readiness Audit
 
-> **Commercial/pilot re-audit — 2026-08-14:** Current-source reconciliation is
-> in `docs/CNC_MANUFACTURING_V1_COMMERCIAL_GAP_ANALYSIS.md`. CNC-V1-00, 01, 02,
-> 04 and 06 remain `VERIFIED_DONE`; CNC-V1-05 remains
+> **Commercial/pilot re-audit — 2026-09-22:** The authoritative current-source
+> reconciliation is `docs/CNC_MANUFACTURING_V1_COMMERCIAL_GAP_ANALYSIS.md`.
+> CNC-V1-00 through V1-04, V1-06 through V1-11 are completed within their
+> documented V1 scopes. CNC-V1-05 remains
 > `SOFTWARE_READY_FIELD_VALIDATION_REQUIRED` until real M80 acceptance. The
-> exact next recommended implementation is **CNC-V1-03R — MRP Daily Planning,
-> Exception Control & Proposal Conversion**. The historic sections below remain
-> preserved and are not the current status of accepted CNC-V1 epics.
+> next delivery is customer cutover evidence and selected-controller field
+> acceptance; product work beyond that is independent P1/P2 scope. The historic
+> sections below are preserved and are not the current status of accepted
+> CNC-V1 epics.
 
 > Scope: `AHK CNC Manufacturing Professional`, audited from current source on
 > 2026-08-12. This is a gap analysis, not an implementation plan approval and
@@ -55,8 +57,8 @@ and operating/provisioning controls are incomplete.
 | Basic QMS | FOUNDATION_ONLY | Yes | quality plans/checks, inspections, NCR/CAPA/SPC objects exist; no inspection lot/planned enforcement, sampling, material/operation hold-release flow |
 | Basic CMMS | FOUNDATION_ONLY | Yes | calendar/runtime-triggered maintenance orders; no technician/spares/failure taxonomy/downtime-to-maintenance or availability gate |
 | OEE / operational analytics | FOUNDATION_ONLY | Yes, because OEE is in the offered package | alarm/run-derived daily and WO calculations; no planned time, shift calendar, work-centre/WO allocation, telemetry completeness control |
-| Production costing | FOUNDATION_ONLY | Yes, because costing is in the offered package | actual standard material + machine + labor calculation; no planned/variance, overhead, tool/fixture/scrap/subcontract cost |
-| Deployment and commercial administration | FUNCTIONAL_PARTIAL | Yes | Compose/CI/health/seed/import are present; tenant provisioning, backup/restore/runbook/upgrade/onboarding are absent |
+| Production costing | VERIFIED_DONE (V1 scoped) | No for the released material/machine/labor policy | released plant rate cards, frozen WO baseline, planned/actual/variance, operation breakdown and per-good-unit cost; overhead, tooling/fixture, subcontract and finance remain out of V1 scope |
+| Deployment and commercial administration | FUNCTIONAL_PARTIAL | Yes | Compose/CI/health, tenant provisioning, controlled onboarding/import and backup/restore are verified; versioned training/support and selected-controller field acceptance remain. |
 | Entitlements V2 | VERIFIED_DONE, non-authoritative | No | ARCH-001..004; legacy remains production authority by explicit decision |
 
 ## Capability detail and gaps
@@ -268,6 +270,10 @@ analytics:
 **Recommended epics:** `CNC-V1-08 Production-grade time, OEE and operational
 control cockpit` (P0, L) and `CNC-V1-09 Planned/actual manufacturing costing`
 (P0, L). Enterprise BI is P2.
+
+### CNC-V1-09R — VERIFIED_DONE (2026-09-10)
+
+The costing implementation now uses versioned plant rate cards. A released work order retains an immutable material/machine/labor baseline, so later changes to master costs cannot rewrite planned cost. The cost projection exposes planned, actual and variance totals and category/operation breakdowns, per-good-unit cost, plus explicit missing-rate/output data-quality reasons. Clean 80-migration PostgreSQL, focused API and full operations/backup/restore tests verify the scope. The remaining policy gap is deliberate: overhead, tool/fixture, subcontract, payroll/GL and broad scrap/rework allocation are P1/P2 rather than silently included.
 
 ## Real CNC business flow trace
 

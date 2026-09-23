@@ -29,7 +29,8 @@ export async function nextDocNo(
     | "supplierPayment"
     | "customerPayment"
     | "mrpProposal"
-    | "purchaseRequisition",
+    | "purchaseRequisition"
+    | "customerReturn",
   field:
     | "quoteNo"
     | "woNo"
@@ -50,17 +51,28 @@ export async function nextDocNo(
     | "spNo"
     | "cpNo"
     | "proposalNo"
-    | "prqNo",
+    | "prqNo"
+    | "rmaNo",
   prefix: string,
 ): Promise<string> {
   const year = new Date().getFullYear();
   const pfx = `${prefix}-${year}-`;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const last = await (tx as any)[model].findFirst({
-    where: { [field]: { startsWith: pfx } },
-    orderBy: { [field]: "desc" },
-    select: { [field]: true },
-  });
-  const lastSeq = last ? Number.parseInt(String(last[field]).slice(pfx.length), 10) : 0;
+  // Serialises concurrent callers computing the "next" number for the same
+  // model/field so two transactions never read the same max before either
+  // commits (this function itself does no row locking or unique retry).
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`nextDocNo:${model}:${field}`}))`;
+  // Raw SQL, not the Prisma model client: the document-number sequence
+  // (`@unique` on this field) is global across tenants, but the tenant-scope
+  // extension (AHK-017) would silently inject the caller's tenantId into a
+  // model-client findFirst here, scoping "last" per tenant while the DB
+  // constraint stays global — two tenants would both compute "0001" and
+  // collide. Raw queries are documented as outside that extension's scope.
+  const table = model.charAt(0).toUpperCase() + model.slice(1);
+  const rows = await tx.$queryRawUnsafe<{ value: string }[]>(
+    `SELECT "${field}" AS value FROM "${table}" WHERE "${field}" LIKE $1 ORDER BY "${field}" DESC LIMIT 1`,
+    `${pfx}%`,
+  );
+  const last = rows[0]?.value;
+  const lastSeq = last ? Number.parseInt(last.slice(pfx.length), 10) : 0;
   return `${pfx}${String(lastSeq + 1).padStart(4, "0")}`;
 }

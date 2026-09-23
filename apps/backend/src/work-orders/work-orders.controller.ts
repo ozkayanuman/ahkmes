@@ -34,12 +34,14 @@ import { Roles } from "../common/decorators/roles.decorator";
 import { RequirePage } from "../common/decorators/require-page.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../common/zod-validation.pipe";
+import { ActionPermissionsGuard } from "../common/guards/action-permissions.guard";
+import { RequireActionPermissions } from "../common/decorators/require-action-permission.decorator";
 import type { AuthUser } from "../common/types";
 import { parseOeeCalculationContext } from "../oee/oee-request";
 
 @Controller("work-orders")
 @RequirePage("work-orders")
-@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PagesGuard, ActionPermissionsGuard)
 export class WorkOrdersController {
   constructor(private readonly service: WorkOrdersService) {}
 
@@ -97,8 +99,9 @@ export class WorkOrdersController {
   }
 
   @Get(":id/cost")
-  cost(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.cost(user.tenantId, id);
+  @RequireActionPermissions("COSTING_READ")
+  cost(@CurrentUser() user: AuthUser, @Param("id") id: string, @Query("asOf") asOf?: string) {
+    return this.service.cost(user.tenantId, id, asOf ? new Date(asOf) : undefined);
   }
 
   @Get(":id/genealogy")

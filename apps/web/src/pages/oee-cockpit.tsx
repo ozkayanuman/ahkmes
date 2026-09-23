@@ -5,10 +5,11 @@ import { Card, Input, Label, Select, Table } from "../components/ui";
 
 type Metric = { value: number | null };
 type Cockpit = {
-  context: { asOf: string; lastRefreshedAt?: string };
+  context: { asOf: string; lastRefreshedAt?: string; workOrderStateAt?: string };
   summary: { metrics: { oee: Metric; availability: Metric; performance: Metric; quality: Metric; dataQuality: string; issues: { code: string }[] } };
   machines: { id: string; name: string; currentStatus: string | null; activeWorkOrder: { id: string; woNo: string } | null; oee: { value: number | null; dataQuality: string; facts: { goodCount: number; scrapCount: number } } | null; maintenanceOrderIds: string[] }[];
   blockers: { maintenance: { id: string; bakNo: string; status: string; priority: string }[]; qualityHolds: { id: string; reason: string }[]; materialExceptions: { id: string; type: string; severity: string }[] };
+  workOrders: { currentStateAt: string; summary: { openCount: number; inProductionCount: number; waitingMaterialCount: number; overdueCount: number; blockedOperationCount: number }; overdue: { id: string; woNo: string; status: string; dueDate: string; quantity: number | null; part: { code: string; name: string }; blockedOperationCount: number }[] };
 };
 
 function pct(metric: Metric) { return metric.value === null ? "Veri yetersiz" : `%${(metric.value * 100).toFixed(0)}`; }
@@ -32,7 +33,7 @@ export function OeeCockpitPage() {
 
   return <div>
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
-      <div><h1 className="text-2xl font-bold">OEE Cockpit</h1><p className="text-sm text-slate-500">Kanonik üretim, kalite, bakım ve malzeme görünümü</p></div>
+      <div><h1 className="text-2xl font-bold">Operasyon Cockpit</h1><p className="text-sm text-slate-500">Kanonik üretim, WIP, kalite, bakım ve malzeme görünümü</p></div>
       <div className="flex gap-2"><div className="w-48"><Label htmlFor="oee-cockpit-plant">Tesis</Label><Select id="oee-cockpit-plant" value={plantId} onChange={(event) => setPlantId(event.target.value)}><option value="">Tesis seçin</option>{(plants.data ?? []).map((plant) => <option key={plant.id} value={plant.id}>{plant.name}</option>)}</Select></div><div><Label htmlFor="oee-cockpit-date">Tarih</Label><Input id="oee-cockpit-date" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></div></div>
     </div>
     {!plantId && <p className="text-slate-500">Görünümü açmak için tesis seçin.</p>}
@@ -44,6 +45,8 @@ export function OeeCockpitPage() {
         {[['OEE', data.summary.metrics.oee], ['Kullanılabilirlik', data.summary.metrics.availability], ['Performans', data.summary.metrics.performance], ['Kalite', data.summary.metrics.quality]].map(([name, metric]) => <Card key={name as string}><div className="text-sm text-slate-500">{name as string}</div><div className="text-2xl font-bold">{pct(metric as Metric)}</div></Card>)}
       </div>
       <Card className="mb-6"><h2 className="mb-2 text-lg font-semibold">Veri kalitesi: {data.summary.metrics.dataQuality}</h2>{data.summary.metrics.issues.length > 0 && <p className="text-sm text-amber-700">{data.summary.metrics.issues.map((issue) => issue.code).join(", ")}</p>}</Card>
+      <Card className="mb-6"><h2 className="mb-3 text-lg font-semibold">İş emri ve WIP (anlık durum)</h2><p className="mb-3 text-xs text-slate-500">İş emri durumları geçmişe dönük yeniden oluşturma değil, {new Date(data.workOrders.currentStateAt).toLocaleString("tr-TR")} anındaki kayıttır.</p><div className="grid gap-3 md:grid-cols-5">{[["Açık iş emri", data.workOrders.summary.openCount], ["Üretimde", data.workOrders.summary.inProductionCount], ["Malzeme bekliyor", data.workOrders.summary.waitingMaterialCount], ["Gecikmiş", data.workOrders.summary.overdueCount], ["Bloke operasyon", data.workOrders.summary.blockedOperationCount]].map(([name, value]) => <div key={name as string} className="rounded border p-3"><div className="text-sm text-slate-500">{name as string}</div><div className="text-2xl font-bold">{value as number}</div></div>)}</div></Card>
+      <Card className="mb-6"><h2 className="mb-3 text-lg font-semibold">Gecikmiş iş emirleri</h2>{data.workOrders.overdue.length === 0 ? <p className="text-sm text-slate-500">Gecikmiş açık iş emri yok</p> : <Table headers={["İş emri", "Parça", "Termin", "Durum", "Bloke op."]}>{data.workOrders.overdue.map((order) => <tr key={order.id}><td>{order.woNo}</td><td>{order.part.code} · {order.part.name}</td><td>{new Date(order.dueDate).toLocaleDateString("tr-TR")}</td><td>{order.status}</td><td>{order.blockedOperationCount}</td></tr>)}</Table>}</Card>
       <Card className="mb-6"><h2 className="mb-3 text-lg font-semibold">Makine durumu</h2><Table headers={["Makine", "Durum", "İş emri", "OEE", "Sağlam / Hurda", "Bakım"]}>{data.machines.map((machine) => <tr key={machine.id}><td>{machine.name}</td><td>{machine.currentStatus ?? "Bilinmiyor"}</td><td>{machine.activeWorkOrder?.woNo ?? "—"}</td><td>{machine.oee ? pct(machine.oee) : "Veri yetersiz"}</td><td>{machine.oee ? `${machine.oee.facts.goodCount} / ${machine.oee.facts.scrapCount}` : "—"}</td><td>{machine.maintenanceOrderIds.length}</td></tr>)}</Table></Card>
       <div className="grid gap-4 md:grid-cols-3"><BlockerCard title="Bakım blokajları" values={data.blockers.maintenance.map((item) => `${item.bakNo} · ${item.status}`)} /><BlockerCard title="Kalite blokajları" values={data.blockers.qualityHolds.map((item) => item.reason)} /><BlockerCard title="Malzeme istisnaları" values={data.blockers.materialExceptions.map((item) => `${item.type} · ${item.severity}`)} /></div>
     </>}

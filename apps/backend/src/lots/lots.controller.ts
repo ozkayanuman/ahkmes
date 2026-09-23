@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
-import { createLotSchema, decideLotAcceptanceSchema, type CreateLotDto, type DecideLotAcceptanceDto } from "@ahkmes/shared-types";
+import { createLotSchema, createSupplierLotReturnSchema, decideLotAcceptanceSchema, type CreateLotDto, type CreateSupplierLotReturnDto, type DecideLotAcceptanceDto } from "@ahkmes/shared-types";
 import type { StockItemType } from "@prisma/client";
 import { LotsService } from "./lots.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
@@ -62,6 +62,23 @@ export class LotsController {
     @Body(new ZodValidationPipe(decideLotAcceptanceSchema)) dto: DecideLotAcceptanceDto,
   ) {
     return this.service.decideAcceptance(user.tenantId, user.userId, id, dto);
+  }
+
+  @Get(":id/incoming-inspections")
+  incomingInspectionHistory(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.incomingInspectionHistory(user.tenantId, id);
+  }
+
+  @Get(":id/supplier-returns")
+  supplierReturnHistory(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.supplierReturnHistory(user.tenantId, id);
+  }
+
+  @Post(":id/supplier-returns")
+  @SkipAudit()
+  @Roles("ADMIN", "PLANNER", "FOREMAN")
+  recordSupplierLotReturn(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(createSupplierLotReturnSchema)) dto: CreateSupplierLotReturnDto) {
+    return this.service.recordSupplierLotReturn(user.tenantId, user.userId, id, dto);
   }
 
   @Delete(":id")

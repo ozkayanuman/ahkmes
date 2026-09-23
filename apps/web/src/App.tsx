@@ -61,6 +61,8 @@ import { HmiOperationsPage } from "./pages/hmi-operations";
 import { EngineeringMasterDataPage } from "./pages/engineering-master-data";
 import { ProductionStandardsPage } from "./pages/production-standards";
 import { OeeCockpitPage } from "./pages/oee-cockpit";
+import { CostingPage } from "./pages/costing";
+import { OnboardingImportPage } from "./pages/onboarding-import";
 
 export function App() {
   return (
@@ -88,6 +90,7 @@ export function App() {
           }
         />
         <Route path="/work-orders" element={<PageGuard page="work-orders"><WorkOrdersPage /></PageGuard>} />
+        <Route path="/costing" element={<PageGuard page="work-orders"><CostingPage /></PageGuard>} />
         <Route
           path="/work-orders/:id"
           element={
@@ -167,6 +170,7 @@ export function App() {
         <Route path="/genealogy" element={<PageGuard page="genealogy"><GenealogyPage /></PageGuard>} />
         <Route path="/scheduling" element={<PageGuard page="scheduling"><SchedulingPage /></PageGuard>} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/onboarding-import" element={<OnboardingImportPage />} />
         <Route path="/permission-groups" element={<PermissionGroupsPage />} />
         <Route path="/audit-log" element={<AuditLogPage />} />
         <Route path="/platform/modules" element={<PageGuard page="platform-modules"><PlatformModulesPage /></PageGuard>} />

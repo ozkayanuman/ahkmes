@@ -14,11 +14,11 @@ const operationInclude = {
   workOrder: {
     select: {
       id: true, woNo: true, quantity: true, priority: true, status: true, dueDate: true, plannedStartDate: true, plannedEndDate: true,
-      machine: { select: { id: true, name: true, unit: { select: { id: true, name: true } } } },
+      machine: { select: { id: true, name: true, operatorQualificationRequired: true, unit: { select: { id: true, name: true } } } },
       part: { select: { id: true, partNo: true, revision: true, name: true } },
     },
   },
-  machine: { select: { id: true, name: true, unit: { select: { id: true, name: true } } } },
+  machine: { select: { id: true, name: true, operatorQualificationRequired: true, unit: { select: { id: true, name: true } } } },
   ncProgram: { select: { id: true, version: true, status: true, fileName: true, checksum: true, effectivityScope: true } },
   toolRequirements: { where: { isRequired: true }, select: { id: true } },
   fixtureRequirements: { where: { isRequired: true }, select: { id: true } },
@@ -76,6 +76,19 @@ export class HmiService {
   async start(tenantId: string, userId: string, operationId: string) {
     const operation = await this.operation(tenantId, operationId);
     const machineId = operation.machineId ?? operation.workOrder.machine?.id;
+    const machine = operation.machine ?? operation.workOrder.machine;
+    if (machine?.operatorQualificationRequired) {
+      const qualification = await this.prisma.operatorMachineQualification.findFirst({
+        where: {
+          tenantId,
+          machineId: machine.id,
+          operatorId: userId,
+          status: "ACTIVE",
+          OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        },
+      });
+      if (!qualification) throw new ConflictException("Operator is not qualified for this machine");
+    }
     const requirements = await this.materials.requirements(tenantId, operation.workOrderId);
     // Issued stock is no longer reserved at the warehouse, but still fulfils
     // the operation's material allocation.  Do not block a legitimate start

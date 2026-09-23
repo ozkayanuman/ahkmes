@@ -175,6 +175,53 @@ enum WorkOrderOperationStatus {
   SKIPPED
 }
 
+/// CNC-V1-09R: a standard-rate card is deliberately separate from mutable
+/// material, machine and user master data.  Only released revisions can be
+/// used to build an immutable work-order costing baseline.
+enum CostRateCardStatus {
+  DRAFT
+  RELEASED
+  SUPERSEDED
+}
+
+enum CostRateKind {
+  MATERIAL
+  MACHINE
+  LABOR
+}
+
+/// CNC-V1-10R: imports are explicit, tenant-scoped batches. A dry-run is
+/// retained as evidence; only that fully-valid batch can be committed later.
+enum OnboardingImportTemplate {
+  PARTS
+  MATERIALS
+  TOOL_DEFINITIONS
+  TOOL_COMPONENTS
+  FIXTURE_DEFINITIONS
+  PHYSICAL_TOOLS
+  PHYSICAL_FIXTURES
+  TOOL_MACHINE_COMPATIBILITIES
+  FIXTURE_MACHINE_COMPATIBILITIES
+  BOMS
+  ROUTINGS
+  CUSTOMERS
+  SUPPLIERS
+  MACHINES
+  WAREHOUSES
+  OPENING_STOCK
+}
+
+enum OnboardingImportMode {
+  DRY_RUN
+  COMMIT
+}
+
+enum OnboardingImportStatus {
+  VALIDATED
+  REJECTED
+  COMMITTED
+}
+
 enum PurchaseOrderStatus {
   ORDERED
   IN_TRANSIT
@@ -222,6 +269,12 @@ enum LotAcceptanceStatus {
   REJECTED
 }
 
+enum IncomingLotInspectionDecision {
+  ACCEPTED
+  QUARANTINED
+  REJECTED
+}
+
 enum RunSource {
   MANUAL
   MACHINE
@@ -248,6 +301,11 @@ enum AuditAction {
   STATUS_CHANGE
 }
 
+enum OperatorMachineQualificationStatus {
+  ACTIVE
+  REVOKED
+}
+
 enum DocumentType {
   STEP
   WORK_INSTRUCTION
@@ -270,13 +328,24 @@ enum PhysicalToolStatus {
   RETIRED
 }
 
+enum ToolPresetStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
 enum PhysicalFixtureStatus {
   AVAILABLE
   RESERVED
   IN_USE
+  CHECKED_OUT
   MAINTENANCE
   QUARANTINED
   RETIRED
+}
+
+enum FixtureCustodyAction {
+  CHECK_OUT
+  CHECK_IN
 }
 
 enum SetupVerificationStatus {
@@ -336,6 +405,7 @@ model Plant {
   maintenanceBreakdowns MaintenanceBreakdown[]
   maintenancePlans      MaintenancePlan[]
   maintenanceOrders     MaintenanceOrder[]
+  costRateCards         CostRateCard[]
 
   @@unique([tenantId, name])
   @@unique([id, tenantId])
@@ -438,6 +508,7 @@ model PhysicalToolInstance {
   toolAssembly     ToolAssembly?              @relation(fields: [toolAssemblyId], references: [id], onDelete: Restrict)
   assignments      OperationSetupAssignment[] @relation("AssignedPhysicalTool")
   lifeEvents       ToolLifeEvent[]
+  presetRecords    ToolPresetRecord[]
 
   @@unique([tenantId, serialNo])
   @@index([tenantId, status])
@@ -483,6 +554,7 @@ model PhysicalFixtureInstance {
   assignments           OperationSetupAssignment[] @relation("AssignedPhysicalFixture")
   maintenanceEvents     FixtureMaintenanceEvent[]
   calibrationRecords    FixtureCalibrationRecord[]
+  custodyEvents         FixtureCustodyEvent[]
 
   @@unique([tenantId, serialNo])
   @@index([tenantId, status])
@@ -733,6 +805,50 @@ model ToolLifeEvent {
   @@index([tenantId, workOrderOperationId])
 }
 
+/// CNC-V1-10R: manually measured machine-specific tool offsets. This record
+/// does not claim controller write or controller readback integration.
+model ToolPresetRecord {
+  id                     String           @id @default(uuid())
+  tenantId               String
+  physicalToolInstanceId String
+  machineId              String
+  offsetNumber           Int
+  lengthOffset           Decimal          @db.Decimal(18, 3)
+  radiusOffset           Decimal?         @db.Decimal(18, 3)
+  measuredAt             DateTime
+  status                 ToolPresetStatus @default(ACTIVE)
+  reason                 String
+  createdById            String?
+  supersededAt           DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  physicalToolInstance PhysicalToolInstance @relation(fields: [physicalToolInstanceId], references: [id], onDelete: Restrict)
+  machine              Machine              @relation(fields: [machineId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, physicalToolInstanceId, machineId, offsetNumber, status])
+  @@index([tenantId, machineId, status, measuredAt])
+}
+
+/// CNC-V1-10R: explicit physical custody trail. CHECKED_OUT means the fixture
+/// is outside normal crib availability; it is intentionally distinct from an
+/// operation's RESERVED/IN_USE setup lifecycle.
+model FixtureCustodyEvent {
+  id                     String               @id @default(uuid())
+  tenantId               String
+  physicalFixtureInstanceId String
+  action                 FixtureCustodyAction
+  fromLocation           String?
+  toLocation             String
+  reason                 String
+  createdById            String?
+  createdAt              DateTime             @default(now())
+
+  physicalFixtureInstance PhysicalFixtureInstance @relation(fields: [physicalFixtureInstanceId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, physicalFixtureInstanceId, createdAt])
+}
+
 model Area {
   id        String   @id @default(uuid())
   tenantId  String
@@ -795,6 +911,7 @@ model Tenant {
   entitlementReconciliations    EntitlementReconciliation[]
   entitlementMigrationApprovals EntitlementMigrationApproval[]
   entitlementMigrationRuns      EntitlementMigrationRun[]
+  onboardingImportBatches       OnboardingImportBatch[]
 }
 
 model TenantModuleEntitlement {
@@ -1114,10 +1231,16 @@ model User {
   maintenanceTasksCompleted        MaintenanceTask[]                 @relation("MaintenanceTaskCompletedBy")
   maintenanceLaborEntries          MaintenanceLaborEntry[]
   maintenancePlansCreated          MaintenancePlan[]
+  maintenanceSpareReservations     MaintenanceSpareReservation[]
   maintenanceSpareTransactions     MaintenanceSpareTransaction[]
   machineMaintenanceStateEvents    MachineMaintenanceStateEvent[]
   returnToServiceEvents            ReturnToServiceEvent[]
   acceptedLots                     Lot[]                             @relation("LotAcceptedBy")
+  incomingLotInspections           IncomingLotInspection[]           @relation("IncomingLotInspectedBy")
+  supplierLotReturns               SupplierLotReturn[]               @relation("SupplierLotReturnedBy")
+  operatorMachineQualifications    OperatorMachineQualification[]    @relation("OperatorMachineQualifiedUser")
+  operatorMachineQualificationsGranted OperatorMachineQualification[] @relation("OperatorMachineQualificationGrantedBy")
+  operatorMachineQualificationsRevoked OperatorMachineQualification[] @relation("OperatorMachineQualificationRevokedBy")
   spcMeasurements                  SpcMeasurement[]
   acknowledgedAlarms               MachineStatusEvent[]              @relation("AcknowledgedAlarms")
   downtimeEventsTriggered          DowntimeEvent[]                   @relation("DowntimeTriggeredBy")
@@ -1133,6 +1256,7 @@ model User {
   inventoryMovements               InventoryMovement[]
   approvedEntitlementMigrations    EntitlementMigrationApproval[]    @relation("EntitlementMigrationApprovedBy")
   entitlementMigrationRuns         EntitlementMigrationRun[]         @relation("EntitlementMigrationRunActor")
+  onboardingImportBatches          OnboardingImportBatch[]
   oidcProvider                     OidcProvider?                     @relation(fields: [oidcProviderId], references: [id])
 
   @@unique([id, tenantId])
@@ -1464,6 +1588,9 @@ model Machine {
   /// manual/non-qualified machines so controller work never becomes global.
   controllerVerificationRequired Boolean                 @default(false)
   controllerFreshnessSeconds     Int                     @default(60)
+  /// Opt-in human operator safety gate. Machine-originated telemetry runs do
+  /// not use this rule because they have no authenticated named operator.
+  operatorQualificationRequired  Boolean                 @default(false)
   /// Saha hiyerarşisindeki yeri (Plant>Area>Workplace>Unit) — opsiyonel, henüz
   /// yerleştirilmemiş makineler null kalabilir (geriye uyumlu). Organizasyonel
   /// gruplama amaçlıdır — Digital Twin'deki fiziksel konumdan (posX/posY) bağımsızdır.
@@ -1512,14 +1639,43 @@ model Machine {
   alarmDefinitions       AlarmDefinition[]
   energyReadings         EnergyReading[]
   toolCompatibilities    ToolMachineCompatibility[]
+  toolPresetRecords      ToolPresetRecord[]
   fixtureCompatibilities FixtureMachineCompatibility[]
   setupVerifications     OperationSetupVerification[]
+  operatorQualifications OperatorMachineQualification[]
   plant                  Plant?                         @relation(fields: [plantId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
   @@unique([tenantId, assetCode])
   @@index([tenantId])
   @@index([tenantId, plantId, maintenanceState])
+}
+
+/// Current controlled authorization for a named user to run a named machine.
+/// Re-granting updates this current record; the administrative audit trail
+/// records every grant and revocation decision.
+model OperatorMachineQualification {
+  id                     String                             @id @default(uuid())
+  tenantId               String
+  machineId              String
+  operatorId             String
+  status                 OperatorMachineQualificationStatus @default(ACTIVE)
+  qualificationReference String?
+  expiresAt              DateTime?
+  grantedById            String
+  grantedAt              DateTime                           @default(now())
+  revokedById            String?
+  revokedAt              DateTime?
+  createdAt              DateTime                           @default(now())
+  updatedAt              DateTime                           @updatedAt
+
+  machine   Machine @relation(fields: [machineId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  operator  User    @relation("OperatorMachineQualifiedUser", fields: [operatorId], references: [id], onDelete: Restrict)
+  grantedBy User    @relation("OperatorMachineQualificationGrantedBy", fields: [grantedById], references: [id], onDelete: Restrict)
+  revokedBy User?   @relation("OperatorMachineQualificationRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, machineId, operatorId])
+  @@index([tenantId, machineId, status, expiresAt])
 }
 
 /// Append-only controller evidence.  The latest row is the efficient current
@@ -1662,15 +1818,15 @@ enum ProductionLossCategory {
 /// ile aynı desen: tenant-scoped katalog, forward-only (geçmiş kayıtlara
 /// backfill edilmez).
 model DowntimeReason {
-  id        String                 @id @default(uuid())
-  tenantId  String
-  code      String
-  label     String
-  category  DowntimeReasonCategory @default(UNPLANNED)
+  id           String                  @id @default(uuid())
+  tenantId     String
+  code         String
+  label        String
+  category     DowntimeReasonCategory  @default(UNPLANNED)
   lossCategory ProductionLossCategory?
-  isActive  Boolean                @default(true)
-  createdAt DateTime               @default(now())
-  updatedAt DateTime               @updatedAt
+  isActive     Boolean                 @default(true)
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
 
   events DowntimeEvent[]
 
@@ -1825,12 +1981,151 @@ model WorkOrder {
   inspections          Inspection[]
   spcMeasurements      SpcMeasurement[]
   serialNumbers        SerialNumber[]
+  costBaseline         WorkOrderCostBaseline?
 
   @@unique([id, tenantId])
   @@unique([mrpProposalId, tenantId])
   @@index([tenantId])
   @@index([tenantId, plantId])
   @@index([status])
+}
+
+/// Tenant and plant-scoped standard-cost revision.  `effectiveFrom` is an
+/// inclusive date boundary; the most recent released card at or before a
+/// work-order's engineering release is selected.
+model CostRateCard {
+  id            String             @id @default(uuid())
+  tenantId      String
+  plantId       String
+  revision      Int
+  currency      String             @db.VarChar(3)
+  effectiveFrom DateTime
+  status        CostRateCardStatus @default(DRAFT)
+  releasedAt    DateTime?
+  releasedById  String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  plant     Plant                   @relation(fields: [plantId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lines     CostRateLine[]
+  baselines WorkOrderCostBaseline[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, plantId, revision])
+  @@unique([tenantId, plantId, effectiveFrom])
+  @@index([tenantId, plantId, status, effectiveFrom])
+}
+
+/// `targetId` is a Material/Machine id for the respective kind; LABOR uses
+/// the literal DEFAULT.  Polymorphic targets are verified by the service so a
+/// rate-card line never needs a mutable master-data relation.
+model CostRateLine {
+  id         String       @id @default(uuid())
+  tenantId   String
+  rateCardId String
+  kind       CostRateKind
+  targetId   String
+  rate       Decimal      @db.Decimal(18, 6)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  rateCard CostRateCard @relation(fields: [rateCardId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([tenantId, rateCardId, kind, targetId])
+  @@index([tenantId, rateCardId, kind])
+}
+
+/// One immutable costing baseline exists for each released work order.  A
+/// baseline can be partial: unavailable components are represented by a line
+/// with `amount = null` and an explicit issue code, never by an invented zero.
+model WorkOrderCostBaseline {
+  id                  String   @id @default(uuid())
+  tenantId            String
+  workOrderId         String   @unique
+  rateCardId          String?
+  rateCardRevision    Int?
+  currency            String?  @db.VarChar(3)
+  capturedAt          DateTime @default(now())
+  capturedById        String
+  plannedMaterialCost Decimal? @db.Decimal(18, 6)
+  plannedMachineCost  Decimal? @db.Decimal(18, 6)
+  plannedLaborCost    Decimal? @db.Decimal(18, 6)
+  plannedTotalCost    Decimal? @db.Decimal(18, 6)
+  dataQuality         String   @default("PARTIAL")
+  issues              Json
+  createdAt           DateTime @default(now())
+
+  workOrder WorkOrder                   @relation(fields: [workOrderId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  rateCard  CostRateCard?               @relation(fields: [rateCardId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  lines     WorkOrderCostBaselineLine[]
+
+  @@unique([id, tenantId])
+  @@unique([workOrderId, tenantId])
+  @@index([tenantId, rateCardId])
+}
+
+model WorkOrderCostBaselineLine {
+  id          String       @id @default(uuid())
+  tenantId    String
+  baselineId  String
+  kind        CostRateKind
+  targetId    String?
+  operationId String?
+  quantity    Decimal?     @db.Decimal(18, 6)
+  minutes     Decimal?     @db.Decimal(18, 6)
+  rate        Decimal?     @db.Decimal(18, 6)
+  amount      Decimal?     @db.Decimal(18, 6)
+  issueCode   String?
+  provenance  Json
+  createdAt   DateTime     @default(now())
+
+  baseline WorkOrderCostBaseline @relation(fields: [baselineId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@index([tenantId, baselineId, kind])
+}
+
+/// One imported CSV (or dry-run) and its immutable validation result. The
+/// normalized rows are held only to make a later commit deterministic; source
+/// files and credentials are deliberately not retained here.
+model OnboardingImportBatch {
+  id             String                   @id @default(uuid())
+  tenantId       String
+  template       OnboardingImportTemplate
+  mode           OnboardingImportMode
+  status         OnboardingImportStatus
+  sourceChecksum String
+  totalRows      Int
+  validRows      Int
+  createdRows    Int                      @default(0)
+  failureReason  String?
+  createdById    String
+  createdAt      DateTime                 @default(now())
+  committedAt    DateTime?
+
+  tenant     Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User                        @relation(fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+  rowResults OnboardingImportRowResult[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, template, createdAt])
+}
+
+model OnboardingImportRowResult {
+  id              String   @id @default(uuid())
+  tenantId        String
+  batchId         String
+  rowNumber       Int
+  externalKey     String?
+  status          String
+  normalized      Json?
+  errors          Json?
+  createdEntityId String?
+  createdAt       DateTime @default(now())
+
+  batch OnboardingImportBatch @relation(fields: [batchId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([batchId, rowNumber])
+  @@index([tenantId, batchId])
 }
 
 /// RecipeStep'in iş emri anındaki immutable işleme snapshot'ı. Alanlar Recipe
@@ -1966,6 +2261,7 @@ model Supplier {
   purchaseProposals PurchaseProposal[]
   supplierInvoices  SupplierInvoice[]
   payments          SupplierPayment[]
+  supplierLotReturns SupplierLotReturn[]
 
   @@index([tenantId])
 }
@@ -1983,12 +2279,16 @@ model Material {
   /// maliyet hesaplamasında bu malzemenin katkısı "veri yok" olarak işaretlenir.
   standardCost        Decimal?     @db.Decimal(18, 4)
   lotTrackingRequired Boolean      @default(false)
+  /// Opt-in raw-material serial control. Existing materials remain compatible
+  /// until a planner explicitly enables per-unit serial allocation.
+  serialTrackingRequired Boolean   @default(false)
   certificateRequired Boolean      @default(false)
   createdAt           DateTime     @default(now())
   updatedAt           DateTime     @updatedAt
 
   purchaseOrderLines    PurchaseOrderLine[]
   purchaseProposalLines PurchaseProposalLine[]
+  serialNumbers         MaterialSerialNumber[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2233,6 +2533,7 @@ model ProductionMaterialReservation {
   lot            Lot?                                @relation(fields: [lotId], references: [id])
   createdBy      User                                @relation(fields: [createdById], references: [id])
   transactions   ProductionMaterialTransaction[]
+  materialSerialNumbers MaterialSerialNumber[]
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, requirementId, status])
@@ -2552,18 +2853,18 @@ model RecipeHeader {
 }
 
 model RecipeStep {
-  id              String   @id @default(uuid())
-  tenantId        String
-  recipeHeaderId  String
-  seq             Int
-  name            String
-  parameterName   String?
-  parameterValue  String?
-  unit            String?
-  ncProgramId     String?
+  id                String   @id @default(uuid())
+  tenantId          String
+  recipeHeaderId    String
+  seq               Int
+  name              String
+  parameterName     String?
+  parameterValue    String?
+  unit              String?
+  ncProgramId       String?
   /// AHK-011: opsiyonel planlama verisi — WorkOrder oluşturulunca
   /// WorkOrderOperation.standardMinutes'e immutable snapshot olarak kopyalanır.
-  standardMinutes Decimal? @db.Decimal(10, 2)
+  standardMinutes   Decimal? @db.Decimal(10, 2)
   /// CNC-V1-08R: released per-piece ideal cycle standard. This is copied to
   /// WorkOrderOperation and never re-resolved from the mutable Part master.
   idealCycleTimeSec Decimal? @db.Decimal(18, 6)
@@ -2571,9 +2872,9 @@ model RecipeStep {
   /// (gömülü resimler <img data-document-id> referansıyla tutulur, ham signed
   /// URL saklanmaz). WorkOrder oluşturulunca WorkOrderOperation.instructionHtml'e
   /// immutable snapshot olarak kopyalanır (standardMinutes ile aynı desen).
-  instructionHtml String?  @db.Text
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  instructionHtml   String?  @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   recipeHeader        RecipeHeader                  @relation(fields: [recipeHeaderId], references: [id], onDelete: Cascade)
   ncProgram           NcProgram?                    @relation(fields: [ncProgramId], references: [id], onDelete: Restrict)
@@ -3242,14 +3543,19 @@ model Delivery {
   tenantId     String
   dlvNo        String   @unique
   salesOrderId String
-  shippedDate  DateTime @default(now())
-  notes        String?
-  createdById  String
+    shippedDate  DateTime @default(now())
+    notes        String?
+    carrierName  String?
+    trackingReference String?
+    deliveredAt  DateTime?
+    deliveryProofReference String?
+    createdById  String
   createdAt    DateTime @default(now())
 
   salesOrder SalesOrder     @relation(fields: [salesOrderId], references: [id])
   createdBy  User           @relation(fields: [createdById], references: [id])
   lines      DeliveryLine[]
+  customerReturns CustomerReturn[]
 
   @@index([tenantId, salesOrderId])
 }
@@ -3265,8 +3571,46 @@ model DeliveryLine {
 
   delivery       Delivery       @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
   salesOrderLine SalesOrderLine @relation(fields: [salesOrderLineId], references: [id])
+  customerReturnLines CustomerReturnLine[]
 
   @@index([tenantId, deliveryId])
+}
+
+/// Authorization and physical return receipt are separate: receipt writes an
+/// immutable CUSTOMER_RETURN ledger event into the system quarantine location.
+model CustomerReturn {
+  id              String               @id @default(uuid())
+  tenantId        String
+  rmaNo           String               @unique
+  deliveryId      String
+  status          CustomerReturnStatus @default(AUTHORIZED)
+  reason          String
+  authorizedById  String
+  authorizedAt    DateTime             @default(now())
+  receivedById    String?
+  receivedAt      DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  delivery Delivery             @relation(fields: [deliveryId], references: [id])
+  lines    CustomerReturnLine[]
+
+  @@index([tenantId, deliveryId])
+  @@index([tenantId, status])
+}
+
+model CustomerReturnLine {
+  id               String @id @default(uuid())
+  tenantId         String
+  customerReturnId String
+  deliveryLineId   String
+  qty              Decimal @db.Decimal(18, 3)
+
+  customerReturn CustomerReturn @relation(fields: [customerReturnId], references: [id], onDelete: Cascade)
+  deliveryLine   DeliveryLine   @relation(fields: [deliveryLineId], references: [id])
+
+  @@unique([customerReturnId, deliveryLineId])
+  @@index([tenantId, deliveryLineId])
 }
 
 /// Fatura — sadece "kesildi/iptal" durumu var, ödeme/AR takibi yok (Faz G
@@ -3368,6 +3712,7 @@ model Bin {
   cycleCounts                    CycleCount[]
   productionMaterialReservations ProductionMaterialReservation[]
   productionMaterialTransactions ProductionMaterialTransaction[]
+  maintenanceSpareReservations   MaintenanceSpareReservation[]
 
   @@unique([warehouseId, code])
   @@index([tenantId])
@@ -3376,6 +3721,15 @@ model Bin {
 enum StockItemType {
   MATERIAL
   PART
+}
+
+enum MaterialSerialStatus {
+  AVAILABLE
+  RESERVED
+  ISSUED
+  CONSUMED
+  RETURNED
+  SCRAPPED
 }
 
 /// Immutable inventory event types. StockBalance, Material.stockQty and
@@ -3396,6 +3750,13 @@ enum InventoryMovementType {
   QUALITY_SCRAP
   MAINTENANCE_ISSUE
   MAINTENANCE_RETURN
+  CUSTOMER_RETURN
+}
+
+enum CustomerReturnStatus {
+  AUTHORIZED
+  RECEIVED
+  CANCELLED
 }
 
 /// Malzeme/mamul parti (lot) kaydı — genealogy'nin gelecekte WorkOrder
@@ -3420,20 +3781,65 @@ model Lot {
   acceptedAt       DateTime?
   createdAt        DateTime            @default(now())
 
-  stockBalances          StockBalance[]
-  consumptions           MaterialConsumption[]
-  productionReservations ProductionMaterialReservation[]
-  productionTransactions ProductionMaterialTransaction[]
-  finishedGoodsEntries   FinishedGoodsEntry[]
-  serialNumbers          SerialNumber[]
-  inventoryMovements     InventoryMovement[]
-  qualityHolds           QualityHold[]
-  inspectionLots         InspectionLot[]
-  acceptedBy             User?                           @relation("LotAcceptedBy", fields: [acceptedById], references: [id])
+  stockBalances                StockBalance[]
+  consumptions                 MaterialConsumption[]
+  productionReservations       ProductionMaterialReservation[]
+  productionTransactions       ProductionMaterialTransaction[]
+  maintenanceSpareReservations MaintenanceSpareReservation[]
+  finishedGoodsEntries         FinishedGoodsEntry[]
+  serialNumbers                SerialNumber[]
+  materialSerialNumbers        MaterialSerialNumber[]
+  inventoryMovements           InventoryMovement[]
+  qualityHolds                 QualityHold[]
+  inspectionLots               InspectionLot[]
+  acceptedBy                   User?                           @relation("LotAcceptedBy", fields: [acceptedById], references: [id])
+  incomingInspections          IncomingLotInspection[]
+  supplierReturns              SupplierLotReturn[]
 
   @@unique([tenantId, lotNo])
   @@unique([id, tenantId])
   @@index([tenantId, itemType, itemId])
+}
+
+/// Immutable acceptance evidence for a supplier/incoming material lot. This
+/// intentionally records a decision and its note; detailed sampling and gauge
+/// execution remains the separate QMS inspection-lot capability.
+model IncomingLotInspection {
+  id            String                       @id @default(uuid())
+  tenantId      String
+  lotId         String
+  decision      IncomingLotInspectionDecision
+  note          String?
+  inspectedById String
+  inspectedAt   DateTime                     @default(now())
+  createdAt     DateTime                     @default(now())
+
+  lot         Lot  @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  inspectedBy User @relation("IncomingLotInspectedBy", fields: [inspectedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, lotId, inspectedAt])
+}
+
+/// First RTV slice: a rejected incoming material lot physically sent back to
+/// the supplier. It has no inventory ledger effect because rejected lots are
+/// never admitted by the purchase-receipt stock gate.
+model SupplierLotReturn {
+  id                String   @id @default(uuid())
+  tenantId          String
+  lotId             String   @unique
+  supplierId        String
+  quantity          Decimal  @db.Decimal(18, 3)
+  shipmentReference String
+  reason            String
+  returnedById      String
+  returnedAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  lot        Lot      @relation(fields: [lotId], references: [id], onDelete: Restrict)
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  returnedBy User     @relation("SupplierLotReturnedBy", fields: [returnedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, supplierId, returnedAt])
 }
 
 /// Barcode/QR MVP'nin 2. seçeneği — Lot (parti/batch) yerine tekil fiziksel
@@ -3456,6 +3862,30 @@ model SerialNumber {
 
   @@unique([tenantId, serialNo])
   @@index([tenantId, partId])
+}
+
+/// Raw material unit identity is deliberately separate from finished-good
+/// serials. A serial can optionally be tied to a supplier lot and is later
+/// allocated to production through its own reservation lifecycle.
+model MaterialSerialNumber {
+  id         String               @id @default(uuid())
+  tenantId   String
+  serialNo   String
+  materialId String
+  lotId      String?
+  reservationId String?
+  status     MaterialSerialStatus @default(AVAILABLE)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+
+  material Material @relation(fields: [materialId], references: [id])
+  lot      Lot?     @relation(fields: [lotId], references: [id])
+  reservation ProductionMaterialReservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, serialNo])
+  @@index([tenantId, materialId, status])
+  @@index([tenantId, lotId])
+  @@index([tenantId, reservationId])
 }
 
 /// Bin başına malzeme/mamul bakiyesi — polimorfik itemType/itemId deseni
@@ -3977,45 +4407,57 @@ enum MaintenanceSpareTransactionType {
   RETURN
 }
 
+/// Reservation holds maintenance spare stock without changing physical on-hand.
+/// It participates in the same availability calculation as production material.
+enum MaintenanceSpareReservationStatus {
+  OPEN
+  PARTIALLY_ISSUED
+  ISSUED
+  CANCELLED
+}
+
 /// Bakım emri — Faz E MVP'de TAKVİM BAZLI (scheduledDate). Machine'de
 /// kümülatif çalışma saati sayacı yok (OEE hesaplaması MachineStatusEvent'ten
 /// anlık türetiyor, kalıcı sayaç tutmuyor) — runtime-hour bazlı tetikleme
 /// bilinçli olarak kapsam dışı bırakıldı, ileride Machine'e bir sayaç alanı
 /// eklenip bu modelin genişletilmesi gerekir.
 model MaintenanceOrder {
-  id                 String                         @id @default(uuid())
-  tenantId           String
-  plantId            String?
-  bakNo              String                         @unique
-  machineId          String
-  requestId          String?
-  maintenancePlanId  String?
-  breakdownId        String?
-  occurrenceDueAt    DateTime?
-  type               MaintenanceOrderType
-  priority           MaintenancePriority            @default(MEDIUM)
-  status             MaintenanceOrderStatus         @default(DRAFT)
-  description        String?
-  scheduledDate      DateTime?
-  plannedStart       DateTime?
-  plannedFinish      DateTime?
-  blockingFrom       DateTime?
-  blockingUntil      DateTime?
-  actualStart        DateTime?
-  actualFinish       DateTime?
-  completedAt        DateTime?
-  completionNotes    String?
-  resolution         String?
-  failureCodeId      String?
-  causeCodeId        String?
-  remedyCodeId       String?
-  remedy             String?
-  machineDisposition MaintenanceMachineDisposition?
-  notes              String?
-  idempotencyKey     String?
-  createdById        String
-  createdAt          DateTime                       @default(now())
-  updatedAt          DateTime                       @updatedAt
+  id                  String                         @id @default(uuid())
+  tenantId            String
+  plantId             String?
+  bakNo               String                         @unique
+  machineId           String
+  requestId           String?
+  maintenancePlanId   String?
+  breakdownId         String?
+  occurrenceDueAt     DateTime?
+  /// The cumulative runtime threshold that caused this PM work order. Null for
+  /// calendar, corrective and manually-created maintenance orders.
+  runtimeTriggerHours Decimal?                       @db.Decimal(18, 2)
+  type                MaintenanceOrderType
+  priority            MaintenancePriority            @default(MEDIUM)
+  status              MaintenanceOrderStatus         @default(DRAFT)
+  description         String?
+  scheduledDate       DateTime?
+  plannedStart        DateTime?
+  plannedFinish       DateTime?
+  blockingFrom        DateTime?
+  blockingUntil       DateTime?
+  actualStart         DateTime?
+  actualFinish        DateTime?
+  completedAt         DateTime?
+  completionNotes     String?
+  resolution          String?
+  failureCodeId       String?
+  causeCodeId         String?
+  remedyCodeId        String?
+  remedy              String?
+  machineDisposition  MaintenanceMachineDisposition?
+  notes               String?
+  idempotencyKey      String?
+  createdById         String
+  createdAt           DateTime                       @default(now())
+  updatedAt           DateTime                       @updatedAt
 
   plant                 Plant?                            @relation(fields: [plantId, tenantId], references: [id, tenantId], onDelete: Restrict)
   machine               Machine                           @relation(fields: [machineId, tenantId], references: [id, tenantId], onDelete: Restrict)
@@ -4037,6 +4479,7 @@ model MaintenanceOrder {
   @@unique([tenantId, idempotencyKey])
   @@unique([breakdownId, tenantId])
   @@unique([maintenancePlanId, occurrenceDueAt])
+  @@unique([tenantId, machineId, runtimeTriggerHours])
   @@index([tenantId, plantId, status])
   @@index([tenantId, machineId, status])
   @@index([tenantId, scheduledDate])
@@ -4213,16 +4656,42 @@ model MaintenanceSpareLine {
   itemType           StockItemType
   itemId             String
   plannedQuantity    Decimal                       @db.Decimal(18, 6)
+  reservedQty        Decimal                       @default(0) @db.Decimal(18, 6)
   issuedQty          Decimal                       @default(0) @db.Decimal(18, 6)
   returnedQty        Decimal                       @default(0) @db.Decimal(18, 6)
   createdAt          DateTime                      @default(now())
   updatedAt          DateTime                      @updatedAt
   maintenanceOrder   MaintenanceOrder              @relation(fields: [maintenanceOrderId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  reservations       MaintenanceSpareReservation[]
   transactions       MaintenanceSpareTransaction[]
 
   @@unique([id, tenantId])
   @@index([tenantId, maintenanceOrderId])
   @@index([tenantId, itemType, itemId])
+}
+
+model MaintenanceSpareReservation {
+  id             String                            @id @default(uuid())
+  tenantId       String
+  spareLineId    String
+  binId          String
+  lotId          String?
+  quantity       Decimal                           @db.Decimal(18, 6)
+  issuedQty      Decimal                           @default(0) @db.Decimal(18, 6)
+  status         MaintenanceSpareReservationStatus @default(OPEN)
+  idempotencyKey String
+  createdById    String
+  createdAt      DateTime                          @default(now())
+  updatedAt      DateTime                          @updatedAt
+  spareLine      MaintenanceSpareLine              @relation(fields: [spareLineId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  bin            Bin                               @relation(fields: [binId], references: [id])
+  lot            Lot?                              @relation(fields: [lotId], references: [id])
+  createdBy      User                              @relation(fields: [createdById, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, spareLineId, status])
+  @@index([tenantId, binId, lotId, status])
 }
 
 model MaintenanceSpareTransaction {

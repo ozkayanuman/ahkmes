@@ -54,7 +54,7 @@ const isoDate = z.coerce.date();
 // ---- MES-TOOL-001 CNC tooling / fixture ----
 const toolLifePolicySchema = z.enum(["TIME", "CYCLE", "PART_COUNT"]);
 const physicalToolStatusSchema = z.enum(["AVAILABLE", "RESERVED", "IN_USE", "EXPIRED", "BROKEN", "QUARANTINED", "RETIRED"]);
-const physicalFixtureStatusSchema = z.enum(["AVAILABLE", "RESERVED", "IN_USE", "MAINTENANCE", "QUARANTINED", "RETIRED"]);
+const physicalFixtureStatusSchema = z.enum(["AVAILABLE", "RESERVED", "IN_USE", "CHECKED_OUT", "MAINTENANCE", "QUARANTINED", "RETIRED"]);
 const nonNegative = decimalString.refine((n) => n >= 0, "Negative value is not allowed");
 
 const toolDefinitionFields = z.object({
@@ -70,8 +70,14 @@ export type UpdateToolDefinitionDto = z.infer<typeof updateToolDefinitionSchema>
 export const createToolComponentSchema = z.object({ componentType: z.string().trim().min(1), code: z.string().trim().min(1), name: z.string().trim().min(1), manufacturerCode: z.string().trim().optional(), revision: z.string().trim().min(1).default("A"), isActive: z.boolean().default(true) });
 export const createToolAssemblySchema = z.object({ toolDefinitionId: idSchema, code: z.string().trim().min(1), name: z.string().trim().min(1), revision: z.string().trim().min(1).default("A"), isActive: z.boolean().default(true), componentIds: z.array(idSchema).min(1).refine((ids) => new Set(ids).size === ids.length, "Duplicate assembly component") });
 export const createPhysicalToolSchema = z.object({ toolDefinitionId: idSchema, toolAssemblyId: idSchema.optional(), serialNo: z.string().trim().min(1), barcode: z.string().trim().min(1).optional(), location: z.string().trim().optional(), consumedLife: nonNegative.default(0), remainingLife: nonNegative, status: physicalToolStatusSchema.default("AVAILABLE") });
+export const updatePhysicalToolStateSchema = z.object({ location: z.string().trim().min(1).max(120).optional(), status: z.enum(["AVAILABLE", "BROKEN", "QUARANTINED", "RETIRED"]), version: z.number().int().positive(), reason: z.string().trim().min(1).max(500) });
+export type UpdatePhysicalToolStateDto = z.infer<typeof updatePhysicalToolStateSchema>;
+export const recordToolPresetSchema = z.object({ machineId: idSchema, offsetNumber: z.number().int().positive().max(9999), lengthOffset: nonNegative, radiusOffset: nonNegative.optional(), measuredAt: z.coerce.date().optional(), reason: z.string().trim().min(1).max(500) });
+export type RecordToolPresetDto = z.infer<typeof recordToolPresetSchema>;
 export const createFixtureDefinitionSchema = z.object({ code: z.string().trim().min(1), name: z.string().trim().min(1), fixtureType: z.string().trim().min(1), revision: z.string().trim().min(1).default("A"), isActive: z.boolean().default(true) });
 export const createPhysicalFixtureSchema = z.object({ fixtureDefinitionId: idSchema, serialNo: z.string().trim().min(1), barcode: z.string().trim().min(1).optional(), location: z.string().trim().optional(), status: physicalFixtureStatusSchema.default("AVAILABLE") });
+export const fixtureCustodySchema = z.object({ location: z.string().trim().min(1).max(120), version: z.number().int().positive(), reason: z.string().trim().min(1).max(500) });
+export type FixtureCustodyDto = z.infer<typeof fixtureCustodySchema>;
 export const createToolCompatibilitySchema = z.object({ machineId: idSchema, toolDefinitionId: idSchema.optional(), toolAssemblyId: idSchema.optional() }).refine((v) => Boolean(v.toolDefinitionId) !== Boolean(v.toolAssemblyId), "Exactly one tool definition or assembly is required");
 export const createFixtureCompatibilitySchema = z.object({ machineId: idSchema, fixtureDefinitionId: idSchema });
 export const createOperationToolRequirementSchema = z.object({ toolDefinitionId: idSchema.optional(), toolAssemblyId: idSchema.optional(), isRequired: z.boolean().default(true), quantity: z.number().int().positive().default(1), alternativeGroup: z.string().trim().min(1).optional(), sequence: z.number().int().positive().default(1) }).refine((v) => Boolean(v.toolDefinitionId) !== Boolean(v.toolAssemblyId), "Exactly one tool definition or assembly is required");
@@ -264,11 +270,18 @@ export const createMaterialSchema = z.object({
   // bu alanı okuyordu ama UI'dan girilemiyordu (bkz. Faz H/I asimetri notu).
   standardCost: decimalString.optional(),
   lotTrackingRequired: z.boolean().optional(),
+  serialTrackingRequired: z.boolean().optional(),
   certificateRequired: z.boolean().optional(),
 });
 export const updateMaterialSchema = createMaterialSchema.partial();
 export type CreateMaterialDto = z.infer<typeof createMaterialSchema>;
 export type UpdateMaterialDto = z.infer<typeof updateMaterialSchema>;
+export const createMaterialSerialNumberSchema = z.object({
+  serialNo: z.string().trim().min(1).max(160),
+  materialId: idSchema,
+  lotId: idSchema.optional(),
+});
+export type CreateMaterialSerialNumberDto = z.infer<typeof createMaterialSerialNumberSchema>;
 
 // ---- Machine (sadece referans) ----
 export const createMachineSchema = z.object({
@@ -280,6 +293,7 @@ export const createMachineSchema = z.object({
   connectorConfig: z.record(z.unknown()).optional(),
   controllerVerificationRequired: z.boolean().default(false),
   controllerFreshnessSeconds: z.number().int().min(5).max(3600).default(60),
+  operatorQualificationRequired: z.boolean().default(false),
   /// Saha hiyerarşisindeki yeri — null: yerleştirilmemiş/kaldırılmış.
   unitId: idSchema.nullable().optional(),
   /// Faz I Predictive Maintenance: eşik girilirse (runtimeHours - lastPmRuntimeHours)
@@ -295,6 +309,13 @@ export const createMachineSchema = z.object({
 export const updateMachineSchema = createMachineSchema.partial();
 export type CreateMachineDto = z.infer<typeof createMachineSchema>;
 export type UpdateMachineDto = z.infer<typeof updateMachineSchema>;
+
+export const grantOperatorMachineQualificationSchema = z.object({
+  operatorId: idSchema,
+  qualificationReference: z.string().trim().min(1).max(160).optional(),
+  expiresAt: z.coerce.date().optional(),
+});
+export type GrantOperatorMachineQualificationDto = z.infer<typeof grantOperatorMachineQualificationSchema>;
 
 // ---- Saha hiyerarşisi (Plant > Area > Workplace > Unit) ----
 export const createPlantSchema = z.object({
@@ -395,10 +416,30 @@ export const deliveryLineInputSchema = z.object({
 });
 export const createDeliverySchema = z.object({
   salesOrderId: idSchema,
-  notes: z.string().optional(),
+  notes: z.string().max(2_000).optional(),
+  carrierName: z.string().trim().min(1).max(120).optional(),
+  trackingReference: z.string().trim().min(1).max(160).optional(),
   lines: z.array(deliveryLineInputSchema).min(1),
 });
 export type CreateDeliveryDto = z.infer<typeof createDeliverySchema>;
+export const confirmDeliverySchema = z.object({
+  proofReference: z.string().trim().min(1).max(160),
+  deliveredAt: z.coerce.date().optional(),
+});
+export type ConfirmDeliveryDto = z.infer<typeof confirmDeliverySchema>;
+
+// ---- Customer return / RMA ----
+export const customerReturnLineInputSchema = z.object({ deliveryLineId: idSchema, qty: positiveQty });
+export const createCustomerReturnSchema = z.object({
+  deliveryId: idSchema,
+  reason: z.string().trim().min(1).max(1_000),
+  lines: z.array(customerReturnLineInputSchema).min(1),
+});
+export type CreateCustomerReturnDto = z.infer<typeof createCustomerReturnSchema>;
+export const receiveCustomerReturnSchema = z.object({ receivedAt: z.coerce.date().optional() });
+export type ReceiveCustomerReturnDto = z.infer<typeof receiveCustomerReturnSchema>;
+export const cancelCustomerReturnSchema = z.object({ reason: z.string().trim().min(1).max(500) });
+export type CancelCustomerReturnDto = z.infer<typeof cancelCustomerReturnSchema>;
 
 // ---- Invoice (Faz C Pass 2) — sadece kesildi/iptal, ödeme/AR takibi yok ----
 export const invoiceLineInputSchema = z.object({
@@ -452,6 +493,13 @@ export const decideLotAcceptanceSchema = z.object({
   note: z.string().min(1).optional(),
 });
 export type DecideLotAcceptanceDto = z.infer<typeof decideLotAcceptanceSchema>;
+export const createSupplierLotReturnSchema = z.object({
+  supplierId: idSchema,
+  quantity: positiveQty,
+  shipmentReference: z.string().trim().min(1).max(120),
+  reason: z.string().trim().min(1).max(500),
+});
+export type CreateSupplierLotReturnDto = z.infer<typeof createSupplierLotReturnSchema>;
 
 // ---- SerialNumber (Faz K) — Lot'a paralel, tekil fiziksel ürün birimi takibi ----
 export const createSerialNumberSchema = z.object({
@@ -738,13 +786,44 @@ export const createMaintenancePlanSchema = z.object({
 }).refine((v) => Boolean(v.frequency ?? v.frequencyDays ?? v.intervalDays), "frequency is required");
 export type CreateMaintenancePlanDto = z.infer<typeof createMaintenancePlanSchema>;
 
+// ---- CNC-V1-09R planned-versus-actual manufacturing costing ----
+const costRateLineSchema = z
+  .object({
+    kind: z.enum(["MATERIAL", "MACHINE", "LABOR"]),
+    targetId: z.string().trim().min(1).max(120),
+    rate: decimalString,
+  })
+  .superRefine((line, ctx) => {
+    if (line.kind === "LABOR" && line.targetId !== "DEFAULT") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["targetId"], message: "Labor rate must use the DEFAULT target" });
+    }
+    if (line.kind !== "LABOR" && line.targetId === "DEFAULT") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["targetId"], message: "Only labor may use the DEFAULT target" });
+    }
+  });
+
+export const createCostRateCardSchema = z.object({
+  plantId: idSchema,
+  currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
+  effectiveFrom: isoDate,
+  lines: z.array(costRateLineSchema).min(1),
+});
+export type CreateCostRateCardDto = z.infer<typeof createCostRateCardSchema>;
+
+export const updateCostRateCardSchema = createCostRateCardSchema.omit({ plantId: true }).partial();
+export type UpdateCostRateCardDto = z.infer<typeof updateCostRateCardSchema>;
+
+export const costingRateCardQuerySchema = z.object({ plantId: idSchema.optional(), asOf: isoDate.optional() });
+export type CostingRateCardQueryDto = z.infer<typeof costingRateCardQuerySchema>;
+
 export const maintenanceTransitionSchema = z.object({ to: MaintenanceOrderStatusSchema, note: z.string().max(2000).optional(), idempotencyKey: z.string().min(8).max(160) });
 export const assignMaintenanceTechnicianSchema = z.object({ technicianId: idSchema, isPrimary: z.boolean().default(false) });
 export const addMaintenanceTaskSchema = z.object({ sequence: z.number().int().positive(), description: z.string().min(1).max(1000), required: z.boolean().default(false) });
 export const completeMaintenanceTaskSchema = z.object({ completed: z.boolean().default(true) });
 export const addMaintenanceLaborSchema = z.object({ technicianId: idSchema, workDate: isoDate, startedAt: isoDate.optional(), endedAt: isoDate.optional(), durationMinutes: z.number().int().positive().optional(), category: z.string().max(80).optional(), notes: z.string().max(2000).optional(), idempotencyKey: z.string().min(8).max(160) });
 export const addMaintenanceSpareSchema = z.object({ itemType: StockItemTypeSchema, itemId: idSchema, plannedQuantity: positiveQty });
-export const maintenanceSpareMovementSchema = z.object({ quantity: positiveQty, binId: idSchema, lotId: idSchema.optional(), idempotencyKey: z.string().min(8).max(160) });
+export const maintenanceSpareReservationSchema = z.object({ quantity: positiveQty, binId: idSchema, lotId: idSchema.optional(), idempotencyKey: z.string().min(8).max(160) });
+export const maintenanceSpareMovementSchema = z.object({ quantity: positiveQty, binId: idSchema, lotId: idSchema.optional(), reservationId: idSchema.optional(), idempotencyKey: z.string().min(8).max(160) });
 export const returnToServiceSchema = z.object({ maintenanceOrderId: idSchema.optional(), breakdownId: idSchema.optional(), reason: z.string().min(1).max(1000), notes: z.string().max(2000).optional(), idempotencyKey: z.string().min(8).max(160) });
 export const createMaintenanceCodeSchema = z.object({ kind: MaintenanceCodeKindSchema, code: z.string().min(1).max(80), label: z.string().min(1).max(200) });
 export const maintenanceWorkbenchQuerySchema = z.object({ plantId: idSchema.optional(), machineId: idSchema.optional(), status: z.string().optional(), priority: MaintenancePrioritySchema.optional(), technicianId: idSchema.optional(), type: MaintenanceOrderTypeSchema.optional(), dueFrom: isoDate.optional(), dueTo: isoDate.optional() });
@@ -852,6 +931,7 @@ export const createProductionMaterialReservationSchema = z.object({
   requirementId: idSchema,
   binId: idSchema,
   lotId: idSchema.optional(),
+  materialSerialIds: z.array(idSchema).min(1).optional(),
   quantity: positiveQty,
   idempotencyKey: z.string().min(8).max(160),
 });
@@ -861,6 +941,7 @@ export const productionMaterialMutationSchema = z.object({
   quantity: positiveQty,
   binId: idSchema.optional(),
   lotId: idSchema.optional(),
+  materialSerialIds: z.array(idSchema).min(1).optional(),
   reasonCode: z.string().min(1).max(80).optional(),
   idempotencyKey: z.string().min(8).max(160),
 });
