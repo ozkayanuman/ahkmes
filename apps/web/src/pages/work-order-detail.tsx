@@ -139,8 +139,17 @@ export function WorkOrderDetailPage() {
     queryKey: ["/work-orders", id],
     queryFn: () => apiGet<WorkOrderRow>(`/work-orders/${id}`),
   });
+  const oeeContext = (() => {
+    const wo = query.data;
+    if (!wo?.plantId) return null;
+    const now = new Date();
+    const from = wo.plannedStartDate ? new Date(wo.plannedStartDate) : new Date(wo.dueDate);
+    const to = wo.plannedEndDate ? new Date(wo.plannedEndDate) : now;
+    if (!(from.getTime() < to.getTime())) return null;
+    return new URLSearchParams({ plantId: wo.plantId, from: from.toISOString(), to: to.toISOString(), asOf: now.toISOString() });
+  })();
   const oee = useQuery({
-    queryKey: ["/work-orders", id, "oee"],
+    queryKey: ["/work-orders", id, "oee", oeeContext?.toString()],
     queryFn: () =>
       apiGet<{
         quality: number | null;
@@ -148,7 +157,8 @@ export function WorkOrderDetailPage() {
         availability: number | null;
         oee: number | null;
         note?: string;
-      }>(`/work-orders/${id}/oee`),
+      }>(`/work-orders/${id}/oee?${oeeContext!.toString()}`),
+    enabled: !!oeeContext,
   });
   const cost = useQuery({
     queryKey: ["/work-orders", id, "cost"],
@@ -451,14 +461,15 @@ export function WorkOrderDetailPage() {
           <div className="mt-1 font-medium">{wo.machine?.name ?? "Atanmadı"}</div>
         </Card>
         <Card>
-          <div className="text-xs uppercase text-slate-500" title={oee.data?.note}>
-            OEE (Kalite×Performans)
+          <div className="text-xs uppercase text-slate-500" title={oee.data?.note ?? (!oeeContext ? "Tesis atanmamış" : undefined)}>
+            OEE (Kullanılabilirlik×Kalite×Performans)
           </div>
           <div className="mt-1 font-medium">
             {oee.data?.oee != null ? `${(oee.data.oee * 100).toFixed(0)}%` : "Veri yok"}
           </div>
           <div className="mt-1 text-xs text-slate-400">
-            Kalite: {oee.data?.quality != null ? `${(oee.data.quality * 100).toFixed(0)}%` : "—"} · Perf:{" "}
+            Kullanılabilirlik: {oee.data?.availability != null ? `${(oee.data.availability * 100).toFixed(0)}%` : "—"} · Kalite:{" "}
+            {oee.data?.quality != null ? `${(oee.data.quality * 100).toFixed(0)}%` : "—"} · Perf:{" "}
             {oee.data?.performance != null ? `${(oee.data.performance * 100).toFixed(0)}%` : "—"}
           </div>
         </Card>

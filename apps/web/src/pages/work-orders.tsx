@@ -34,6 +34,8 @@ export interface WorkOrderRow {
   routeSnapshotAt?: string | null;
   engineeringReleaseRequired?: boolean;
   plantId?: string | null;
+  plannedStartDate?: string | null;
+  plannedEndDate?: string | null;
   operations?: {
     id: string;
     seq: number;
