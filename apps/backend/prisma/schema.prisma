@@ -1244,6 +1244,9 @@ model User {
   operatorSkills                   OperatorSkill[]                   @relation("OperatorSkillOperator")
   operatorSkillsGranted            OperatorSkill[]                   @relation("OperatorSkillGrantedBy")
   operatorSkillsRevoked            OperatorSkill[]                   @relation("OperatorSkillRevokedBy")
+  copilotDraftsCreated             CopilotDraft[]                    @relation("CopilotDraftCreatedBy")
+  copilotDraftsApproved            CopilotDraft[]                    @relation("CopilotDraftApprovedBy")
+  copilotDraftsRejected            CopilotDraft[]                    @relation("CopilotDraftRejectedBy")
   spcMeasurements                  SpcMeasurement[]
   acknowledgedAlarms               MachineStatusEvent[]              @relation("AcknowledgedAlarms")
   downtimeEventsTriggered          DowntimeEvent[]                   @relation("DowntimeTriggeredBy")
@@ -5159,4 +5162,46 @@ model OidcProvider {
 
   @@unique([tenantId, name])
   @@index([tenantId])
+}
+
+enum CopilotDraftStatus {
+  /// The deterministic engine produced at least one actionable draft, but
+  /// no privileged user has reviewed it yet.
+  PENDING_APPROVAL
+  /// A privileged user marked the draft reviewed and safe to act on
+  /// manually — this flips a flag only; it never executes the underlying
+  /// mutation (material.create etc.) itself. That remains a separate,
+  /// explicit step through the action's own endpoint (AHK-013 M2 boundary).
+  APPROVED
+  REJECTED
+  /// The engine's own response carried no actionable draft (SUGGESTION,
+  /// NEEDS_CLARIFICATION, NO_CHANGES) — kept for the prompt history/audit
+  /// trail, never transitions to APPROVED/REJECTED.
+  NOT_APPROVABLE
+}
+
+/// AHK-013 Copilot Gateway Milestone 2: persists every deterministic-draft
+/// response so a privileged user can review and approve/reject it later,
+/// instead of the draft only ever existing in one request/response cycle.
+/// Approval never executes a mutation by itself — see CopilotDraftStatus.
+model CopilotDraft {
+  id           String             @id @default(uuid())
+  tenantId     String
+  prompt       String
+  /// Full CopilotService.createDraft() response snapshot (suggestions,
+  /// actions/drafts, summary, safety copy) — the UI replays this verbatim.
+  response     Json
+  status       CopilotDraftStatus
+  createdById  String
+  createdAt    DateTime           @default(now())
+  approvedById String?
+  approvedAt   DateTime?
+  rejectedById String?
+  rejectedAt   DateTime?
+
+  createdBy  User  @relation("CopilotDraftCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  approvedBy User? @relation("CopilotDraftApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  rejectedBy User? @relation("CopilotDraftRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, createdAt])
 }
