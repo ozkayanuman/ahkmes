@@ -222,7 +222,15 @@ describe("CNC-V1-07R commercial CMMS closure (PostgreSQL e2e)", () => {
   });
 
   it("X rolls back an issue atomically when persistence fails", async () => {
-    const order = await prisma.maintenanceOrder.findFirstOrThrow({ where: { tenantId, breakdownId: { not: null } } });
+    // By this point the tenant has two breakdown-linked orders: the
+    // original one (COMPLETED by test R-T) and test W's restart-persistence
+    // order (left IN_PROGRESS). An unordered findFirst on breakdownId alone
+    // is not guaranteed to always return the same row, so it would
+    // occasionally pick the COMPLETED order and fail with
+    // MAINTENANCE_ORDER_NOT_EXECUTING (409) before ever reaching the
+    // trigger this test installs — the issue path requires an executable
+    // order. Filtering by status makes the pick deterministic.
+    const order = await prisma.maintenanceOrder.findFirstOrThrow({ where: { tenantId, breakdownId: { not: null }, status: { in: ["IN_PROGRESS", "ON_HOLD"] } } });
     const spare = await auth(api().post(`/maintenance-orders/${order.id}/spares`).send({ itemType: "MATERIAL", itemId: materialId, plannedQuantity: 1 })).expect(201);
     const before = await prisma.stockBalance.findFirstOrThrow({ where: { tenantId, binId, itemId: materialId } });
     await prisma.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION cmms_e2e_fail_spare_tx() RETURNS trigger AS $$ BEGIN IF NEW."idempotencyKey" LIKE 'rollback-%' THEN RAISE EXCEPTION 'CMMS_E2E_ROLLBACK'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`);
