@@ -30,4 +30,16 @@ export class SchedulingController {
     if (toDate < fromDate) throw new BadRequestException("'to' 'from'dan önce olamaz");
     return this.service.capacity(user.tenantId, fromDate, toDate);
   }
+
+  @Get("bottlenecks")
+  bottlenecks(@CurrentUser() user: AuthUser, @Query("from") from?: string, @Query("to") to?: string) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const defaultTo = new Date(today);
+    defaultTo.setDate(defaultTo.getDate() + 13);
+    const fromDate = parseDate(from, today);
+    const toDate = parseDate(to, defaultTo);
+    if (toDate < fromDate) throw new BadRequestException("'to' 'from'dan önce olamaz");
+    return this.service.bottlenecks(user.tenantId, fromDate, toDate);
+  }
 }

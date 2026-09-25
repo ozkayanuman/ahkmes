@@ -44,7 +44,7 @@ function renderPage() {
 describe("SchedulingPage", () => {
   beforeEach(() => {
     apiGet.mockReset().mockImplementation((url: string) =>
-      Promise.resolve(url.startsWith("/scheduling/capacity") ? [] : [WO_ROW]),
+      Promise.resolve(url.startsWith("/scheduling/capacity") || url.startsWith("/scheduling/bottlenecks") ? [] : [WO_ROW]),
     );
     apiPatch.mockReset().mockResolvedValue({ ...WO_ROW, plannedStartDate: "2026-07-28", plannedEndDate: "2026-07-30" });
   });

@@ -23,6 +23,15 @@ interface CapacityRow {
   capacityMinutes: number;
   overloaded: boolean;
 }
+interface BottleneckRow {
+  machineId: string;
+  machineName: string;
+  overloadedDays: number;
+  totalLoadMinutes: number;
+  totalCapacityMinutes: number;
+  totalOverloadMinutes: number;
+  utilization: number | null;
+}
 
 const DAYS_VISIBLE = 14;
 const STATUS_COLOR: Record<string, string> = {
@@ -123,6 +132,10 @@ export function SchedulingPage() {
     }
     return map;
   }, [capacity.data]);
+  const bottlenecks = useQuery({
+    queryKey: ["/scheduling/bottlenecks", today.toISOString(), windowEnd.toISOString()],
+    queryFn: () => apiGet<BottleneckRow[]>(`/scheduling/bottlenecks?from=${today.toISOString()}&to=${windowEnd.toISOString()}`),
+  });
 
   return (
     <div className="space-y-4">
@@ -131,6 +144,38 @@ export function SchedulingPage() {
         Otomatik kapasite planlama algoritması değil — manuel çizelgeleme. Planlanmamış iş emirleri için
         termin tarihi (dueDate) kullanılır.
       </p>
+
+      {(bottlenecks.data ?? []).length > 0 && (
+        <Card>
+          <h2 className="mb-2 text-sm font-semibold text-slate-700">
+            Darboğazlar <span className="font-normal text-slate-400">(pencere boyunca en çok ve en sık aşan makineler, azalan sırayla)</span>
+          </h2>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-slate-400">
+                <th className="pb-1 font-normal">Makine</th>
+                <th className="pb-1 font-normal">Aşan gün</th>
+                <th className="pb-1 font-normal">Toplam yük</th>
+                <th className="pb-1 font-normal">Toplam kapasite</th>
+                <th className="pb-1 font-normal">Toplam aşım</th>
+                <th className="pb-1 font-normal">Kullanım</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(bottlenecks.data ?? []).map((row) => (
+                <tr key={row.machineId} className="border-t border-slate-100">
+                  <td className="py-1 font-medium text-slate-700">{row.machineName}</td>
+                  <td className="py-1">{row.overloadedDays}</td>
+                  <td className="py-1">{row.totalLoadMinutes.toFixed(0)} dk</td>
+                  <td className="py-1">{row.totalCapacityMinutes.toFixed(0)} dk</td>
+                  <td className="py-1 font-medium text-red-600">+{row.totalOverloadMinutes.toFixed(0)} dk</td>
+                  <td className="py-1">{row.utilization != null ? `%${(row.utilization * 100).toFixed(0)}` : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
 
       {capacityByMachine.size > 0 && (
         <Card>

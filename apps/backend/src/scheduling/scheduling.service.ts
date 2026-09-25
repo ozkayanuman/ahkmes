@@ -11,6 +11,17 @@ export interface CapacityRow {
   overloaded: boolean;
 }
 
+export interface BottleneckRow {
+  machineId: string;
+  machineName: string;
+  overloadedDays: number;
+  totalLoadMinutes: number;
+  totalCapacityMinutes: number;
+  totalOverloadMinutes: number;
+  /** totalLoadMinutes / totalCapacityMinutes; null if the machine had zero capacity across the window. */
+  utilization: number | null;
+}
+
 const MAX_WINDOW_DAYS = 366;
 
 function toIsoDate(d: Date): string {
@@ -112,6 +123,42 @@ export class SchedulingService {
       });
     }
     return result.sort((a, b) => a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName));
+  }
+
+  /**
+   * Aggregates capacity() across the window per machine to surface the
+   * persistent bottlenecks — not just "overloaded on some day" but ranked by
+   * how much and how often. Machines with zero overloaded days in the window
+   * are omitted; this is a shortage/bottleneck report, not a full utilization
+   * dashboard.
+   */
+  async bottlenecks(tenantId: string, from: Date, to: Date): Promise<BottleneckRow[]> {
+    const rows = await this.capacity(tenantId, from, to);
+    const byMachine = new Map<string, { machineName: string; overloadedDays: number; totalLoadMinutes: number; totalCapacityMinutes: number; totalOverloadMinutes: number }>();
+    for (const row of rows) {
+      const entry = byMachine.get(row.machineId) ?? { machineName: row.machineName, overloadedDays: 0, totalLoadMinutes: 0, totalCapacityMinutes: 0, totalOverloadMinutes: 0 };
+      entry.totalLoadMinutes += row.loadMinutes;
+      entry.totalCapacityMinutes += row.capacityMinutes;
+      if (row.overloaded) {
+        entry.overloadedDays += 1;
+        entry.totalOverloadMinutes += row.loadMinutes - row.capacityMinutes;
+      }
+      byMachine.set(row.machineId, entry);
+    }
+    const result: BottleneckRow[] = [];
+    for (const [machineId, entry] of byMachine) {
+      if (entry.overloadedDays === 0) continue;
+      result.push({
+        machineId,
+        machineName: entry.machineName,
+        overloadedDays: entry.overloadedDays,
+        totalLoadMinutes: Math.round(entry.totalLoadMinutes * 100) / 100,
+        totalCapacityMinutes: Math.round(entry.totalCapacityMinutes * 100) / 100,
+        totalOverloadMinutes: Math.round(entry.totalOverloadMinutes * 100) / 100,
+        utilization: entry.totalCapacityMinutes > 0 ? Math.round((entry.totalLoadMinutes / entry.totalCapacityMinutes) * 10000) / 10000 : null,
+      });
+    }
+    return result.sort((a, b) => b.totalOverloadMinutes - a.totalOverloadMinutes || b.overloadedDays - a.overloadedDays);
   }
 
   /**
