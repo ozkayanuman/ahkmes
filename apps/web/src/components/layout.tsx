@@ -3,7 +3,10 @@ import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 import { clsx } from "clsx";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
+import { PAGE_PRODUCT_MODULE, type PageKey, type ProductModule } from "@ahkmes/shared-types";
 import { useAuth, hasPageAccess } from "../lib/auth";
+import { apiGet } from "../lib/api";
 import { NAV_GROUPS, type NavGroup } from "../lib/nav-groups";
 import { GlobalStatusBar } from "./global-status-bar";
 import { LanguageSwitcher } from "./language-switcher";
@@ -101,17 +104,34 @@ export function AppLayout() {
   const { t } = useTranslation();
   const { user, loading, logout } = useAuth();
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const entitlements = useQuery({
+    queryKey: ["/platform/modules"],
+    queryFn: () => apiGet<Array<{ module: ProductModule; isEnabled: boolean }>>("/platform/modules"),
+    enabled: !!user,
+    staleTime: 30_000,
+  });
 
   if (loading) {
     return <div className="flex h-screen items-center justify-center text-slate-500">{t("Yükleniyor…")}</div>;
   }
   if (!user) return <Navigate to="/login" replace />;
 
+  const disabledModules = new Set<ProductModule | "PLATFORM_CORE">(
+    (entitlements.data ?? []).filter((item) => !item.isEnabled).map((item) => item.module),
+  );
+  // "platform-modules" is the single recovery route — an administrator must
+  // always be able to reach it to re-enable a disabled module, mirroring
+  // PageGuard's carve-out.
   const visibleGroups = NAV_GROUPS.map((g) => ({
     ...g,
-    items: g.items.filter(
-      (n) => (!n.adminOnly || user.role === "ADMIN") && (!n.page || hasPageAccess(user, n.page)),
-    ),
+    items: g.items.filter((n) => {
+      if (n.adminOnly && user.role !== "ADMIN") return false;
+      if (n.page && !hasPageAccess(user, n.page)) return false;
+      if (n.page === "platform-modules") return true;
+      const module = n.page ? PAGE_PRODUCT_MODULE[n.page as PageKey] : undefined;
+      if (module && disabledModules.has(module)) return false;
+      return true;
+    }),
   })).filter((g) => g.items.length > 0);
 
   return (
