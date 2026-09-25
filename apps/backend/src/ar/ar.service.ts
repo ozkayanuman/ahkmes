@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import type { CreateCustomerPaymentDto } from "@ahkmes/shared-types";
+import type { CreateCustomerPaymentDto, ReconcilePaymentDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { OutboxService } from "../outbox/outbox.service";
 import { nextDocNo } from "../common/numbering";
@@ -7,6 +7,7 @@ import { nextDocNo } from "../common/numbering";
 const PAYMENT_INCLUDE = {
   customer: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
+  reconciledBy: { select: { id: true, name: true } },
   allocations: { include: { invoice: { select: { id: true, invNo: true } } } },
 } as const;
 
@@ -22,11 +23,33 @@ export class ArService {
     private readonly outbox: OutboxService,
   ) {}
 
-  findPayments(tenantId: string, customerId?: string) {
+  findPayments(tenantId: string, customerId?: string, reconciled?: boolean) {
     return this.prisma.customerPayment.findMany({
-      where: { tenantId, ...(customerId ? { customerId } : {}) },
+      where: { tenantId, ...(customerId ? { customerId } : {}), ...(reconciled !== undefined ? { isReconciled: reconciled } : {}) },
       include: PAYMENT_INCLUDE,
       orderBy: { paymentDate: "desc" },
+    });
+  }
+
+  /** Banka ekstresiyle manuel mutabakat — otomatik ekstre içe aktarma/eşleştirme yok. */
+  async reconcilePayment(tenantId: string, userId: string, id: string, dto: ReconcilePaymentDto) {
+    const payment = await this.prisma.customerPayment.findFirst({ where: { id, tenantId } });
+    if (!payment) throw new NotFoundException("Ödeme bulunamadı");
+    if (payment.isReconciled) throw new ConflictException("Ödeme zaten mutabık");
+    return this.prisma.customerPayment.update({
+      where: { id },
+      data: { isReconciled: true, reconciledAt: new Date(), reconciledById: userId, bankReference: dto.bankReference },
+      include: PAYMENT_INCLUDE,
+    });
+  }
+
+  async unreconcilePayment(tenantId: string, id: string) {
+    const payment = await this.prisma.customerPayment.findFirst({ where: { id, tenantId } });
+    if (!payment) throw new NotFoundException("Ödeme bulunamadı");
+    return this.prisma.customerPayment.update({
+      where: { id },
+      data: { isReconciled: false, reconciledAt: null, reconciledById: null, bankReference: null },
+      include: PAYMENT_INCLUDE,
     });
   }
 

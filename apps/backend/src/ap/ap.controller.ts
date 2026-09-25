@@ -2,8 +2,10 @@ import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/co
 import {
   createSupplierInvoiceSchema,
   createSupplierPaymentSchema,
+  reconcilePaymentSchema,
   type CreateSupplierInvoiceDto,
   type CreateSupplierPaymentDto,
+  type ReconcilePaymentDto,
 } from "@ahkmes/shared-types";
 import { ApService } from "./ap.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
@@ -47,8 +49,8 @@ export class ApController {
   }
 
   @Get("payments")
-  findPayments(@CurrentUser() user: AuthUser, @Query("supplierId") supplierId?: string) {
-    return this.service.findPayments(user.tenantId, supplierId);
+  findPayments(@CurrentUser() user: AuthUser, @Query("supplierId") supplierId?: string, @Query("reconciled") reconciled?: string) {
+    return this.service.findPayments(user.tenantId, supplierId, reconciled === undefined ? undefined : reconciled === "true");
   }
 
   @Post("payments")
@@ -58,6 +60,22 @@ export class ApController {
     @Body(new ZodValidationPipe(createSupplierPaymentSchema)) dto: CreateSupplierPaymentDto,
   ) {
     return this.service.createPayment(user.tenantId, user.userId, dto);
+  }
+
+  @Post("payments/:id/reconcile")
+  @Roles("ADMIN", "PLANNER")
+  reconcilePayment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(reconcilePaymentSchema)) dto: ReconcilePaymentDto,
+  ) {
+    return this.service.reconcilePayment(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post("payments/:id/unreconcile")
+  @Roles("ADMIN", "PLANNER")
+  unreconcilePayment(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.unreconcilePayment(user.tenantId, id);
   }
 
   @Get("summary")

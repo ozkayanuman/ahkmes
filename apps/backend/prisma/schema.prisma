@@ -1252,8 +1252,10 @@ model User {
   downtimeEventsTriggered          DowntimeEvent[]                   @relation("DowntimeTriggeredBy")
   downtimeEventsClosed             DowntimeEvent[]                   @relation("DowntimeClosedBy")
   supplierInvoicesCreated          SupplierInvoice[]
-  supplierPaymentsCreated          SupplierPayment[]
-  customerPaymentsCreated          CustomerPayment[]
+  supplierPaymentsCreated          SupplierPayment[]                 @relation("SupplierPaymentCreatedBy")
+  supplierPaymentsReconciled       SupplierPayment[]                 @relation("SupplierPaymentReconciledBy")
+  customerPaymentsCreated          CustomerPayment[]                 @relation("CustomerPaymentCreatedBy")
+  customerPaymentsReconciled       CustomerPayment[]                 @relation("CustomerPaymentReconciledBy")
   energyReadingsCreated            EnergyReading[]
   webhooksCreated                  WebhookSubscription[]
   assignedProjectTasks             ProjectTask[]
@@ -2471,21 +2473,29 @@ model SupplierInvoiceLine {
 /// bölüştürülür (allocations). amount, allocation toplamından türetilir (tek
 /// doğru kaynak allocations'tır).
 model SupplierPayment {
-  id          String   @id @default(uuid())
-  tenantId    String
-  spNo        String   @unique
-  supplierId  String
-  amount      Decimal  @db.Decimal(18, 2)
-  paymentDate DateTime @default(now())
-  notes       String?
-  createdById String
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid())
+  tenantId       String
+  spNo           String   @unique
+  supplierId     String
+  amount         Decimal  @db.Decimal(18, 2)
+  paymentDate    DateTime @default(now())
+  notes          String?
+  createdById    String
+  createdAt      DateTime @default(now())
+  /// Banka mutabakatı: ekstre ile eşleştirildiğinde işaretlenir. Manuel bir
+  /// süreç — otomatik ekstre içe aktarma/eşleştirme kapsam dışıdır.
+  isReconciled   Boolean  @default(false)
+  reconciledAt   DateTime?
+  reconciledById String?
+  bankReference  String?
 
-  supplier    Supplier                    @relation(fields: [supplierId], references: [id])
-  createdBy   User                        @relation(fields: [createdById], references: [id])
-  allocations SupplierPaymentAllocation[]
+  supplier     Supplier                    @relation(fields: [supplierId], references: [id])
+  createdBy    User                        @relation("SupplierPaymentCreatedBy", fields: [createdById], references: [id])
+  reconciledBy User?                       @relation("SupplierPaymentReconciledBy", fields: [reconciledById], references: [id])
+  allocations  SupplierPaymentAllocation[]
 
   @@index([tenantId, supplierId])
+  @@index([tenantId, isReconciled])
 }
 
 model SupplierPaymentAllocation {
@@ -2505,21 +2515,29 @@ model SupplierPaymentAllocation {
 /// bölüştürülür (allocations), SupplierPayment ile aynı desen (alım/satım
 /// simetrisi).
 model CustomerPayment {
-  id          String   @id @default(uuid())
-  tenantId    String
-  cpNo        String   @unique
-  customerId  String
-  amount      Decimal  @db.Decimal(18, 2)
-  paymentDate DateTime @default(now())
-  notes       String?
-  createdById String
-  createdAt   DateTime @default(now())
+  id             String   @id @default(uuid())
+  tenantId       String
+  cpNo           String   @unique
+  customerId     String
+  amount         Decimal  @db.Decimal(18, 2)
+  paymentDate    DateTime @default(now())
+  notes          String?
+  createdById    String
+  createdAt      DateTime @default(now())
+  /// Banka mutabakatı: ekstre ile eşleştirildiğinde işaretlenir. Manuel bir
+  /// süreç — otomatik ekstre içe aktarma/eşleştirme kapsam dışıdır.
+  isReconciled   Boolean  @default(false)
+  reconciledAt   DateTime?
+  reconciledById String?
+  bankReference  String?
 
-  customer    Customer                    @relation(fields: [customerId], references: [id])
-  createdBy   User                        @relation(fields: [createdById], references: [id])
-  allocations CustomerPaymentAllocation[]
+  customer     Customer                    @relation(fields: [customerId], references: [id])
+  createdBy    User                        @relation("CustomerPaymentCreatedBy", fields: [createdById], references: [id])
+  reconciledBy User?                       @relation("CustomerPaymentReconciledBy", fields: [reconciledById], references: [id])
+  allocations  CustomerPaymentAllocation[]
 
   @@index([tenantId, customerId])
+  @@index([tenantId, isReconciled])
 }
 
 model CustomerPaymentAllocation {

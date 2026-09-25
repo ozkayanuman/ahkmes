@@ -47,6 +47,9 @@ interface SupplierPaymentRow {
   paymentDate: string;
   supplier: { id: string; name: string };
   allocations: { amount: string; supplierInvoice: { id: string; sinNo: string } }[];
+  isReconciled: boolean;
+  bankReference: string | null;
+  reconciledBy?: { id: string; name: string } | null;
 }
 interface SummaryRow {
   supplierId: string;
@@ -136,6 +139,19 @@ export function ApPage() {
       const msg = e instanceof ApiError ? (e.body as { message?: string } | null)?.message : undefined;
       toast(msg ?? "Fatura iptal edilemedi", "error");
     },
+  });
+
+  const [reconcileFor, setReconcileFor] = useState<SupplierPaymentRow | null>(null);
+  const [bankReference, setBankReference] = useState("");
+  const reconcile = useMutation({
+    mutationFn: () => apiPost(`/ap/payments/${reconcileFor!.id}/reconcile`, { bankReference }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/ap/payments"] }); setReconcileFor(null); toast("Ödeme mutabık işaretlendi.", "success"); },
+    onError: () => toast("Mutabakat kaydedilemedi.", "error"),
+  });
+  const unreconcile = useMutation({
+    mutationFn: (id: string) => apiPost(`/ap/payments/${id}/unreconcile`, {}),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/ap/payments"] }); toast("Mutabakat geri alındı.", "success"); },
+    onError: () => toast("İşlem başarısız.", "error"),
   });
 
   const createPayment = useMutation({
@@ -247,10 +263,10 @@ export function ApPage() {
             </Button>
           )}
         </div>
-        <Table headers={["No", "Tedarikçi", "Tutar", "Tarih", "Tahsis Edilen Faturalar"]}>
+        <Table headers={["No", "Tedarikçi", "Tutar", "Tarih", "Tahsis Edilen Faturalar", "Banka Mutabakatı"]}>
           {(payments.data ?? []).length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+              <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                 Kayıt yok
               </td>
             </tr>
@@ -263,6 +279,22 @@ export function ApPage() {
               <td className="px-4 py-3">{fmtDate(p.paymentDate)}</td>
               <td className="px-4 py-3 text-slate-500">
                 {p.allocations.map((a) => `${a.supplierInvoice.sinNo}: ${Number(a.amount).toFixed(2)}`).join(", ")}
+              </td>
+              <td className="px-4 py-3">
+                {p.isReconciled ? (
+                  <div className="flex items-center gap-2">
+                    <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-800" title={p.bankReference ?? undefined}>
+                      Mutabık{p.reconciledBy ? ` · ${p.reconciledBy.name}` : ""}
+                    </span>
+                    {canWrite && <Button size="sm" variant="outline" disabled={unreconcile.isPending} onClick={() => unreconcile.mutate(p.id)}>Geri Al</Button>}
+                  </div>
+                ) : (
+                  canWrite ? (
+                    <Button size="sm" variant="outline" onClick={() => { setReconcileFor(p); setBankReference(""); }}>Mutabık Kıl</Button>
+                  ) : (
+                    <span className="text-xs text-slate-400">Mutabık değil</span>
+                  )
+                )}
               </td>
             </tr>
           ))}
@@ -398,6 +430,19 @@ export function ApPage() {
             <Button type="submit" disabled={createPayment.isPending}>
               Kaydet
             </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal open={!!reconcileFor} title={`${reconcileFor?.spNo} — Banka Mutabakatı`} onClose={() => setReconcileFor(null)}>
+        <form onSubmit={(e) => { e.preventDefault(); reconcile.mutate(); }} className="space-y-4">
+          <div>
+            <Label htmlFor="bankRef">Banka Ekstresi Referansı</Label>
+            <Input id="bankRef" required value={bankReference} onChange={(e) => setBankReference(e.target.value)} placeholder="Örn. ekstre tarih/satır no" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setReconcileFor(null)}>Vazgeç</Button>
+            <Button type="submit" disabled={reconcile.isPending}>Mutabık Kıl</Button>
           </div>
         </form>
       </Modal>

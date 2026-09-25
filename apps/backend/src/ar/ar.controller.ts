@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
-import { createCustomerPaymentSchema, type CreateCustomerPaymentDto } from "@ahkmes/shared-types";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { createCustomerPaymentSchema, reconcilePaymentSchema, type CreateCustomerPaymentDto, type ReconcilePaymentDto } from "@ahkmes/shared-types";
 import { ArService } from "./ar.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
@@ -17,8 +17,8 @@ export class ArController {
   constructor(private readonly service: ArService) {}
 
   @Get("payments")
-  findPayments(@CurrentUser() user: AuthUser, @Query("customerId") customerId?: string) {
-    return this.service.findPayments(user.tenantId, customerId);
+  findPayments(@CurrentUser() user: AuthUser, @Query("customerId") customerId?: string, @Query("reconciled") reconciled?: string) {
+    return this.service.findPayments(user.tenantId, customerId, reconciled === undefined ? undefined : reconciled === "true");
   }
 
   @Post("payments")
@@ -28,6 +28,22 @@ export class ArController {
     @Body(new ZodValidationPipe(createCustomerPaymentSchema)) dto: CreateCustomerPaymentDto,
   ) {
     return this.service.createPayment(user.tenantId, user.userId, dto);
+  }
+
+  @Post("payments/:id/reconcile")
+  @Roles("ADMIN", "SALES")
+  reconcilePayment(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(reconcilePaymentSchema)) dto: ReconcilePaymentDto,
+  ) {
+    return this.service.reconcilePayment(user.tenantId, user.userId, id, dto);
+  }
+
+  @Post("payments/:id/unreconcile")
+  @Roles("ADMIN", "SALES")
+  unreconcilePayment(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.unreconcilePayment(user.tenantId, id);
   }
 
   @Get("summary")

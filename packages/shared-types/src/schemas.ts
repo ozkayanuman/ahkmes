@@ -1415,3 +1415,9 @@ export const upsertPriceListLineSchema = z.object({
   discountPercent: z.number().min(0).max(100).optional(),
 });
 export type UpsertPriceListLineDto = z.infer<typeof upsertPriceListLineSchema>;
+
+// ---- AR/AP ödeme banka mutabakatı — manuel, otomatik ekstre eşleştirme kapsam dışı ----
+export const reconcilePaymentSchema = z.object({
+  bankReference: z.string().trim().min(1).max(160),
+});
+export type ReconcilePaymentDto = z.infer<typeof reconcilePaymentSchema>;
