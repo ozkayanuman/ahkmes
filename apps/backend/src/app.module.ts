@@ -15,6 +15,7 @@ import { MaterialsModule } from "./materials/materials.module";
 import { MachinesModule } from "./machines/machines.module";
 import { SkillsModule } from "./skills/skills.module";
 import { QuotesModule } from "./quotes/quotes.module";
+import { PriceListsModule } from "./price-lists/price-lists.module";
 import { WorkOrdersModule } from "./work-orders/work-orders.module";
 import { PurchasingModule } from "./purchasing/purchasing.module";
 import { RealtimeModule } from "./realtime/realtime.module";
@@ -103,6 +104,7 @@ import { CustomerReturnsModule } from "./customer-returns/customer-returns.modul
     SkillsModule,
     RealtimeModule,
     QuotesModule,
+    PriceListsModule,
     WorkOrdersModule,
     PurchasingModule,
     ConsumptionModule,

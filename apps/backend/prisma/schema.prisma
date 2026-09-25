@@ -1357,6 +1357,7 @@ model Customer {
   opportunities  Opportunity[]
   convertedLeads Lead[]
   serviceTickets ServiceTicket[]
+  priceLists     PriceList[]
 
   @@index([tenantId])
 }
@@ -1395,6 +1396,7 @@ model Part {
   serialNumbers         SerialNumber[]
   qualityPlans          QualityPlan[]
   productionDefinitions ProductionDefinition[]
+  priceListLines        PriceListLine[]
 
   @@unique([tenantId, partNo, revision])
   @@index([tenantId])
@@ -5204,4 +5206,42 @@ model CopilotDraft {
   rejectedBy User? @relation("CopilotDraftRejectedBy", fields: [rejectedById], references: [id], onDelete: Restrict)
 
   @@index([tenantId, status, createdAt])
+}
+
+/// A named set of per-part unit prices. customerId null means a general/
+/// default list any customer falls back to; a customer-specific list takes
+/// priority when both match a part (see PriceListsService.resolve()).
+model PriceList {
+  id            String    @id @default(uuid())
+  tenantId      String
+  name          String
+  currency      String
+  customerId    String?
+  isActive      Boolean   @default(true)
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  customer Customer?       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  lines    PriceListLine[]
+
+  @@index([tenantId, customerId, isActive])
+}
+
+model PriceListLine {
+  id              String   @id @default(uuid())
+  tenantId        String
+  priceListId     String
+  partId          String
+  unitPrice       Decimal  @db.Decimal(18, 2)
+  discountPercent Decimal? @db.Decimal(5, 2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  priceList PriceList @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  part      Part      @relation(fields: [partId], references: [id], onDelete: Cascade)
+
+  @@unique([priceListId, partId])
+  @@index([tenantId])
 }

@@ -1390,3 +1390,28 @@ export const createMrpIndependentDemandSchema = z.object({
   reference: z.string().trim().max(300).optional(),
 });
 export type CreateMrpIndependentDemandDto = z.infer<typeof createMrpIndependentDemandSchema>;
+
+// ---- Fiyat listesi / indirim yönetimi — customerId boşsa genel/varsayılan
+// liste, doluysa yalnızca o müşteriye özel ve genel listeye göre öncelikli ----
+export const createPriceListSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  currency: z.string().trim().min(3).max(3),
+  customerId: idSchema.optional(),
+  effectiveFrom: z.coerce.date().optional(),
+  effectiveTo: z.coerce.date().optional(),
+});
+export const updatePriceListSchema = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  isActive: z.boolean().optional(),
+  effectiveFrom: z.coerce.date().nullable().optional(),
+  effectiveTo: z.coerce.date().nullable().optional(),
+});
+export type CreatePriceListDto = z.infer<typeof createPriceListSchema>;
+export type UpdatePriceListDto = z.infer<typeof updatePriceListSchema>;
+
+export const upsertPriceListLineSchema = z.object({
+  partId: idSchema,
+  unitPrice: z.number().nonnegative(),
+  discountPercent: z.number().min(0).max(100).optional(),
+});
+export type UpsertPriceListLineDto = z.infer<typeof upsertPriceListLineSchema>;

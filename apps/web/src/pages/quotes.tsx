@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Search, Tags, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, apiGet, apiPost } from "../lib/api";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { fmtDate, fmtMoney } from "../lib/format";
 import { useInvalidateOn } from "../lib/socket";
+import { useToast } from "../components/toast";
 import { QUOTE_STATUS, StatusBadge } from "../components/status";
 import { Button, Input, Label, Modal, Select, Table } from "../components/ui";
 
@@ -41,6 +42,132 @@ const emptyLine = (): LineDraft => ({ partId: "", quantity: "", unitPrice: "", d
 export const quoteTotal = (lines: { quantity: string; unitPrice: string }[]) =>
   lines.reduce((sum, l) => sum + Number(l.quantity) * Number(l.unitPrice), 0);
 
+interface PriceListRow {
+  id: string;
+  name: string;
+  currency: string;
+  customerId: string | null;
+  customer?: { id: string; name: string } | null;
+  isActive: boolean;
+}
+interface PriceListLineRow {
+  id: string;
+  unitPrice: string;
+  discountPercent: string | null;
+  part: { id: string; partNo: string; name: string };
+}
+
+/** Fiyat listesi/indirim yönetimi — customerId boş "Genel" bir liste, doluysa
+ * yalnızca o müşteriye özel ve teklif satırı ekleme formunda önceliklidir. */
+function PriceListsModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [selected, setSelected] = useState<PriceListRow | null>(null);
+  const [newList, setNewList] = useState({ name: "", currency: "TRY", customerId: "" });
+  const [lineForm, setLineForm] = useState({ partId: "", unitPrice: "", discountPercent: "" });
+
+  const lists = useQuery({ queryKey: ["/price-lists"], queryFn: () => apiGet<PriceListRow[]>("/price-lists") });
+  const customers = useQuery({ queryKey: ["/customers"], queryFn: () => apiGet<Option[]>("/customers") });
+  const parts = useQuery({ queryKey: ["/parts"], queryFn: () => apiGet<PartOption[]>("/parts") });
+  const lines = useQuery({
+    queryKey: ["/price-lists", selected?.id, "lines"],
+    queryFn: () => apiGet<PriceListLineRow[]>(`/price-lists/${selected!.id}/lines`),
+    enabled: !!selected,
+  });
+
+  const createList = useMutation({
+    mutationFn: () => apiPost<PriceListRow>("/price-lists", { name: newList.name, currency: newList.currency, ...(newList.customerId ? { customerId: newList.customerId } : {}) }),
+    onSuccess: (created) => { qc.invalidateQueries({ queryKey: ["/price-lists"] }); setNewList({ name: "", currency: "TRY", customerId: "" }); setSelected(created); toast("Fiyat listesi oluşturuldu.", "success"); },
+    onError: () => toast("Fiyat listesi oluşturulamadı.", "error"),
+  });
+  const deactivate = useMutation({
+    mutationFn: (id: string) => apiPatch(`/price-lists/${id}`, { isActive: false }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/price-lists"] }); toast("Fiyat listesi pasifleştirildi.", "success"); },
+    onError: () => toast("İşlem başarısız.", "error"),
+  });
+  const upsertLine = useMutation({
+    mutationFn: () => apiPost(`/price-lists/${selected!.id}/lines`, { partId: lineForm.partId, unitPrice: Number(lineForm.unitPrice), ...(lineForm.discountPercent ? { discountPercent: Number(lineForm.discountPercent) } : {}) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/price-lists", selected?.id, "lines"] }); setLineForm({ partId: "", unitPrice: "", discountPercent: "" }); toast("Fiyat satırı kaydedildi.", "success"); },
+    onError: () => toast("Fiyat satırı kaydedilemedi.", "error"),
+  });
+  const removeLine = useMutation({
+    mutationFn: (lineId: string) => apiDelete(`/price-lists/${selected!.id}/lines/${lineId}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/price-lists", selected?.id, "lines"] }); toast("Fiyat satırı kaldırıldı.", "success"); },
+    onError: () => toast("Kaldırılamadı.", "error"),
+  });
+
+  return (
+    <Modal open title="Fiyat Listeleri" onClose={onClose} className="max-w-3xl">
+      <div className="grid gap-4 sm:grid-cols-[220px_1fr]">
+        <div className="space-y-2">
+          <div className="max-h-64 space-y-1 overflow-y-auto">
+            {lists.data?.map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setSelected(l)}
+                className={`w-full rounded border px-2 py-1.5 text-left text-sm ${selected?.id === l.id ? "border-brand-400 bg-brand-50" : "border-slate-200"} ${!l.isActive ? "opacity-50" : ""}`}
+              >
+                <div className="font-medium">{l.name}</div>
+                <div className="text-xs text-slate-500">{l.customer?.name ?? "Genel"} · {l.currency}{!l.isActive ? " · pasif" : ""}</div>
+              </button>
+            ))}
+            {lists.data?.length === 0 && <p className="text-xs text-slate-400">Henüz fiyat listesi yok.</p>}
+          </div>
+          <div className="space-y-2 border-t border-slate-100 pt-3">
+            <Input placeholder="Liste adı" value={newList.name} onChange={(e) => setNewList({ ...newList, name: e.target.value })} />
+            <Select value={newList.currency} onChange={(e) => setNewList({ ...newList, currency: e.target.value })}>
+              <option value="TRY">TRY</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </Select>
+            <Select value={newList.customerId} onChange={(e) => setNewList({ ...newList, customerId: e.target.value })}>
+              <option value="">Genel (tüm müşteriler)</option>
+              {customers.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+            <Button className="w-full" disabled={!newList.name.trim() || createList.isPending} onClick={() => createList.mutate()}>Yeni Liste</Button>
+          </div>
+        </div>
+        <div>
+          {!selected ? (
+            <p className="text-sm text-slate-400">Satırları görmek için soldan bir liste seçin.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium">{selected.name}</h3>
+                {selected.isActive && <Button size="sm" variant="outline" disabled={deactivate.isPending} onClick={() => deactivate.mutate(selected.id)}>Pasifleştir</Button>}
+              </div>
+              <div className="grid grid-cols-[1fr_100px_90px_70px] gap-2">
+                <Select value={lineForm.partId} onChange={(e) => setLineForm({ ...lineForm, partId: e.target.value })}>
+                  <option value="">Parça…</option>
+                  {parts.data?.map((p) => <option key={p.id} value={p.id}>{p.partNo} — {p.name}</option>)}
+                </Select>
+                <Input type="number" step="any" min="0" placeholder="B.Fiyat" value={lineForm.unitPrice} onChange={(e) => setLineForm({ ...lineForm, unitPrice: e.target.value })} />
+                <Input type="number" step="any" min="0" max="100" placeholder="İndirim %" value={lineForm.discountPercent} onChange={(e) => setLineForm({ ...lineForm, discountPercent: e.target.value })} />
+                <Button disabled={!lineForm.partId || !lineForm.unitPrice || upsertLine.isPending} onClick={() => upsertLine.mutate()}>Ekle</Button>
+              </div>
+              <div className="max-h-56 space-y-1 overflow-y-auto text-sm">
+                {lines.data?.map((row) => (
+                  <div key={row.id} className="flex items-center justify-between rounded border border-slate-100 px-2 py-1">
+                    <span>{row.part.partNo} — {row.part.name}</span>
+                    <span className="flex items-center gap-2 text-slate-600">
+                      {fmtMoney(Number(row.unitPrice), selected.currency)}
+                      {row.discountPercent && <span className="text-xs text-emerald-600">−%{Number(row.discountPercent)}</span>}
+                      <Button size="sm" variant="ghost" className="px-1 py-0.5 text-red-600" onClick={() => removeLine.mutate(row.id)}><Trash2 className="h-3 w-3" /></Button>
+                    </span>
+                  </div>
+                ))}
+                {lines.data?.length === 0 && <p className="text-xs text-slate-400">Bu listede fiyat satırı yok.</p>}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="mt-4 flex justify-end"><Button variant="outline" onClick={onClose}>Kapat</Button></div>
+    </Modal>
+  );
+}
+
 export function QuotesPage() {
   const { user } = useAuth();
   const canWrite = !!user && ["ADMIN", "SALES"].includes(user.role);
@@ -55,6 +182,7 @@ export function QuotesPage() {
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([emptyLine()]);
   const [err, setErr] = useState<string | null>(null);
+  const [showPriceLists, setShowPriceLists] = useState(false);
 
   useInvalidateOn(["quote.updated"], ["/quotes"]);
 
@@ -117,15 +245,37 @@ export function QuotesPage() {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   }
 
+  /** Parça seçilince, müşteriye özel veya genel fiyat listesinden bir öneri
+   * çeker — yalnızca birim fiyat henüz boşsa doldurur, elle girilmiş bir
+   * değerin üzerine yazmaz. */
+  async function applyPriceSuggestion(i: number, partId: string) {
+    if (!partId || !customerId) return;
+    try {
+      const match = await apiGet<{ unitPrice: string; discountPercent: string | null } | null>(
+        `/price-lists/resolve?partId=${partId}&customerId=${customerId}`,
+      );
+      if (!match) return;
+      const effective = Number(match.unitPrice) * (1 - Number(match.discountPercent ?? 0) / 100);
+      setLines((ls) => ls.map((l, idx) => (idx === i && l.partId === partId && !l.unitPrice ? { ...l, unitPrice: effective.toFixed(2) } : l)));
+    } catch {
+      // Fiyat önerisi opsiyonel bir kolaylık — bulunamazsa satır elle doldurulmaya devam eder.
+    }
+  }
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Teklifler</h1>
-        {canWrite && (
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> Yeni Teklif
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowPriceLists(true)}>
+            <Tags className="h-4 w-4" /> Fiyat Listeleri
           </Button>
-        )}
+          {canWrite && (
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" /> Yeni Teklif
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-3">
@@ -245,7 +395,7 @@ export function QuotesPage() {
                     <Select
                       required
                       value={l.partId}
-                      onChange={(e) => setLine(i, { partId: e.target.value })}
+                      onChange={(e) => { setLine(i, { partId: e.target.value }); void applyPriceSuggestion(i, e.target.value); }}
                     >
                       <option value="">Parça…</option>
                       {parts.data?.map((p) => (
@@ -307,6 +457,7 @@ export function QuotesPage() {
           </div>
         </form>
       </Modal>
+      {showPriceLists && <PriceListsModal onClose={() => setShowPriceLists(false)} />}
     </div>
   );
 }
