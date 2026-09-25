@@ -2,15 +2,45 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import type { CreateOpportunityDto, UpdateOpportunityDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 
+const OPEN_STAGES = ["NEW", "QUALIFIED", "PROPOSAL"] as const;
+
 @Injectable()
 export class OpportunitiesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** customerId verilmezse tenant genelinde satış hattı (pipeline) görünümü için
+   * kullanılır — bu yüzden müşteri adı her zaman include edilir. */
   findAll(tenantId: string, customerId?: string) {
     return this.prisma.opportunity.findMany({
       where: { tenantId, ...(customerId ? { customerId } : {}) },
+      include: { customer: { select: { id: true, name: true } } },
       orderBy: { createdAt: "desc" },
     });
+  }
+
+  /**
+   * Aşama bazlı sayı + tahmini değer toplamı — açık aşamalar (NEW/QUALIFIED/
+   * PROPOSAL) için satış hattının o anki büyüklüğünü, WON/LOST için kapanmış
+   * hacmi gösterir. Değeri boş fırsatlar toplamı etkilemez (0 sayılır).
+   */
+  async pipelineSummary(tenantId: string) {
+    const rows = await this.prisma.opportunity.groupBy({
+      by: ["stage"],
+      where: { tenantId },
+      _count: { _all: true },
+      _sum: { estimatedValue: true },
+    });
+    const byStage = new Map(rows.map((r) => [r.stage, { count: r._count._all, totalValue: r._sum.estimatedValue }]));
+    const stages = ["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"] as const;
+    const summary = stages.map((stage) => ({
+      stage,
+      count: byStage.get(stage)?.count ?? 0,
+      totalValue: byStage.get(stage)?.totalValue ?? null,
+    }));
+    const openTotalValue = summary
+      .filter((s) => (OPEN_STAGES as readonly string[]).includes(s.stage))
+      .reduce((sum, s) => sum + Number(s.totalValue ?? 0), 0);
+    return { byStage: summary, openTotalValue };
   }
 
   async findOne(tenantId: string, id: string) {

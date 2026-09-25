@@ -3,7 +3,14 @@ import { OpportunitiesService } from "./opportunities.service";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma = {
-    opportunity: { findFirst: jest.fn(), findMany: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
+    opportunity: {
+      findFirst: jest.fn(),
+      findMany: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      groupBy: jest.fn(),
+    },
     customer: { findFirst: jest.fn() },
     ...overrides,
   };
@@ -57,5 +64,39 @@ describe("OpportunitiesService.update", () => {
     const call = prisma.opportunity.update.mock.calls[0][0];
     expect(call.data.wonAt).toBeUndefined();
     expect(call.data.lostAt).toBeUndefined();
+  });
+});
+
+describe("OpportunitiesService.pipelineSummary", () => {
+  it("her aşama için sayı/toplam döner, veri olmayan aşamalarda 0/null verir", async () => {
+    const { service, prisma } = buildService();
+    prisma.opportunity.groupBy.mockResolvedValue([
+      { stage: "NEW", _count: { _all: 2 }, _sum: { estimatedValue: 5000 } },
+      { stage: "WON", _count: { _all: 1 }, _sum: { estimatedValue: 3000 } },
+    ]);
+
+    const result = await service.pipelineSummary("t1");
+
+    expect(result.byStage).toEqual([
+      { stage: "NEW", count: 2, totalValue: 5000 },
+      { stage: "QUALIFIED", count: 0, totalValue: null },
+      { stage: "PROPOSAL", count: 0, totalValue: null },
+      { stage: "WON", count: 1, totalValue: 3000 },
+      { stage: "LOST", count: 0, totalValue: null },
+    ]);
+  });
+
+  it("açık toplam (openTotalValue) sadece NEW/QUALIFIED/PROPOSAL toplamıdır, WON/LOST dahil edilmez", async () => {
+    const { service, prisma } = buildService();
+    prisma.opportunity.groupBy.mockResolvedValue([
+      { stage: "NEW", _count: { _all: 1 }, _sum: { estimatedValue: 1000 } },
+      { stage: "QUALIFIED", _count: { _all: 1 }, _sum: { estimatedValue: 2000 } },
+      { stage: "WON", _count: { _all: 1 }, _sum: { estimatedValue: 9000 } },
+      { stage: "LOST", _count: { _all: 1 }, _sum: { estimatedValue: 4000 } },
+    ]);
+
+    const result = await service.pipelineSummary("t1");
+
+    expect(result.openTotalValue).toBe(3000);
   });
 });

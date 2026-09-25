@@ -4,6 +4,7 @@ import { LoginPage } from "./pages/login";
 import { OidcCallbackPage } from "./pages/oidc-callback";
 import { DashboardPage } from "./pages/dashboard";
 import { CustomersPage } from "./pages/customers";
+import { PipelinePage } from "./pages/pipeline";
 import { PartsPage } from "./pages/parts";
 import { SuppliersPage } from "./pages/suppliers";
 import { MaterialsPage } from "./pages/materials";
@@ -75,6 +76,7 @@ export function App() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/copilot" element={<PageGuard page="copilot"><CopilotPage /></PageGuard>} />
         <Route path="/customers" element={<PageGuard page="customers"><CustomersPage /></PageGuard>} />
+        <Route path="/pipeline" element={<PageGuard page="customers"><PipelinePage /></PageGuard>} />
         <Route path="/leads" element={<PageGuard page="leads"><LeadsPage /></PageGuard>} />
         <Route path="/service-tickets" element={<PageGuard page="service-tickets"><ServiceTicketsPage /></PageGuard>} />
         <Route path="/rfq" element={<PageGuard page="rfq"><RfqPage /></PageGuard>} />

@@ -30,6 +30,11 @@ export class OpportunitiesController {
     return this.service.findAll(user.tenantId, customerId);
   }
 
+  @Get("pipeline-summary")
+  pipelineSummary(@CurrentUser() user: AuthUser) {
+    return this.service.pipelineSummary(user.tenantId);
+  }
+
   @Get(":id")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);

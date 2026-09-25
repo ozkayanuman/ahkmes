@@ -21,6 +21,7 @@ import {
   ShieldAlert,
   ShoppingCart,
   Siren,
+  Target,
   FlaskConical,
   ListOrdered,
   Landmark,
@@ -78,6 +79,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Briefcase,
     items: [
       { to: "/customers", label: "Müşteriler", icon: Users, page: "customers" },
+      { to: "/pipeline", label: "Satış Hattı", icon: Target, page: "customers" },
       { to: "/leads", label: "Potansiyel Müşteriler", icon: Users2, page: "leads" },
       { to: "/service-tickets", label: "Servis Talepleri", icon: LifeBuoy, page: "service-tickets" },
       { to: "/rfq", label: "Teklif Talepleri (RFQ)", icon: FileText, page: "rfq" },
