@@ -104,3 +104,66 @@ describe("SpcService.stats", () => {
     expect(result.cpk).not.toBeNull();
   });
 });
+
+describe("SpcService.controlChart", () => {
+  function rowsFor(values: number[]) {
+    return values.map((value, i) => ({
+      id: `m${i + 1}`,
+      value: String(value),
+      measuredAt: new Date(2026, 0, i + 1),
+    }));
+  }
+
+  it("8'den az ölçümde limitler hesaplanmaz, boş ihlal listesi döner", async () => {
+    const { service, prisma } = buildService();
+    prisma.spcCharacteristic.findFirst.mockResolvedValue({ id: "c1" });
+    prisma.spcMeasurement.findMany.mockResolvedValue(rowsFor([10, 10, 10]));
+
+    const result = await service.controlChart("t1", "c1");
+
+    expect(result.sampleSize).toBe(3);
+    expect(result.centerLine).toBeNull();
+    expect(result.violations).toEqual([]);
+    expect(result.note).toContain("en az 8 ölçüm");
+  });
+
+  it("kararlı bir süreçte hiçbir Nelson kuralı ihlal edilmez", async () => {
+    const { service, prisma } = buildService();
+    prisma.spcCharacteristic.findFirst.mockResolvedValue({ id: "c1" });
+    // Merkez etrafında küçük, dengeli salınım — hiçbir kural tetiklenmemeli.
+    prisma.spcMeasurement.findMany.mockResolvedValue(rowsFor([10, 10.5, 9.5, 10.2, 9.8, 10.1, 9.9, 10.3, 9.7, 10]));
+
+    const result = await service.controlChart("t1", "c1");
+
+    expect(result.centerLine).not.toBeNull();
+    expect(result.violations).toEqual([]);
+  });
+
+  it("Kural 1: tek nokta 3-sigma dışında ise tespit edilir", async () => {
+    const { service, prisma } = buildService();
+    prisma.spcCharacteristic.findFirst.mockResolvedValue({ id: "c1" });
+    // İstikrarlı bir taban çizgisi + son noktada büyük bir sıçrama.
+    prisma.spcMeasurement.findMany.mockResolvedValue(
+      rowsFor([10, 10.1, 9.9, 10, 10.1, 9.9, 10, 9.9, 50]),
+    );
+
+    const result = await service.controlChart("t1", "c1");
+
+    const rule1 = result.violations.filter((v) => v.rule === 1);
+    expect(rule1).toHaveLength(1);
+    expect(rule1[0].measurementId).toBe("m9");
+  });
+
+  it("Kural 2: 9 ardışık nokta merkez hattının aynı tarafında ise tespit edilir", async () => {
+    const { service, prisma } = buildService();
+    prisma.spcCharacteristic.findFirst.mockResolvedValue({ id: "c1" });
+    // İlk 5 nokta merkezi belirler (ortalamayı ~10'a çeker), sonraki 9 nokta hep üstünde.
+    prisma.spcMeasurement.findMany.mockResolvedValue(
+      rowsFor([10, 9, 10, 9, 10, 10.4, 10.3, 10.5, 10.2, 10.4, 10.3, 10.5, 10.2, 10.4]),
+    );
+
+    const result = await service.controlChart("t1", "c1");
+
+    expect(result.violations.some((v) => v.rule === 2)).toBe(true);
+  });
+});

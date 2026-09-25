@@ -36,6 +36,11 @@ export class SpcController {
     return this.service.stats(user.tenantId, id);
   }
 
+  @Get("characteristics/:id/control-chart")
+  controlChart(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.controlChart(user.tenantId, id);
+  }
+
   @Post("characteristics")
   @Roles("ADMIN", "PLANNER", "FOREMAN")
   createCharacteristic(

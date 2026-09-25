@@ -41,6 +41,20 @@ interface StatsResult {
   cpk: number | null;
   note?: string;
 }
+interface ControlChartViolation {
+  measurementId: string;
+  rule: number;
+  description: string;
+}
+interface ControlChartResult {
+  sampleSize: number;
+  centerLine: number | null;
+  ucl: number | null;
+  lcl: number | null;
+  sigma: number | null;
+  violations: ControlChartViolation[];
+  note?: string;
+}
 
 export function SpcPage() {
   const { user } = useAuth();
@@ -86,6 +100,14 @@ export function SpcPage() {
     queryFn: () => apiGet<StatsResult>(`/spc/characteristics/${selected!.id}/stats`),
     enabled: !!selected,
   });
+  const controlChart = useQuery({
+    queryKey: ["/spc/characteristics", selected?.id, "control-chart"],
+    queryFn: () => apiGet<ControlChartResult>(`/spc/characteristics/${selected!.id}/control-chart`),
+    enabled: !!selected,
+  });
+  const violationByMeasurementId = new Map(
+    (controlChart.data?.violations ?? []).map((v) => [v.measurementId, v]),
+  );
 
   const createChar = useMutation({
     mutationFn: () =>
@@ -117,6 +139,7 @@ export function SpcPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/spc/measurements", selected?.id] });
       qc.invalidateQueries({ queryKey: ["/spc/characteristics", selected?.id, "stats"] });
+      qc.invalidateQueries({ queryKey: ["/spc/characteristics", selected?.id, "control-chart"] });
       qc.invalidateQueries({ queryKey: ["/non-conformances"] });
       setMeasureOpen(false);
       setValue("");
@@ -206,35 +229,86 @@ export function SpcPage() {
               </div>
             )}
 
-            <Table headers={["Değer", "Durum", "İş Emri", "Ölçen", "Tarih"]}>
+            {controlChart.data && (
+              <div className="mb-4 rounded-lg border border-slate-200 p-3 text-sm">
+                <div className="mb-2 font-semibold">Kontrol Grafiği (I-MR, Nelson Kuralları)</div>
+                {controlChart.data.centerLine !== null ? (
+                  <div className="mb-2 grid grid-cols-3 gap-3">
+                    <div>
+                      <div className="text-slate-500">Merkez Hattı (CL)</div>
+                      <div className="font-semibold">{controlChart.data.centerLine.toFixed(3)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">UCL (3σ)</div>
+                      <div className="font-semibold">{controlChart.data.ucl?.toFixed(3)}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">LCL (3σ)</div>
+                      <div className="font-semibold">{controlChart.data.lcl?.toFixed(3)}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-amber-600">{controlChart.data.note}</div>
+                )}
+                {controlChart.data.violations.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {controlChart.data.violations.map((v, i) => (
+                      <li key={`${v.measurementId}-${v.rule}-${i}`} className="text-xs text-red-700">
+                        Kural {v.rule}: {v.description}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {controlChart.data.centerLine !== null && controlChart.data.violations.length === 0 && (
+                  <div className="text-xs text-green-700">Süreç istatistiksel kontrol altında — kural ihlali yok.</div>
+                )}
+              </div>
+            )}
+
+            <Table headers={["Değer", "Durum", "Kontrol", "İş Emri", "Ölçen", "Tarih"]}>
               {(measurements.data ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
                     Ölçüm yok
                   </td>
                 </tr>
               )}
-              {(measurements.data ?? []).map((m) => (
-                <tr key={m.id}>
-                  <td className="px-4 py-3 font-medium">{m.value}</td>
-                  <td className="px-4 py-3">
-                    {m.inSpec === null ? (
-                      "—"
-                    ) : m.inSpec ? (
-                      <span className="inline-flex rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
-                        Limit İçi
-                      </span>
-                    ) : (
-                      <span className="inline-flex rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
-                        Limit Dışı
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">{m.workOrder?.woNo ?? "—"}</td>
-                  <td className="px-4 py-3">{m.measuredBy.name}</td>
-                  <td className="px-4 py-3">{fmtDate(m.measuredAt)}</td>
-                </tr>
-              ))}
+              {(measurements.data ?? []).map((m) => {
+                const violation = violationByMeasurementId.get(m.id);
+                return (
+                  <tr key={m.id}>
+                    <td className="px-4 py-3 font-medium">{m.value}</td>
+                    <td className="px-4 py-3">
+                      {m.inSpec === null ? (
+                        "—"
+                      ) : m.inSpec ? (
+                        <span className="inline-flex rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
+                          Limit İçi
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
+                          Limit Dışı
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {violation ? (
+                        <span
+                          className="inline-flex rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700"
+                          title={violation.description}
+                        >
+                          Kural {violation.rule}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-3">{m.workOrder?.woNo ?? "—"}</td>
+                    <td className="px-4 py-3">{m.measuredBy.name}</td>
+                    <td className="px-4 py-3">{fmtDate(m.measuredAt)}</td>
+                  </tr>
+                );
+              })}
             </Table>
           </div>
         )}
