@@ -11,6 +11,7 @@ import { AuthService } from "../auth/auth.service";
 import { nextDocNo } from "../common/numbering";
 import { ProductionCalendarService } from "../production-calendar/production-calendar.service";
 import { UomService } from "../uom/uom.service";
+import { SupplierMaterialsService } from "../supplier-materials/supplier-materials.service";
 import { MrpRunSynchronization } from "./mrp-run-synchronization";
 
 const PP_INCLUDE = {
@@ -51,6 +52,7 @@ export class MrpService {
     private readonly calendar?: ProductionCalendarService,
     private readonly uom?: UomService,
     private readonly synchronization?: MrpRunSynchronization,
+    private readonly supplierMaterials?: SupplierMaterialsService,
   ) {}
 
   /** MRP II için kapasite girdilerinin gerçek durumunu gösterir. Mevcut modelde
@@ -367,6 +369,10 @@ export class MrpService {
       return { purchaseProposal: null, productionProposals: [], unresolvedPartIds };
     }
 
+    const commonPreferredSupplierId = this.supplierMaterials
+      ? await this.supplierMaterials.findCommonPreferredSupplier(tenantId, shortfallLines.map((line) => line.materialId))
+      : null;
+
     const result = await this.prisma.$transaction(async (tx) => {
       let purchaseProposal = null as Awaited<ReturnType<typeof tx.purchaseProposal.create>> | null;
       if (shortfallLines.length > 0) {
@@ -375,7 +381,7 @@ export class MrpService {
           data: {
             tenantId,
             ppNo,
-            supplierId: null,
+            supplierId: commonPreferredSupplierId,
             lines: {
               create: shortfallLines.map((l) => ({
                 tenantId,
@@ -575,7 +581,58 @@ export class MrpService {
   async createIndependentDemand(tenantId: string, userId: string, input: any) {
     await this.assertPlant(tenantId, input.plantId);
     await this.assertPlanningItem(tenantId, input.itemType, input.itemId);
-    return (this.prisma as any).mrpIndependentDemand.create({ data: { tenantId, createdById: userId, ...input } });
+    return this.prisma.$transaction(async (tx) => {
+      const created = await (tx as any).mrpIndependentDemand.create({ data: { tenantId, createdById: userId, ...input } });
+      await (tx as any).auditLog.create({ data: { tenantId, userId, entity: "mrp-independent-demand", entityId: created.id, action: "CREATE", after: created } });
+      return created;
+    });
+  }
+
+  /**
+   * The V1 forecast is an explainable simple moving average. It is a preview
+   * only: no planning input is created until a planner explicitly applies it.
+   */
+  async previewDemandForecast(tenantId: string, input: { plantId: string; asOf?: Date; historyMonths: number; requiredDate?: Date }) {
+    await this.assertPlant(tenantId, input.plantId);
+    const asOf = input.asOf ? mrpDate(input.asOf) : mrpDate(new Date());
+    const historyEnd = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), 1));
+    const historyStart = new Date(Date.UTC(historyEnd.getUTCFullYear(), historyEnd.getUTCMonth() - input.historyMonths, 1));
+    const requiredDate = input.requiredDate ? mrpDate(input.requiredDate) : new Date(Date.UTC(historyEnd.getUTCFullYear(), historyEnd.getUTCMonth() + 1, 1));
+    const salesLines = await (this.prisma as any).salesOrderLine.findMany({
+      where: {
+        tenantId,
+        fulfillmentPlantId: input.plantId,
+        createdAt: { gte: historyStart, lt: historyEnd },
+        salesOrder: { status: { not: "CANCELLED" } },
+      },
+      select: { partId: true, quantity: true, part: { select: { id: true, partNo: true, name: true, unit: true } } },
+    });
+    const byPart = new Map<string, { part: { id: string; partNo: string; name: string; unit: string }; historicalQuantity: number }>();
+    for (const line of salesLines) {
+      const current = byPart.get(line.partId) ?? { part: line.part, historicalQuantity: 0 };
+      current.historicalQuantity += Number(line.quantity);
+      byPart.set(line.partId, current);
+    }
+    const rows = [...byPart.values()]
+      .map(({ part, historicalQuantity }) => ({
+        part,
+        historicalQuantity,
+        averageMonthlyQuantity: roundMrpQuantity(historicalQuantity / input.historyMonths),
+        suggestedQuantity: roundMrpQuantity(historicalQuantity / input.historyMonths),
+        requiredDate,
+        reference: `FORECAST:SMA:${input.historyMonths}M:${historyStart.toISOString().slice(0, 10)}:${historyEnd.toISOString().slice(0, 10)}`,
+      }))
+      .filter((row) => row.suggestedQuantity > 0)
+      .sort((left, right) => left.part.partNo.localeCompare(right.part.partNo));
+    return {
+      method: "SIMPLE_MOVING_AVERAGE",
+      historyMonths: input.historyMonths,
+      historyStart,
+      historyEnd,
+      requiredDate,
+      rows,
+      disclaimer: "Preview only: each row must be explicitly applied as independent demand before it affects MRP.",
+    };
   }
 
   listDailyRuns(tenantId: string, plantId?: string) {
@@ -974,6 +1031,7 @@ export class MrpService {
 function mrpDate(value: Date) { return new Date(`${value.toISOString().slice(0, 10)}T00:00:00.000Z`); }
 function mrpDateKey(value: Date) { return value.toISOString().slice(0, 10); }
 function mrpItemKey(itemType: string, itemId: string) { return `${itemType}:${itemId}`; }
+function roundMrpQuantity(value: number) { return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000; }
 export function mrpLotSize(netRequirement: number, parameter: any) {
   let quantity = netRequirement;
   if (parameter.lotSizingRule === "FIXED_LOT_SIZE" && Number(parameter.fixedLotSize) > 0) quantity = Math.ceil(quantity / Number(parameter.fixedLotSize)) * Number(parameter.fixedLotSize);

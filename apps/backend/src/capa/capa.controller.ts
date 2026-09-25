@@ -3,9 +3,11 @@ import {
   createCapaSchema,
   decideCapaSchema,
   updateCapaSchema,
+  verifyCapaEffectivenessSchema,
   type CreateCapaDto,
   type DecideCapaDto,
   type UpdateCapaDto,
+  type VerifyCapaEffectivenessDto,
 } from "@ahkmes/shared-types";
 import { CapaService } from "./capa.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
@@ -82,5 +84,11 @@ export class CapaController {
   @Roles("ADMIN", "PLANNER")
   close(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.close(user.tenantId, id);
+  }
+
+  @Patch(":id/verify-effectiveness")
+  @Roles("ADMIN", "PLANNER")
+  verifyEffectiveness(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body(new ZodValidationPipe(verifyCapaEffectivenessSchema)) dto: VerifyCapaEffectivenessDto) {
+    return this.service.verifyEffectiveness(user.tenantId, user.userId, id, dto);
   }
 }

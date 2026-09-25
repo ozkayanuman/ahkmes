@@ -70,6 +70,24 @@ interface MrpRun {
   summary: { proposalCount?: number; exceptionCount?: number } | null;
 }
 
+interface DemandForecastRow {
+  part: { id: string; partNo: string; name: string; unit: string };
+  historicalQuantity: number;
+  averageMonthlyQuantity: number;
+  suggestedQuantity: number;
+  requiredDate: string;
+  reference: string;
+}
+
+interface DemandForecast {
+  method: string;
+  historyMonths: number;
+  historyStart: string;
+  historyEnd: string;
+  requiredDate: string;
+  rows: DemandForecastRow[];
+}
+
 const proposalStatusLabel: Record<ProposalStatus, string> = {
   PROPOSED: "Önerildi",
   FIRMED: "Firm",
@@ -266,6 +284,9 @@ export function MrpPage() {
   const [acknowledgement, setAcknowledgement] = useState("");
   const [detail, setDetail] = useState<Proposal | null>(null);
   const [conversion, setConversion] = useState<Proposal | null>(null);
+  const [forecastMonths, setForecastMonths] = useState("3");
+  const [forecastDate, setForecastDate] = useState(plusDays(30));
+  const [forecastRequested, setForecastRequested] = useState(false);
   const canManage = !!user && ["ADMIN", "PLANNER"].includes(user.role);
 
   const plants = useQuery({ queryKey: ["/plants"], queryFn: () => apiGet<Plant[]>("/plants") });
@@ -297,6 +318,12 @@ export function MrpPage() {
     queryKey: ["/mrp/runs", selectedPlant],
     enabled: !!selectedPlant,
     queryFn: () => apiGet<MrpRun[]>(`/mrp/runs?plantId=${encodeURIComponent(selectedPlant)}`),
+  });
+
+  const forecast = useQuery({
+    queryKey: ["/mrp/demand-forecast", selectedPlant, forecastMonths, forecastDate],
+    enabled: !!selectedPlant && forecastRequested,
+    queryFn: () => apiGet<DemandForecast>(`/mrp/demand-forecast?${new URLSearchParams({ plantId: selectedPlant, historyMonths: forecastMonths, requiredDate: forecastDate }).toString()}`),
   });
 
   const invalidate = () => Promise.all([
@@ -339,6 +366,15 @@ export function MrpPage() {
       toast("İstisna onaylandı", "success");
     },
     onError: () => toast("İstisna onaylanamadı", "error"),
+  });
+
+  const applyForecast = useMutation({
+    mutationFn: (row: DemandForecastRow) => apiPost("/mrp/independent-demand", {
+      plantId: selectedPlant, itemType: "PART", itemId: row.part.id, quantity: row.suggestedQuantity,
+      requiredDate: row.requiredDate, reference: row.reference,
+    }),
+    onSuccess: () => toast("Tahmin, bağımsız talep olarak kaydedildi.", "success"),
+    onError: () => toast("Tahmin talebe dönüştürülemedi.", "error"),
   });
 
   const normalizedItemSearch = itemSearch.trim().toLocaleLowerCase("tr-TR");
@@ -401,6 +437,23 @@ export function MrpPage() {
             </Button>
           )}
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-lg border p-4">
+        <div>
+          <h2 className="text-base font-semibold text-slate-800">Talep Tahmini</h2>
+          <p className="text-xs text-slate-500">İptal edilmemiş geçmiş satış siparişlerinden basit hareketli ortalama. Önizleme MRP’yi değiştirmez; her satır planlayıcı tarafından bağımsız talep olarak uygulanır.</p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="text-sm" htmlFor="forecast-months">Geçmiş ay sayısı<Input id="forecast-months" className="mt-1" type="number" min="1" max="24" value={forecastMonths} onChange={(event) => { setForecastMonths(event.target.value); setForecastRequested(false); }} /></label>
+          <label className="text-sm" htmlFor="forecast-date">Tahmini ihtiyaç tarihi<Input id="forecast-date" className="mt-1" type="date" value={forecastDate} onChange={(event) => { setForecastDate(event.target.value); setForecastRequested(false); }} /></label>
+          <div className="self-end">{canManage && <Button disabled={!selectedPlant || Number(forecastMonths) < 1 || forecast.isFetching} onClick={() => { setForecastRequested(true); void forecast.refetch(); }}>Tahmini Önizle</Button>}</div>
+        </div>
+        {forecast.isLoading && <p className="text-sm text-slate-500">Tahmin hesaplanıyor…</p>}
+        {forecast.data && <Table headers={["Parça", "Geçmiş toplam", "Aylık ortalama", "İhtiyaç", "İşlem"]}>
+          {forecast.data.rows.map((row) => <tr key={row.part.id}><td className="px-4 py-3"><span className="font-medium">{row.part.partNo}</span><span className="ml-2 text-slate-500">{row.part.name}</span></td><td className="px-4 py-3">{row.historicalQuantity} {row.part.unit}</td><td className="px-4 py-3">{row.averageMonthlyQuantity} {row.part.unit}</td><td className="px-4 py-3">{fmtDate(row.requiredDate)}</td><td className="px-4 py-3">{canManage && <Button size="sm" variant="outline" disabled={applyForecast.isPending} onClick={() => applyForecast.mutate(row)}>Talep Olarak Uygula</Button>}</td></tr>)}
+          {forecast.data.rows.length === 0 && <tr><td colSpan={5} className="px-4 py-5 text-center text-slate-500">Seçilen dönemde tahmin oluşturacak satış geçmişi yok.</td></tr>}
+        </Table>}
       </section>
 
       <section>

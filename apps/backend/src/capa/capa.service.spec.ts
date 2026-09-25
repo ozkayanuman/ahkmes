@@ -4,9 +4,10 @@ import { OutboxService } from "../outbox/outbox.service";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildService(overrides: any = {}) {
   const prisma: any = {
-    capa: { findFirst: jest.fn(), update: jest.fn() },
+    capa: { findFirst: jest.fn(), findFirstOrThrow: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     approvalRequest: { findFirst: jest.fn().mockResolvedValue({ id: "ar1" }) },
     nonConformance: { findFirst: jest.fn().mockResolvedValue({ id: "nc1" }) },
+    auditLog: { create: jest.fn().mockResolvedValue({ id: "audit1" }) },
     outboxEvent: { create: jest.fn() },
     $transaction: jest.fn((fn) => fn(prisma)),
     ...overrides,
@@ -29,7 +30,7 @@ function buildService(overrides: any = {}) {
 describe("CapaService.submitForApproval", () => {
   it("DRAFT olmayan CAPA onaya gönderilemez", async () => {
     const { service, prisma } = buildService();
-    prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "APPROVED" });
+    prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "APPROVED", effectivenessEvidence: "Inspection passed after corrective action", effectivenessVerifiedAt: new Date() });
 
     await expect(service.submitForApproval("t1", "u1", "c1")).rejects.toThrow();
   });
@@ -96,11 +97,37 @@ describe("CapaService.close", () => {
 
   it("APPROVED CAPA kapatılır", async () => {
     const { service, prisma } = buildService();
-    prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "APPROVED" });
+    prisma.capa.findFirst.mockResolvedValue({
+      id: "c1",
+      status: "APPROVED",
+      effectivenessEvidence: "Duzeltici faaliyetin ardindan saha incelemesi basarili.",
+      effectivenessVerifiedAt: new Date(),
+    });
     prisma.capa.update.mockResolvedValue({ id: "c1", status: "CLOSED" });
 
     const updated = await service.close("t1", "c1");
 
     expect(updated.status).toBe("CLOSED");
+  });
+
+  it("APPROVED CAPA, etkinlik kanıtı olmadan kapatılamaz", async () => {
+    const { service, prisma } = buildService();
+    prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "APPROVED", effectivenessEvidence: null, effectivenessVerifiedAt: null });
+
+    await expect(service.close("t1", "c1")).rejects.toThrow("effectiveness evidence");
+  });
+});
+
+describe("CapaService.verifyEffectiveness", () => {
+  it("approved CAPA için kanıtı, doğrulayıcıyı ve denetim izini birlikte yazar", async () => {
+    const { service, prisma } = buildService();
+    prisma.capa.findFirst.mockResolvedValue({ id: "c1", status: "APPROVED", effectivenessVerifiedAt: null });
+    prisma.capa.updateMany.mockResolvedValue({ count: 1 });
+    prisma.capa.findFirstOrThrow.mockResolvedValue({ id: "c1", status: "APPROVED", effectivenessEvidence: "First article inspection passed", effectivenessVerifiedAt: new Date() });
+
+    await service.verifyEffectiveness("t1", "u1", "c1", { evidence: "First article inspection passed" });
+
+    expect(prisma.capa.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ effectivenessVerifiedAt: null }), data: expect.objectContaining({ effectivenessEvidence: "First article inspection passed", effectivenessVerifiedById: "u1" }) }));
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ entity: "capa", action: "UPDATE" }) }));
   });
 });

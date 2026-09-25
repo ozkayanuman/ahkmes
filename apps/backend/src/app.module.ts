@@ -42,6 +42,7 @@ import { LdapModule } from "./ldap/ldap.module";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { ApprovalsModule } from "./approvals/approvals.module";
 import { MrpModule } from "./mrp/mrp.module";
+import { SupplierMaterialsModule } from "./supplier-materials/supplier-materials.module";
 import { RfqModule } from "./rfq/rfq.module";
 import { SalesOrdersModule } from "./sales-orders/sales-orders.module";
 import { DeliveryModule } from "./delivery/delivery.module";
@@ -130,6 +131,7 @@ import { CustomerReturnsModule } from "./customer-returns/customer-returns.modul
     NotificationsModule,
     ApprovalsModule,
     MrpModule,
+    SupplierMaterialsModule,
     RfqModule,
     SalesOrdersModule,
     DeliveryModule,

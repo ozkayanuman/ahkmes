@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
-import { createMrpIndependentDemandSchema, mrpPlanningParameterSchema, mrpProposalDecisionSchema, runDailyMrpSchema, type CreateMrpIndependentDemandDto, type MrpPlanningParameterDto, type MrpProposalDecisionDto, type RunDailyMrpDto } from "@ahkmes/shared-types";
+import { createMrpIndependentDemandSchema, mrpDemandForecastSchema, mrpPlanningParameterSchema, mrpProposalDecisionSchema, runDailyMrpSchema, type CreateMrpIndependentDemandDto, type MrpDemandForecastDto, type MrpPlanningParameterDto, type MrpProposalDecisionDto, type RunDailyMrpDto } from "@ahkmes/shared-types";
 import { MrpService } from "./mrp.service";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
@@ -108,6 +108,12 @@ export class MrpController {
   @RequireActionPermissions("MRP_ADMIN_PARAMETERS")
   independentDemand(@CurrentUser() user: AuthUser, @Body(new ZodValidationPipe(createMrpIndependentDemandSchema)) dto: CreateMrpIndependentDemandDto) {
     return this.service.createIndependentDemand(user.tenantId, user.userId, dto);
+  }
+
+  @Get("demand-forecast")
+  @RequireActionPermissions("MRP_READ")
+  demandForecast(@CurrentUser() user: AuthUser, @Query(new ZodValidationPipe(mrpDemandForecastSchema)) dto: MrpDemandForecastDto) {
+    return this.service.previewDemandForecast(user.tenantId, dto);
   }
 
   @Get("capacity-readiness")

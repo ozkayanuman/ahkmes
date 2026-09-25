@@ -58,10 +58,11 @@ function buildService(prisma: ReturnType<typeof buildPrismaMock>) {
   const auth = {
     reauthenticate: jest.fn().mockResolvedValue({ userId: "u1", authSource: "LOCAL", verifiedAt: new Date("2026-01-01T00:00:00Z") }),
   };
+  const supplierMaterials = { findCommonPreferredSupplier: jest.fn().mockResolvedValue(null) };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new MrpService(prisma as any, notifications as any, approvals as any, purchasing as any, workOrders as any, auth as any, outbox as any);
-  return { service, prisma, outbox, notifications, approvals, purchasing, workOrders, auth };
+  const service = new MrpService(prisma as any, notifications as any, approvals as any, purchasing as any, workOrders as any, auth as any, outbox as any, undefined, undefined, undefined, supplierMaterials as any);
+  return { service, prisma, outbox, notifications, approvals, purchasing, workOrders, auth, supplierMaterials };
 }
 
 describe("MrpService.run", () => {
@@ -204,6 +205,48 @@ describe("MrpService.run", () => {
       expect.objectContaining({ data: expect.objectContaining({ partId: "a", qty: 5 }) }),
     );
     expect(result.productionProposals).toHaveLength(2);
+  });
+});
+
+describe("MrpService demand forecast", () => {
+  it("uses completed calendar months of non-cancelled, plant-scoped sales as a transparent moving average", async () => {
+    const prisma = buildPrismaMock({
+      plant: { findFirst: jest.fn().mockResolvedValue({ id: "plant1" }) },
+      salesOrderLine: { findMany: jest.fn().mockResolvedValue([
+        { partId: "part1", quantity: "6", part: { id: "part1", partNo: "P-100", name: "Bracket", unit: "EA" } },
+        { partId: "part1", quantity: "3", part: { id: "part1", partNo: "P-100", name: "Bracket", unit: "EA" } },
+      ]) },
+    });
+    const { service } = buildService(prisma);
+
+    const preview = await service.previewDemandForecast("t1", {
+      plantId: "plant1", historyMonths: 3, asOf: new Date("2026-04-20T00:00:00.000Z"), requiredDate: new Date("2026-05-01T00:00:00.000Z"),
+    });
+
+    expect(prisma.salesOrderLine.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ tenantId: "t1", fulfillmentPlantId: "plant1", salesOrder: { status: { not: "CANCELLED" } } }),
+    }));
+    expect(preview).toMatchObject({ method: "SIMPLE_MOVING_AVERAGE", historyMonths: 3 });
+    expect(preview.rows).toEqual([expect.objectContaining({ part: expect.objectContaining({ partNo: "P-100" }), historicalQuantity: 9, suggestedQuantity: 3 })]);
+  });
+});
+
+describe("MrpService preferred supplier", () => {
+  it("uses one common preferred supplier to prefill a purchase proposal", async () => {
+    const tx = buildTxMock();
+    const prisma = buildPrismaMock({
+      material: { findMany: jest.fn().mockResolvedValue([{ id: "m2", stockQty: "2", minStock: "10" }]) },
+      $transaction: jest.fn((cb) => cb(tx)),
+    });
+    const { service, supplierMaterials } = buildService(prisma);
+    supplierMaterials.findCommonPreferredSupplier.mockResolvedValue("sup1");
+
+    await service.run("t1", "u1");
+
+    expect(supplierMaterials.findCommonPreferredSupplier).toHaveBeenCalledWith("t1", ["m2"]);
+    expect(tx.purchaseProposal.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ supplierId: "sup1" }) }),
+    );
   });
 });
 

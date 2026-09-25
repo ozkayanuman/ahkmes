@@ -25,6 +25,9 @@ interface CapaRow {
   title: string;
   rootCause: string | null;
   actionPlan: string | null;
+  effectivenessEvidence?: string | null;
+  effectivenessVerifiedAt?: string | null;
+  effectivenessVerifiedBy?: { id: string; name: string } | null;
   status: CapaStatus;
   createdBy: { id: string; name: string };
   createdAt: string;
@@ -41,6 +44,8 @@ export function CapaPage() {
   const [rootCause, setRootCause] = useState("");
   const [actionPlan, setActionPlan] = useState("");
   const [pendingDecision, setPendingDecision] = useState<{ id: string; action: "approve" | "reject" } | null>(null);
+  const [verifying, setVerifying] = useState<CapaRow | null>(null);
+  const [effectivenessEvidence, setEffectivenessEvidence] = useState("");
 
   useInvalidateOn(["capa.updated"], ["/capa"]);
 
@@ -96,6 +101,11 @@ export function CapaPage() {
     mutationFn: (id: string) => apiPatch(`/capa/${id}/close`, {}),
     onSuccess: invalidate,
     onError: onError("Kapatılamadı"),
+  });
+  const verifyEffectiveness = useMutation({
+    mutationFn: ({ id, evidence }: { id: string; evidence: string }) => apiPatch(`/capa/${id}/verify-effectiveness`, { evidence }),
+    onSuccess: () => { invalidate(); setVerifying(null); setEffectivenessEvidence(""); toast("Etkinlik kanıtı kaydedildi.", "success"); },
+    onError: onError("Etkinlik doğrulaması kaydedilemedi"),
   });
 
   return (
@@ -157,9 +167,10 @@ export function CapaPage() {
                   </>
                 )}
                 {canWrite && row.status === "APPROVED" && (
-                  <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => close.mutate(row.id)}>
-                    Kapat
-                  </Button>
+                  <>
+                    {!row.effectivenessVerifiedAt && <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => setVerifying(row)}>Etkinliği Doğrula</Button>}
+                    {row.effectivenessVerifiedAt && <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => close.mutate(row.id)}>Kapat</Button>}
+                  </>
                 )}
               </div>
             </td>
@@ -208,6 +219,14 @@ export function CapaPage() {
           mutation.mutate({ id: pendingDecision.id, password });
         }}
       />
+
+      <Modal open={verifying !== null} title="CAPA Etkinlik Doğrulaması" onClose={() => setVerifying(null)}>
+        <form onSubmit={(event) => { event.preventDefault(); if (verifying) verifyEffectiveness.mutate({ id: verifying.id, evidence: effectivenessEvidence }); }} className="space-y-4">
+          <p className="text-sm text-slate-600">Aksiyon planının kök nedeni giderdiğini gösteren ölçüm, muayene veya saha kanıtını kaydedin. Bu kayıt değiştirilemez ve CAPA kapatılması için zorunludur.</p>
+          <div><Label htmlFor="effectivenessEvidence">Etkinlik kanıtı</Label><Textarea id="effectivenessEvidence" rows={4} required minLength={10} value={effectivenessEvidence} onChange={(event) => setEffectivenessEvidence(event.target.value)} /></div>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setVerifying(null)}>Vazgeç</Button><Button type="submit" disabled={verifyEffectiveness.isPending || effectivenessEvidence.trim().length < 10}>Doğrula</Button></div>
+        </form>
+      </Modal>
     </div>
   );
 }

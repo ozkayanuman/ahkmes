@@ -12,9 +12,10 @@ import { UomModule } from "../uom/uom.module";
 import { ProductionCalendarModule } from "../production-calendar/production-calendar.module";
 import { ActionPermissionsModule } from "../action-permissions/action-permissions.module";
 import { MrpRunSynchronization } from "./mrp-run-synchronization";
+import { SupplierMaterialsModule } from "../supplier-materials/supplier-materials.module";
 
 @Module({
-  imports: [NotificationsModule, ApprovalsModule, PurchasingModule, WorkOrdersModule, AuthModule, UomModule, ProductionCalendarModule, ActionPermissionsModule],
+  imports: [NotificationsModule, ApprovalsModule, PurchasingModule, WorkOrdersModule, AuthModule, UomModule, ProductionCalendarModule, ActionPermissionsModule, SupplierMaterialsModule],
   controllers: [BomController, MrpController],
   providers: [BomService, MrpRunSynchronization, MrpService],
   exports: [MrpRunSynchronization],

@@ -1,15 +1,17 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Role } from "@prisma/client";
-import type { CreateCapaDto, UpdateCapaDto } from "@ahkmes/shared-types";
+import type { CreateCapaDto, UpdateCapaDto, VerifyCapaEffectivenessDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { ApprovalsService } from "../approvals/approvals.service";
 import { AuthService } from "../auth/auth.service";
 import { nextDocNo } from "../common/numbering";
 import { OutboxService } from "../outbox/outbox.service";
+import { writeTransactionalAudit } from "../common/transactional-audit";
 
 const CAPA_INCLUDE = {
   sourceNonConformance: { select: { id: true, failureType: true } },
   createdBy: { select: { id: true, name: true } },
+  effectivenessVerifiedBy: { select: { id: true, name: true } },
 } as const;
 
 type Decision = "approve" | "reject";
@@ -132,6 +134,9 @@ export class CapaService {
     if (capa.status !== "APPROVED") {
       throw new ConflictException("Sadece onaylanmış (APPROVED) CAPA kapatılabilir");
     }
+    if (!capa.effectivenessEvidence || !capa.effectivenessVerifiedAt) {
+      throw new ConflictException("CAPA cannot close before effectiveness evidence is verified");
+    }
     const updated = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.capa.update({
         where: { id },
@@ -142,5 +147,23 @@ export class CapaService {
       return updated;
     });
     return updated;
+  }
+
+  async verifyEffectiveness(tenantId: string, userId: string, id: string, dto: VerifyCapaEffectivenessDto) {
+    const capa = await this.findOne(tenantId, id);
+    if (capa.status !== "APPROVED") throw new ConflictException("Only an approved CAPA can receive effectiveness verification");
+    if (capa.effectivenessVerifiedAt) throw new ConflictException("CAPA effectiveness is already verified and immutable");
+    return this.prisma.$transaction(async (tx) => {
+      const verifiedAt = new Date();
+      const result = await tx.capa.updateMany({
+        where: { id, tenantId, status: "APPROVED", effectivenessVerifiedAt: null },
+        data: { effectivenessEvidence: dto.evidence, effectivenessVerifiedAt: verifiedAt, effectivenessVerifiedById: userId },
+      });
+      if (result.count !== 1) throw new ConflictException("CAPA effectiveness is already verified and immutable");
+      const updated = await tx.capa.findFirstOrThrow({ where: { id, tenantId }, include: CAPA_INCLUDE });
+      await writeTransactionalAudit(tx, { tenantId, userId, entity: "capa", entityId: id, action: "UPDATE", before: { effectivenessVerifiedAt: null }, after: { effectivenessVerifiedAt: verifiedAt, evidence: dto.evidence } });
+      await this.outbox.record(tx, tenantId, "capa", id, "capa.updated", { id, status: updated.status, effectivenessVerifiedAt: verifiedAt });
+      return updated;
+    });
   }
 }

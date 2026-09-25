@@ -1223,6 +1223,7 @@ model User {
   qualityHoldsReleased             QualityHold[]                     @relation("QualityHoldReleasedBy")
   qualityDispositions              QualityDisposition[]              @relation("QualityDispositionDecidedBy")
   capasCreated                     Capa[]
+  capasEffectivenessVerified       Capa[]                         @relation("CapaEffectivenessVerifiedBy")
   calibrationsPerformed            Calibration[]
   maintenanceOrders                MaintenanceOrder[]
   maintenanceRequestsReported      MaintenanceRequest[]              @relation("MaintenanceRequestReporter")
@@ -2346,6 +2347,7 @@ model Supplier {
   supplierInvoices  SupplierInvoice[]
   payments          SupplierPayment[]
   supplierLotReturns SupplierLotReturn[]
+  supplierMaterials  SupplierMaterial[]
 
   @@index([tenantId])
 }
@@ -2373,9 +2375,35 @@ model Material {
   purchaseOrderLines    PurchaseOrderLine[]
   purchaseProposalLines PurchaseProposalLine[]
   serialNumbers         MaterialSerialNumber[]
+  supplierMaterials     SupplierMaterial[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
+}
+
+/// Explicit material↔supplier sourcing relationship, missing until now —
+/// MrpService previously had no way to know which supplier normally sources
+/// a shortfall material, so every purchase proposal was created supplier-less
+/// and required a fully manual choice at approval time (see
+/// MrpService.decidePurchaseProposal). isPreferred marks the default source;
+/// at most one preferred supplier per material is enforced by the service,
+/// not the schema (a material may legitimately have several sourcing options).
+model SupplierMaterial {
+  id           String   @id @default(uuid())
+  tenantId     String
+  supplierId   String
+  materialId   String
+  isPreferred  Boolean  @default(false)
+  leadTimeDays Int?
+  unitCost     Decimal? @db.Decimal(18, 4)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, supplierId, materialId])
+  @@index([tenantId, materialId, isPreferred])
 }
 
 model PurchaseOrder {
@@ -4423,14 +4451,19 @@ model Capa {
   actionPlan             String?
   status                 CapaStatus @default(DRAFT)
   createdById            String
+  effectivenessEvidence  String?
+  effectivenessVerifiedAt DateTime?
+  effectivenessVerifiedById String?
   closedAt               DateTime?
   createdAt              DateTime   @default(now())
   updatedAt              DateTime   @updatedAt
 
   sourceNonConformance NonConformance? @relation(fields: [sourceNonConformanceId], references: [id])
   createdBy            User            @relation(fields: [createdById], references: [id])
+  effectivenessVerifiedBy User?        @relation("CapaEffectivenessVerifiedBy", fields: [effectivenessVerifiedById], references: [id], onDelete: Restrict)
 
   @@index([tenantId, status])
+  @@index([tenantId, effectivenessVerifiedAt])
 }
 
 /// Makine kalibrasyon kaydı — takvim bazlı (nextDueDate). Sertifika/rapor

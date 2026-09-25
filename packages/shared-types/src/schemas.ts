@@ -743,6 +743,8 @@ export type UpdateCapaDto = z.infer<typeof updateCapaSchema>;
 /// yeniden kimlik doğrulama (electronicSignatureSchema ile aynı `password` alanı) zorunlu.
 export const decideCapaSchema = z.object({ note: z.string().optional(), password: z.string().min(1) });
 export type DecideCapaDto = z.infer<typeof decideCapaSchema>;
+export const verifyCapaEffectivenessSchema = z.object({ evidence: z.string().trim().min(10).max(2_000) });
+export type VerifyCapaEffectivenessDto = z.infer<typeof verifyCapaEffectivenessSchema>;
 
 // ---- Calibration (Faz E) — takvim bazlı, Machine'e bağlı ----
 export const createCalibrationSchema = z.object({
@@ -1391,6 +1393,16 @@ export const createMrpIndependentDemandSchema = z.object({
 });
 export type CreateMrpIndependentDemandDto = z.infer<typeof createMrpIndependentDemandSchema>;
 
+/** Preview only: a planner must explicitly create independent demand before a
+ * forecast can influence MRP. */
+export const mrpDemandForecastSchema = z.object({
+  plantId: idSchema,
+  asOf: isoDate.optional(),
+  historyMonths: z.coerce.number().int().min(1).max(24).default(3),
+  requiredDate: isoDate.optional(),
+});
+export type MrpDemandForecastDto = z.infer<typeof mrpDemandForecastSchema>;
+
 // ---- Fiyat listesi / indirim yönetimi — customerId boşsa genel/varsayılan
 // liste, doluysa yalnızca o müşteriye özel ve genel listeye göre öncelikli ----
 export const createPriceListSchema = z.object({
@@ -1421,3 +1433,13 @@ export const reconcilePaymentSchema = z.object({
   bankReference: z.string().trim().min(1).max(160),
 });
 export type ReconcilePaymentDto = z.infer<typeof reconcilePaymentSchema>;
+
+// ---- Tedarikçi-malzeme kaynak ilişkisi — MRP satınalma önerisine varsayılan
+// tedarikçi öner/otomatik seç için kullanılır (bkz. MrpService.decidePurchaseProposal) ----
+export const upsertSupplierMaterialSchema = z.object({
+  materialId: idSchema,
+  isPreferred: z.boolean().optional(),
+  leadTimeDays: z.number().int().positive().optional(),
+  unitCost: z.number().nonnegative().optional(),
+});
+export type UpsertSupplierMaterialDto = z.infer<typeof upsertSupplierMaterialSchema>;
