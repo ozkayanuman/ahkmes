@@ -4,11 +4,15 @@ describe("SchedulingService.capacity", () => {
   function build() {
     const machineFindMany = jest.fn();
     const workOrderFindMany = jest.fn();
+    const calendarFindFirst = jest.fn().mockResolvedValue(null);
     const prisma: any = {
       machine: { findMany: machineFindMany },
       workOrder: { findMany: workOrderFindMany },
+      plantProductionCalendar: { findFirst: calendarFindFirst },
     };
-    return { service: new SchedulingService(prisma), machineFindMany, workOrderFindMany };
+    const shiftWindowsForProductionDate = jest.fn();
+    const productionCalendar: any = { shiftWindowsForProductionDate };
+    return { service: new SchedulingService(prisma, productionCalendar), machineFindMany, workOrderFindMany, calendarFindFirst, shiftWindowsForProductionDate };
   }
 
   it("kapasitesi olmayan bir tenant için boş dizi döner (Prisma'ya WO sorgusu atmadan)", async () => {
@@ -93,5 +97,73 @@ describe("SchedulingService.capacity", () => {
     const result = await service.capacity("tenant-1", new Date("2026-08-10"), new Date("2026-08-10"));
 
     expect(result).toEqual([]);
+  });
+
+  it("bir tesisin aktif vardiya takvimi varsa statik dailyCapacityMinutes yerine gerçek vardiya dakikasını (molalar düşülerek) kullanır", async () => {
+    const { service, machineFindMany, workOrderFindMany, calendarFindFirst, shiftWindowsForProductionDate } = build();
+    machineFindMany.mockResolvedValue([{ id: "m1", name: "VMC-1", dailyCapacityMinutes: 480, plantId: "plant-1" }]);
+    workOrderFindMany.mockResolvedValue([
+      {
+        plannedStartDate: new Date("2026-08-10"),
+        plannedEndDate: new Date("2026-08-10"),
+        operations: [{ machineId: "m1", standardMinutes: 100 }],
+      },
+    ]);
+    calendarFindFirst.mockResolvedValue({ id: "cal-1" });
+    shiftWindowsForProductionDate.mockResolvedValue([
+      {
+        start: new Date("2026-08-10T08:00:00.000Z"),
+        end: new Date("2026-08-10T16:00:00.000Z"),
+        breaks: [{ isValidWithinShift: true, start: new Date("2026-08-10T12:00:00.000Z"), end: new Date("2026-08-10T12:30:00.000Z") }],
+      },
+    ]);
+
+    const result = await service.capacity("tenant-1", new Date("2026-08-10"), new Date("2026-08-10"));
+
+    // 8 saat vardiya (480 dk) - 30 dk mola = 450 dk gerçek kapasite, statik 480 değil.
+    expect(result).toEqual([
+      { machineId: "m1", machineName: "VMC-1", date: "2026-08-10", loadMinutes: 100, capacityMinutes: 450, overloaded: false },
+    ]);
+    expect(shiftWindowsForProductionDate).toHaveBeenCalledWith("tenant-1", "plant-1", "2026-08-10");
+  });
+
+  it("tesisin aktif takvimi yoksa statik dailyCapacityMinutes'a geri düşer, takvim sorgusu atmaz", async () => {
+    const { service, machineFindMany, workOrderFindMany, calendarFindFirst, shiftWindowsForProductionDate } = build();
+    machineFindMany.mockResolvedValue([{ id: "m1", name: "VMC-1", dailyCapacityMinutes: 480, plantId: "plant-1" }]);
+    workOrderFindMany.mockResolvedValue([
+      {
+        plannedStartDate: new Date("2026-08-10"),
+        plannedEndDate: new Date("2026-08-10"),
+        operations: [{ machineId: "m1", standardMinutes: 100 }],
+      },
+    ]);
+    calendarFindFirst.mockResolvedValue(null);
+
+    const result = await service.capacity("tenant-1", new Date("2026-08-10"), new Date("2026-08-10"));
+
+    expect(result).toEqual([
+      { machineId: "m1", machineName: "VMC-1", date: "2026-08-10", loadMinutes: 100, capacityMinutes: 480, overloaded: false },
+    ]);
+    expect(shiftWindowsForProductionDate).not.toHaveBeenCalled();
+  });
+
+  it("tesisin takvimi var ama o gün hiç vardiya yoksa (tatil/hafta sonu) kapasiteyi 0 sayar, statik değere geri düşmez", async () => {
+    const { service, machineFindMany, workOrderFindMany, calendarFindFirst, shiftWindowsForProductionDate } = build();
+    machineFindMany.mockResolvedValue([{ id: "m1", name: "VMC-1", dailyCapacityMinutes: 480, plantId: "plant-1" }]);
+    workOrderFindMany.mockResolvedValue([
+      {
+        plannedStartDate: new Date("2026-08-10"),
+        plannedEndDate: new Date("2026-08-10"),
+        operations: [{ machineId: "m1", standardMinutes: 50 }],
+      },
+    ]);
+    calendarFindFirst.mockResolvedValue({ id: "cal-1" });
+    shiftWindowsForProductionDate.mockResolvedValue([]);
+
+    const result = await service.capacity("tenant-1", new Date("2026-08-10"), new Date("2026-08-10"));
+
+    expect(result).toEqual([
+      { machineId: "m1", machineName: "VMC-1", date: "2026-08-10", loadMinutes: 50, capacityMinutes: 0, overloaded: true },
+    ]);
   });
 });
