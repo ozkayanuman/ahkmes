@@ -27,6 +27,7 @@ import {
   MachineMaintenanceStateSchema,
   MaintenanceCodeKindSchema,
   OpportunityStageSchema,
+  OpportunityActivityTypeSchema,
   ProjectStatusSchema,
   ProjectTaskStatusSchema,
   PurchaseOrderStatusSchema,
@@ -614,6 +615,16 @@ export const updateOpportunitySchema = z.object({
   lostReason: z.string().optional(),
 });
 export type UpdateOpportunityDto = z.infer<typeof updateOpportunitySchema>;
+
+/** A follow-up is part of the immutable activity record rather than a mutable
+ * free-text note. Passing null deliberately clears the pipeline projection. */
+export const createOpportunityActivitySchema = z.object({
+  type: OpportunityActivityTypeSchema.default("NOTE"),
+  note: z.string().trim().min(1).max(2_000),
+  occurredAt: isoDate.optional(),
+  nextFollowUpAt: isoDate.nullable().optional(),
+});
+export type CreateOpportunityActivityDto = z.infer<typeof createOpportunityActivitySchema>;
 
 // ---- Service Management (Faz N) ----
 export const createServiceTicketSchema = z.object({

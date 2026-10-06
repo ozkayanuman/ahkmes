@@ -11,12 +11,15 @@ function buildService(overrides: any = {}) {
       delete: jest.fn(),
       groupBy: jest.fn(),
     },
+    opportunityActivity: { findMany: jest.fn(), create: jest.fn() },
     customer: { findFirst: jest.fn() },
     ...overrides,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const service = new OpportunitiesService(prisma as any);
-  return { service, prisma };
+  prisma.$transaction = jest.fn((cb: any) => cb(prisma));
+  const outbox = { record: jest.fn() };
+  const service = new OpportunitiesService(prisma as any, outbox as any);
+  return { service, prisma, outbox };
 }
 
 describe("OpportunitiesService.create", () => {
@@ -38,7 +41,7 @@ describe("OpportunitiesService.update", () => {
     await service.update("t1", "o1", { stage: "WON" });
 
     expect(prisma.opportunity.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ stage: "WON", wonAt: expect.any(Date) }) }),
+      expect.objectContaining({ data: expect.objectContaining({ stage: "WON", wonAt: expect.any(Date), nextFollowUpAt: null }) }),
     );
   });
 
@@ -50,7 +53,7 @@ describe("OpportunitiesService.update", () => {
     await service.update("t1", "o1", { stage: "LOST", lostReason: "Fiyat" });
 
     expect(prisma.opportunity.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ stage: "LOST", lostAt: expect.any(Date) }) }),
+      expect.objectContaining({ data: expect.objectContaining({ stage: "LOST", lostAt: expect.any(Date), nextFollowUpAt: null }) }),
     );
   });
 
@@ -98,5 +101,51 @@ describe("OpportunitiesService.pipelineSummary", () => {
     const result = await service.pipelineSummary("t1");
 
     expect(result.openTotalValue).toBe(3000);
+  });
+});
+
+describe("OpportunitiesService.activities", () => {
+  it("timeline yalnızca aynı tenant fırsatı için döner", async () => {
+    const { service, prisma } = buildService();
+    prisma.opportunity.findFirst.mockResolvedValue({ id: "o1", tenantId: "t1" });
+    prisma.opportunityActivity.findMany.mockResolvedValue([]);
+
+    await service.listActivities("t1", "o1");
+
+    expect(prisma.opportunityActivity.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: "t1", opportunityId: "o1" } }),
+    );
+  });
+
+  it("aktivite ve takip tarihini tek transaction içinde kaydedip outbox'a yazar", async () => {
+    const { service, prisma, outbox } = buildService();
+    prisma.opportunity.findFirst.mockResolvedValue({ id: "o1", tenantId: "t1", stage: "PROPOSAL" });
+    prisma.opportunityActivity.create.mockResolvedValue({ id: "a1", type: "CALL" });
+    prisma.opportunity.update.mockResolvedValue({ id: "o1" });
+
+    await service.createActivity("t1", "o1", "u1", {
+      type: "CALL", note: "Teklif görüşüldü", nextFollowUpAt: new Date("2026-10-01T09:00:00.000Z"),
+    });
+
+    expect(prisma.opportunityActivity.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ tenantId: "t1", opportunityId: "o1", authorId: "u1", type: "CALL" }),
+    }));
+    expect(prisma.opportunity.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { nextFollowUpAt: new Date("2026-10-01T09:00:00.000Z") },
+    }));
+    expect(outbox.record).toHaveBeenCalledWith(prisma, "t1", "opportunity", "o1", "opportunity.activity-recorded", {
+      activityId: "a1", type: "CALL",
+    });
+  });
+
+  it("null takip tarihi eski pipeline hatırlatıcısını temizler", async () => {
+    const { service, prisma } = buildService();
+    prisma.opportunity.findFirst.mockResolvedValue({ id: "o1", tenantId: "t1", stage: "PROPOSAL" });
+    prisma.opportunityActivity.create.mockResolvedValue({ id: "a1", type: "NOTE" });
+    prisma.opportunity.update.mockResolvedValue({ id: "o1" });
+
+    await service.createActivity("t1", "o1", "u1", { type: "NOTE", note: "Takip tamamlandı", nextFollowUpAt: null });
+
+    expect(prisma.opportunity.update).toHaveBeenCalledWith(expect.objectContaining({ data: { nextFollowUpAt: null } }));
   });
 });

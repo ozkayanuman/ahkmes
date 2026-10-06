@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import {
   createOpportunitySchema,
+  createOpportunityActivitySchema,
+  type CreateOpportunityActivityDto,
   updateOpportunitySchema,
   type CreateOpportunityDto,
   type UpdateOpportunityDto,
@@ -35,6 +37,11 @@ export class OpportunitiesController {
     return this.service.pipelineSummary(user.tenantId);
   }
 
+  @Get(":id/activities")
+  listActivities(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.listActivities(user.tenantId, id);
+  }
+
   @Get(":id")
   findOne(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.service.findOne(user.tenantId, id);
@@ -57,6 +64,16 @@ export class OpportunitiesController {
     @Body(new ZodValidationPipe(updateOpportunitySchema)) dto: UpdateOpportunityDto,
   ) {
     return this.service.update(user.tenantId, id, dto);
+  }
+
+  @Post(":id/activities")
+  @Roles("ADMIN", "SALES")
+  createActivity(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(createOpportunityActivitySchema)) dto: CreateOpportunityActivityDto,
+  ) {
+    return this.service.createActivity(user.tenantId, id, user.userId, dto);
   }
 
   @Delete(":id")

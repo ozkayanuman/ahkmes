@@ -1214,6 +1214,7 @@ model User {
   deliveries                       Delivery[]
   invoices                         Invoice[]
   customerNotes                    CustomerNote[]
+  opportunityActivities            OpportunityActivity[]
   transferOrders                   TransferOrder[]
   cycleCounts                      CycleCount[]
   inspections                      Inspection[]
@@ -5126,12 +5127,45 @@ model Opportunity {
   wonAt             DateTime?
   lostAt            DateTime?
   lostReason        String?
+  /// The next explicitly scheduled sales touchpoint. It is a projection of
+  /// the latest activity that set a follow-up, so pipeline cards can be acted
+  /// on without reading every activity in the timeline.
+  nextFollowUpAt    DateTime?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
-  customer Customer @relation(fields: [customerId], references: [id])
+  customer   Customer              @relation(fields: [customerId], references: [id])
+  activities OpportunityActivity[]
 
   @@index([tenantId, customerId])
+  @@index([tenantId, nextFollowUpAt])
+}
+
+/// Append-only sales activity timeline. The opportunity keeps only the next
+/// follow-up projection; the durable record of calls, e-mails and meetings is
+/// preserved here with its author for customer-facing accountability.
+model OpportunityActivity {
+  id             String                  @id @default(uuid())
+  tenantId       String
+  opportunityId  String
+  authorId       String
+  type           OpportunityActivityType
+  note           String
+  occurredAt     DateTime                @default(now())
+  nextFollowUpAt DateTime?
+  createdAt      DateTime                @default(now())
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id])
+
+  @@index([tenantId, opportunityId, occurredAt])
+}
+
+enum OpportunityActivityType {
+  NOTE
+  CALL
+  EMAIL
+  MEETING
 }
 
 enum ServiceTicketPriority {

@@ -61,6 +61,9 @@ export type LeadStatus = z.infer<typeof LeadStatusSchema>;
 export const OpportunityStageSchema = z.enum(["NEW", "QUALIFIED", "PROPOSAL", "WON", "LOST"]);
 export type OpportunityStage = z.infer<typeof OpportunityStageSchema>;
 
+export const OpportunityActivityTypeSchema = z.enum(["NOTE", "CALL", "EMAIL", "MEETING"]);
+export type OpportunityActivityType = z.infer<typeof OpportunityActivityTypeSchema>;
+
 export const ServiceTicketPrioritySchema = z.enum(["LOW", "MEDIUM", "HIGH"]);
 export type ServiceTicketPriority = z.infer<typeof ServiceTicketPrioritySchema>;
 
