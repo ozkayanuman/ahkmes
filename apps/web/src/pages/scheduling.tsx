@@ -1,9 +1,261 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { Button, Card, Input, Label, Modal } from "../components/ui";
+import { Button, Card, Input, Label, Modal, Select } from "../components/ui";
 import { useToast } from "../components/toast";
-import { apiGet, apiPatch } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { apiGet, apiPatch, apiPost } from "../lib/api";
 import { useInvalidateOn } from "../lib/socket";
+
+type DispatchRule = "EDD" | "PRIORITY" | "FIFO" | "SPT";
+interface FiniteScheduleResult {
+  runId: string | null;
+  committed: boolean;
+  dispatchRule: DispatchRule;
+  horizonStart: string;
+  horizonEnd: string;
+  summary: { workOrders: number; scheduledOps: number; unscheduledOps: number; lateWorkOrders: number; machines: number };
+  workOrders: { workOrderId: string; woNo: string; dueDate: string; plannedStart: string | null; plannedEnd: string | null; scheduledOps: number; unscheduledOps: number; late: boolean; latenessMinutes: number }[];
+  operations: { operationId: string; woNo: string; seq: number; name: string; machineName: string; minutes: number; start: string; end: string; pinned: boolean }[];
+  unscheduled: { operationId: string; woNo: string; seq: number; name: string; reason: string }[];
+}
+interface SchedulingRunRow {
+  id: string;
+  dispatchRule: DispatchRule;
+  horizonStart: string;
+  horizonEnd: string;
+  scheduledOps: number;
+  unscheduledOps: number;
+  lateWorkOrders: number;
+  createdAt: string;
+  createdBy: { name: string };
+}
+interface MachineQueueRow {
+  machineId: string;
+  machineName: string;
+  operations: { operationId: string; woNo: string; partNo: string; seq: number; name: string; status: string; plannedStartAt: string; plannedEndAt: string }[];
+}
+
+const RULE_LABELS: Record<DispatchRule, string> = {
+  EDD: "EDD — en erken termin önce",
+  PRIORITY: "Öncelik (düşük sayı daha acil)",
+  FIFO: "FIFO — oluşturulma sırası",
+  SPT: "SPT — en kısa toplam süre önce",
+};
+const REASON_LABELS: Record<string, string> = {
+  NO_OPERATIONS: "Yayınlanmış operasyon yok (mühendislik yayını gerekli)",
+  NO_MACHINE: "Operasyona makine atanmamış",
+  NO_STANDARD_MINUTES: "Standart süre (standardMinutes) yok",
+  NO_MACHINE_CAPACITY: "Makinede kapasite tanımı yok (takvim veya günlük kapasite)",
+  PREDECESSOR_UNSCHEDULED: "Önceki operasyon planlanamadı",
+  HORIZON_EXCEEDED: "Planlama ufkuna sığmadı",
+};
+const fmtDateTime = (d: string | null | undefined) => (d ? new Date(d).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—");
+
+function FiniteSchedulingPanel({ canRun }: { canRun: boolean }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [plantId, setPlantId] = useState("");
+  const [horizonStart, setHorizonStart] = useState(new Date().toISOString().slice(0, 10));
+  const [horizonDays, setHorizonDays] = useState("14");
+  const [rule, setRule] = useState<DispatchRule>("EDD");
+  const [result, setResult] = useState<FiniteScheduleResult | null>(null);
+
+  const plants = useQuery({ queryKey: ["/plants"], queryFn: () => apiGet<{ id: string; name: string }[]>("/plants") });
+  const runs = useQuery({ queryKey: ["/scheduling/runs"], queryFn: () => apiGet<SchedulingRunRow[]>("/scheduling/runs") });
+
+  const queueFrom = useMemo(() => new Date(`${horizonStart}T00:00:00`), [horizonStart]);
+  const queueTo = useMemo(() => new Date(queueFrom.getTime() + Math.max(1, Number(horizonDays) || 1) * 86_400_000), [queueFrom, horizonDays]);
+  const queue = useQuery({
+    queryKey: ["/scheduling/machine-queue", queueFrom.toISOString(), queueTo.toISOString(), plantId],
+    queryFn: () => apiGet<MachineQueueRow[]>(`/scheduling/machine-queue?from=${queueFrom.toISOString()}&to=${queueTo.toISOString()}${plantId ? `&plantId=${plantId}` : ""}`),
+  });
+
+  const run = useMutation({
+    mutationFn: (commit: boolean) =>
+      apiPost<FiniteScheduleResult>("/scheduling/runs", {
+        plantId: plantId || undefined,
+        horizonStart: queueFrom.toISOString(),
+        horizonDays: Math.max(1, Math.min(90, Number(horizonDays) || 1)),
+        dispatchRule: rule,
+        commit,
+      }),
+    onSuccess: (data) => {
+      setResult(data);
+      if (data.committed) {
+        toast(`Çizelge uygulandı: ${data.summary.scheduledOps} operasyon planlandı`, "success");
+        qc.invalidateQueries({ queryKey: ["/scheduling/runs"] });
+        qc.invalidateQueries({ queryKey: ["/scheduling/machine-queue"] });
+        qc.invalidateQueries({ queryKey: ["/scheduling/capacity"] });
+        qc.invalidateQueries({ queryKey: ["/scheduling/bottlenecks"] });
+        qc.invalidateQueries({ queryKey: ["/work-orders"] });
+      }
+    },
+    onError: () => toast("Çizelgeleme çalıştırılamadı", "error"),
+  });
+
+  const queueSpanMs = queueTo.getTime() - queueFrom.getTime();
+
+  return (
+    <Card>
+      <h2 className="mb-1 text-sm font-semibold text-slate-700">Sonlu Kapasite Çizelgeleme (MRP II)</h2>
+      <p className="mb-3 text-xs text-slate-500">
+        Operasyonlar, tesis vardiya takvimine göre makinelere sıralı ve çakışmasız yerleştirilir; önce simüle edin, sonra uygulayın.
+        Uygulanan çizelge operasyon bazında planlanan başlangıç/bitiş yazar ve kapasite yükünü günceller.
+      </p>
+      <div className="grid gap-3 md:grid-cols-5">
+        <div>
+          <Label htmlFor="fs-plant">Tesis</Label>
+          <Select id="fs-plant" value={plantId} onChange={(e) => setPlantId(e.target.value)}>
+            <option value="">Tümü</option>
+            {(plants.data ?? []).map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </Select>
+        </div>
+        <div>
+          <Label htmlFor="fs-start">Ufuk başlangıcı</Label>
+          <Input id="fs-start" type="date" value={horizonStart} onChange={(e) => setHorizonStart(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="fs-days">Gün</Label>
+          <Input id="fs-days" type="number" min={1} max={90} value={horizonDays} onChange={(e) => setHorizonDays(e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="fs-rule">Sevk kuralı</Label>
+          <Select id="fs-rule" value={rule} onChange={(e) => setRule(e.target.value as DispatchRule)}>
+            {(Object.keys(RULE_LABELS) as DispatchRule[]).map((r) => (
+              <option key={r} value={r}>{RULE_LABELS[r]}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex items-end gap-2">
+          <Button variant="outline" disabled={!canRun || run.isPending} onClick={() => run.mutate(false)}>
+            Simüle et
+          </Button>
+          <Button disabled={!canRun || run.isPending} onClick={() => run.mutate(true)}>
+            Uygula
+          </Button>
+        </div>
+      </div>
+      {!canRun && <p className="mt-2 text-xs text-slate-400">Çizelgeleme çalıştırmak için ADMIN veya PLANNER rolü gerekir.</p>}
+
+      {result && (
+        <div className="mt-4 space-y-3" data-testid="finite-result">
+          <div className="grid gap-2 text-xs sm:grid-cols-5">
+            <div className="rounded bg-slate-50 p-2"><div className="text-slate-400">Mod</div><div className="font-medium">{result.committed ? "Uygulandı" : "Simülasyon"}</div></div>
+            <div className="rounded bg-slate-50 p-2"><div className="text-slate-400">İş emri</div><div className="font-medium">{result.summary.workOrders}</div></div>
+            <div className="rounded bg-slate-50 p-2"><div className="text-slate-400">Planlanan op.</div><div className="font-medium text-emerald-700">{result.summary.scheduledOps}</div></div>
+            <div className="rounded bg-slate-50 p-2"><div className="text-slate-400">Planlanamayan op.</div><div className="font-medium text-amber-700">{result.summary.unscheduledOps}</div></div>
+            <div className="rounded bg-slate-50 p-2"><div className="text-slate-400">Geç iş emri</div><div className="font-medium text-red-700">{result.summary.lateWorkOrders}</div></div>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-slate-400">
+                <th className="pb-1 font-normal">İş emri</th>
+                <th className="pb-1 font-normal">Termin</th>
+                <th className="pb-1 font-normal">Planlanan başlangıç</th>
+                <th className="pb-1 font-normal">Planlanan bitiş</th>
+                <th className="pb-1 font-normal">Op. (plan/—)</th>
+                <th className="pb-1 font-normal">Durum</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.workOrders.map((w) => (
+                <tr key={w.workOrderId} className="border-t border-slate-100">
+                  <td className="py-1 font-medium text-slate-700">{w.woNo}</td>
+                  <td className="py-1">{fmtDateTime(w.dueDate)}</td>
+                  <td className="py-1">{fmtDateTime(w.plannedStart)}</td>
+                  <td className="py-1">{fmtDateTime(w.plannedEnd)}</td>
+                  <td className="py-1">{w.scheduledOps}/{w.unscheduledOps}</td>
+                  <td className="py-1">
+                    {w.late ? (
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-red-700">GEÇ +{Math.round(w.latenessMinutes / 60)} sa</span>
+                    ) : w.unscheduledOps > 0 ? (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">EKSİK</span>
+                    ) : (
+                      <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-700">ZAMANINDA</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {result.unscheduled.length > 0 && (
+            <div>
+              <h3 className="mb-1 text-xs font-semibold text-amber-700">Planlanamayanlar ve nedenleri</h3>
+              <ul className="space-y-0.5 text-xs text-slate-600">
+                {result.unscheduled.map((u, i) => (
+                  <li key={`${u.operationId}-${i}`}>
+                    <span className="font-medium">{u.woNo}</span>
+                    {u.seq > 0 && <span> · op {u.seq} {u.name}</span>}: {REASON_LABELS[u.reason] ?? u.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(queue.data ?? []).length > 0 && (
+        <div className="mt-4">
+          <h3 className="mb-1 text-xs font-semibold text-slate-700">Makine kuyruğu (uygulanmış çizelge)</h3>
+          <div className="space-y-1">
+            {(queue.data ?? []).map((row) => (
+              <div key={row.machineId} className="flex items-center gap-2 text-xs">
+                <div className="w-32 shrink-0 truncate text-slate-600">{row.machineName}</div>
+                <div className="relative h-5 flex-1 overflow-hidden rounded bg-slate-100">
+                  {row.operations.map((op) => {
+                    const s = Math.max(0, (new Date(op.plannedStartAt).getTime() - queueFrom.getTime()) / queueSpanMs);
+                    const e = Math.min(1, (new Date(op.plannedEndAt).getTime() - queueFrom.getTime()) / queueSpanMs);
+                    if (e <= 0 || s >= 1) return null;
+                    return (
+                      <div
+                        key={op.operationId}
+                        className={`absolute top-0 h-full ${op.status === "PENDING" ? "bg-sky-500" : "bg-blue-700"} opacity-90`}
+                        style={{ left: `${s * 100}%`, width: `${Math.max(0.5, (e - s) * 100)}%` }}
+                        title={`${op.woNo} · op ${op.seq} ${op.name} (${op.partNo}): ${fmtDateTime(op.plannedStartAt)} → ${fmtDateTime(op.plannedEndAt)}`}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(runs.data ?? []).length > 0 && (
+        <details className="mt-4 text-xs">
+          <summary className="cursor-pointer text-slate-500">Son koşular ({runs.data!.length})</summary>
+          <table className="mt-1 w-full">
+            <thead>
+              <tr className="text-left text-slate-400">
+                <th className="pb-1 font-normal">Tarih</th>
+                <th className="pb-1 font-normal">Kural</th>
+                <th className="pb-1 font-normal">Ufuk</th>
+                <th className="pb-1 font-normal">Planlanan / —</th>
+                <th className="pb-1 font-normal">Geç</th>
+                <th className="pb-1 font-normal">Kullanıcı</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.data!.map((r) => (
+                <tr key={r.id} className="border-t border-slate-100">
+                  <td className="py-1">{fmtDateTime(r.createdAt)}</td>
+                  <td className="py-1">{r.dispatchRule}</td>
+                  <td className="py-1">{fmtDateTime(r.horizonStart)} → {fmtDateTime(r.horizonEnd)}</td>
+                  <td className="py-1">{r.scheduledOps} / {r.unscheduledOps}</td>
+                  <td className="py-1">{r.lateWorkOrders}</td>
+                  <td className="py-1">{r.createdBy?.name ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+    </Card>
+  );
+}
 
 interface WorkOrderRow {
   id: string;
@@ -91,6 +343,8 @@ function ScheduleModal({ wo, onClose }: { wo: WorkOrderRow; onClose: () => void 
 
 export function SchedulingPage() {
   const [editing, setEditing] = useState<WorkOrderRow | null>(null);
+  const { user } = useAuth();
+  const canRunFinite = user?.role === "ADMIN" || user?.role === "PLANNER";
   useInvalidateOn(["workorder.updated"], ["/work-orders"]);
 
   const workOrders = useQuery({
@@ -139,11 +393,13 @@ export function SchedulingPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">Scheduling — Basit Gantt</h1>
+      <h1 className="text-xl font-semibold">Scheduling — Gantt ve Sonlu Kapasite</h1>
       <p className="text-sm text-slate-500">
-        Otomatik kapasite planlama algoritması değil — manuel çizelgeleme. Planlanmamış iş emirleri için
-        termin tarihi (dueDate) kullanılır.
+        İş emri Gantt'ı manuel çizelgelenebilir; sonlu kapasite paneli ise operasyonları vardiya takvimine göre
+        makinelere otomatik yerleştirir. Planlanmamış iş emirleri için termin tarihi (dueDate) kullanılır.
       </p>
+
+      <FiniteSchedulingPanel canRun={canRunFinite} />
 
       {(bottlenecks.data ?? []).length > 0 && (
         <Card>

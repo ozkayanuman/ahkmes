@@ -163,6 +163,41 @@ enum UomDimension {
 
 /// İş emrindeki rota operasyonunun yaşam döngüsü. Recipe değişse bile bu kayıt
 /// iş emri oluşturulduğu andaki rota anlık görüntüsünü temsil eder.
+/// MRP II finite scheduling dispatch rule. Lower WorkOrder.priority means more urgent.
+enum SchedulingDispatchRule {
+  EDD
+  PRIORITY
+  FIFO
+  SPT
+}
+
+/// MRP II finite-capacity scheduling run. A run is an explainable, auditable
+/// snapshot: inputs (plant/horizon/rule), the resulting operation windows and
+/// the explicit reasons for anything that could not be placed. Only committed
+/// runs write plannedStartAt/plannedEndAt onto WorkOrderOperation; simulated
+/// runs are returned to the caller and never persisted.
+model SchedulingRun {
+  id             String                 @id @default(uuid())
+  tenantId       String
+  plantId        String?
+  dispatchRule   SchedulingDispatchRule
+  horizonStart   DateTime
+  horizonEnd     DateTime
+  committed      Boolean                @default(true)
+  scheduledOps   Int
+  unscheduledOps Int
+  lateWorkOrders Int
+  /// Full result payload (work orders, operations, unscheduled reasons) for later review.
+  result         Json
+  createdById    String
+  createdAt      DateTime               @default(now())
+
+  createdBy  User                 @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  operations WorkOrderOperation[]
+
+  @@index([tenantId, createdAt])
+}
+
 enum WorkOrderOperationStatus {
   PENDING
   SETUP
@@ -1247,6 +1282,7 @@ model User {
   operatorSkillsGranted            OperatorSkill[]                   @relation("OperatorSkillGrantedBy")
   operatorSkillsRevoked            OperatorSkill[]                   @relation("OperatorSkillRevokedBy")
   copilotDraftsCreated             CopilotDraft[]                    @relation("CopilotDraftCreatedBy")
+  schedulingRuns                   SchedulingRun[]
   copilotDraftsApproved            CopilotDraft[]                    @relation("CopilotDraftApprovedBy")
   copilotDraftsRejected            CopilotDraft[]                    @relation("CopilotDraftRejectedBy")
   spcMeasurements                  SpcMeasurement[]
@@ -2248,11 +2284,18 @@ model WorkOrderOperation {
   startedAt           DateTime?
   completedAt         DateTime?
   notes               String?
+  /// MRP II finite scheduling: operation-level planned window written by a
+  /// committed SchedulingRun. Null means "not finitely scheduled" — the
+  /// work-order level plannedStartDate/plannedEndDate stays the coarse fallback.
+  plannedStartAt      DateTime?
+  plannedEndAt        DateTime?
+  schedulingRunId     String?
   createdAt           DateTime                 @default(now())
   updatedAt           DateTime                 @updatedAt
 
   workOrder            WorkOrder                       @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
   machine              Machine?                        @relation(fields: [machineId], references: [id])
+  schedulingRun        SchedulingRun?                  @relation(fields: [schedulingRunId], references: [id], onDelete: SetNull)
   ncProgram            NcProgram?                      @relation(fields: [ncProgramId], references: [id], onDelete: Restrict)
   productionRuns       ProductionRun[]
   toolRequirements     OperationToolRequirement[]
@@ -2272,6 +2315,7 @@ model WorkOrderOperation {
   @@index([tenantId, workOrderId, status])
   @@index([machineId])
   @@index([tenantId, ncProgramId])
+  @@index([tenantId, machineId, plannedStartAt])
 }
 
 enum NonConformanceStatus {

@@ -212,3 +212,127 @@ describe("SchedulingService.bottlenecks", () => {
     expect(result).toEqual([]);
   });
 });
+
+describe("SchedulingService.capacity — MRP II operasyon pencereleri", () => {
+  it("operasyonun kendi plannedStartAt/plannedEndAt penceresi varsa yükü iş emri penceresi yerine ona dağıtır", async () => {
+    const prisma: any = {
+      machine: { findMany: jest.fn().mockResolvedValue([{ id: "m1", name: "VMC-1", dailyCapacityMinutes: 480, plantId: null }]) },
+      workOrder: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            plannedStartDate: new Date("2026-08-10"),
+            plannedEndDate: new Date("2026-08-13"),
+            operations: [{ machineId: "m1", standardMinutes: 100, plannedStartAt: new Date("2026-08-12T05:00:00Z"), plannedEndAt: new Date("2026-08-12T07:00:00Z") }],
+          },
+        ]),
+      },
+      plantProductionCalendar: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    const service = new SchedulingService(prisma, { shiftWindowsForProductionDate: jest.fn() } as any);
+
+    const result = await service.capacity("tenant-1", new Date("2026-08-10"), new Date("2026-08-13"));
+
+    expect(result).toEqual([{ machineId: "m1", machineName: "VMC-1", date: "2026-08-12", loadMinutes: 100, capacityMinutes: 480, overloaded: false }]);
+  });
+});
+
+describe("SchedulingService.runFiniteSchedule", () => {
+  const H = new Date("2026-10-12T05:00:00.000Z");
+
+  function build(opts: { calendar?: boolean } = {}) {
+    const machineFindMany = jest.fn().mockResolvedValue([
+      { id: "m1", name: "VMC-1", plantId: "p1", dailyCapacityMinutes: 480 },
+      { id: "m2", name: "VMC-2", plantId: null, dailyCapacityMinutes: null },
+    ]);
+    const workOrderFindMany = jest.fn().mockResolvedValue([
+      {
+        id: "wo1", woNo: "WO-1", priority: 5, dueDate: new Date("2026-10-13T00:00:00Z"), createdAt: new Date("2026-10-01"), quantity: 10,
+        operations: [
+          { id: "op1", seq: 1, name: "Kaba", machineId: "m1", standardMinutes: 60, status: "PENDING", completedQty: 0, scrapQty: 0 },
+          { id: "op2", seq: 2, name: "Finiş", machineId: "m2", standardMinutes: 30, status: "PENDING", completedQty: 0, scrapQty: 0 },
+        ],
+      },
+      {
+        id: "wo2", woNo: "WO-2", priority: 1, dueDate: new Date("2026-10-20T00:00:00Z"), createdAt: new Date("2026-10-02"), quantity: 4,
+        operations: [{ id: "op3", seq: 1, name: "Tornalama", machineId: "m1", standardMinutes: 100, status: "IN_PROGRESS", completedQty: 2, scrapQty: 0 }],
+      },
+    ]);
+    const calendarFindFirst = jest.fn().mockResolvedValue(opts.calendar ? { id: "cal" } : null);
+    const shiftWindowsForProductionDate = jest.fn().mockImplementation(async (_t: string, _p: string, day: string) => {
+      if (day !== "2026-10-12") return [];
+      return [{
+        start: new Date(`${day}T05:00:00.000Z`), end: new Date(`${day}T14:00:00.000Z`),
+        breaks: [{ isValidWithinShift: true, start: new Date(`${day}T09:00:00.000Z`), end: new Date(`${day}T09:30:00.000Z`) }],
+      }];
+    });
+    const tx = {
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      schedulingRun: { create: jest.fn().mockResolvedValue({ id: "run-1" }) },
+      workOrderOperation: { updateMany: jest.fn().mockResolvedValue({ count: 0 }), update: jest.fn().mockResolvedValue({}) },
+      workOrder: { update: jest.fn().mockResolvedValue({}) },
+    };
+    const prisma: any = {
+      machine: { findMany: machineFindMany },
+      workOrder: { findMany: workOrderFindMany },
+      plantProductionCalendar: { findFirst: calendarFindFirst },
+      $transaction: jest.fn().mockImplementation(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
+    };
+    const service = new SchedulingService(prisma, { shiftWindowsForProductionDate } as any);
+    return { service, prisma, tx, shiftWindowsForProductionDate };
+  }
+
+  it("simülasyon (commit:false) hiçbir şey yazmaz; çalışan operasyonun kalan süresi tamamlanan adetten düşülür", async () => {
+    const { service, prisma, tx } = build();
+
+    const result = await service.runFiniteSchedule("tenant-1", "user-1", { horizonStart: H, horizonDays: 3, dispatchRule: "EDD", commit: false });
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.schedulingRun.create).not.toHaveBeenCalled();
+    expect(result.runId).toBeNull();
+    expect(result.committed).toBe(false);
+    // op3 is live: 100' × (1 − 2/4) = 50', pinned at the horizon start on m1 (fallback 08:00 Istanbul = 05:00Z).
+    const op3 = result.operations.find((o) => o.operationId === "op3")!;
+    expect(op3.pinned).toBe(true);
+    expect(op3.minutes).toBe(50);
+    expect(op3.start).toEqual(H);
+    // op1 then follows on m1; op2 has no capacity (m2 has neither calendar nor dailyCapacity).
+    const op1 = result.operations.find((o) => o.operationId === "op1")!;
+    expect(op1.start).toEqual(op3.end);
+    expect(result.unscheduled).toEqual([expect.objectContaining({ operationId: "op2", reason: "NO_MACHINE_CAPACITY" })]);
+    expect(result.summary).toEqual({ workOrders: 2, scheduledOps: 2, unscheduledOps: 1, lateWorkOrders: 0, machines: 1 });
+  });
+
+  it("commit:true tek transaction içinde tenant kilidi alır, SchedulingRun yazar, planlanan pencereleri ve bayat pencereleri günceller", async () => {
+    const { service, tx } = build();
+
+    const result = await service.runFiniteSchedule("tenant-1", "user-1", { horizonStart: H, horizonDays: 3, dispatchRule: "EDD", commit: true });
+
+    expect(result.runId).toBe("run-1");
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(tx.schedulingRun.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ tenantId: "tenant-1", createdById: "user-1", dispatchRule: "EDD", committed: true, scheduledOps: 2, unscheduledOps: 1 }),
+    }));
+    expect(tx.workOrderOperation.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ workOrderId: { in: ["wo1", "wo2"] }, id: { notIn: expect.arrayContaining(["op1", "op3"]) } }),
+      data: { plannedStartAt: null, plannedEndAt: null, schedulingRunId: null },
+    }));
+    expect(tx.workOrderOperation.update).toHaveBeenCalledTimes(2);
+    expect(tx.workOrderOperation.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "op1" }, data: expect.objectContaining({ schedulingRunId: "run-1" }),
+    }));
+    expect(tx.workOrder.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("tesisin aktif takvimi varsa makine pencereleri vardiya/mola yapısından türetilir, statik kapasite kullanılmaz", async () => {
+    const { service, shiftWindowsForProductionDate } = build({ calendar: true });
+
+    const result = await service.runFiniteSchedule("tenant-1", "user-1", { horizonStart: H, horizonDays: 2, dispatchRule: "FIFO", commit: false });
+
+    expect(shiftWindowsForProductionDate).toHaveBeenCalledWith("tenant-1", "p1", "2026-10-12");
+    // Only 2026-10-12 has shifts: 05:00–09:00Z then 09:30–14:00Z. The live op3 (50') is pinned at 05:00–05:50Z,
+    // so op1 follows at 05:50–06:50Z inside the first shift window.
+    const op1 = result.operations.find((o) => o.operationId === "op1")!;
+    expect(op1.start).toEqual(new Date("2026-10-12T05:50:00.000Z"));
+    expect(op1.end).toEqual(new Date("2026-10-12T06:50:00.000Z"));
+  });
+});

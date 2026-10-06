@@ -111,6 +111,12 @@ export const MrpLotSizingRuleSchema = z.enum(["LOT_FOR_LOT", "MINIMUM_QUANTITY",
 export type MrpLotSizingRule = z.infer<typeof MrpLotSizingRuleSchema>;
 export const MrpProposalStatusSchema = z.enum(["PROPOSED", "FIRMED", "CONVERTED", "CANCELLED", "SUPERSEDED"]);
 export type MrpProposalStatus = z.infer<typeof MrpProposalStatusSchema>;
+/** MRP II finite scheduling dispatch rules. PRIORITY treats a lower WorkOrder.priority number as more urgent. */
+export const SchedulingDispatchRuleSchema = z.enum(["EDD", "PRIORITY", "FIFO", "SPT"]);
+export type SchedulingDispatchRule = z.infer<typeof SchedulingDispatchRuleSchema>;
+export const SchedulingUnscheduledReasonSchema = z.enum(["NO_OPERATIONS", "NO_MACHINE", "NO_STANDARD_MINUTES", "NO_MACHINE_CAPACITY", "PREDECESSOR_UNSCHEDULED", "HORIZON_EXCEEDED"]);
+export type SchedulingUnscheduledReason = z.infer<typeof SchedulingUnscheduledReasonSchema>;
+
 export const MrpExceptionTypeSchema = z.enum(["SHORTAGE", "RESCHEDULE_IN", "RESCHEDULE_OUT", "CANCEL", "QUANTITY_EXCESS", "QUANTITY_SHORTAGE", "MISSING_POLICY"]);
 export type MrpExceptionType = z.infer<typeof MrpExceptionTypeSchema>;
 export const MrpExceptionSeveritySchema = z.enum(["CRITICAL", "WARNING", "INFO"]);

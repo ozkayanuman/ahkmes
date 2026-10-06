@@ -146,4 +146,68 @@ describe("AHK-011 — standart süre + kapasite yükü (e2e)", () => {
     await prisma.machine.deleteMany({ where: { id: bigMachine } });
     await prisma.part.deleteMany({ where: { id: bigPart } });
   });
+
+  describe("MRP II sonlu kapasite çizelgeleme", () => {
+    // Deterministic horizon: a Monday 05:00Z so the 08:00-Istanbul fallback window is the first slot.
+    const horizonStart = new Date("2030-01-07T05:00:00.000Z");
+    let runId: string;
+
+    it("commit:false simülasyonu operasyon pencerelerini döner ama hiçbir şey yazmaz", async () => {
+      const res = await auth(api().post("/scheduling/runs").send({ horizonStart: horizonStart.toISOString(), horizonDays: 7, dispatchRule: "EDD", commit: false })).expect(201);
+
+      expect(res.body.committed).toBe(false);
+      expect(res.body.runId).toBeNull();
+      const op = res.body.operations.find((o: { workOrderId: string }) => o.workOrderId === workOrderId);
+      expect(op).toBeDefined();
+      expect(op.minutes).toBe(100);
+      expect(new Date(op.end).getTime() - new Date(op.start).getTime()).toBe(100 * 60_000);
+      expect(new Date(op.start).getTime()).toBeGreaterThanOrEqual(horizonStart.getTime());
+
+      const stored = await prisma.workOrderOperation.findFirst({ where: { workOrderId } });
+      expect(stored?.plannedStartAt).toBeNull();
+      expect(await prisma.schedulingRun.count({ where: { horizonStart } })).toBe(0);
+    });
+
+    it("commit:true SchedulingRun yazar, operasyon ve iş emri pencerelerini günceller, makine kuyruğunda görünür", async () => {
+      const res = await auth(api().post("/scheduling/runs").send({ horizonStart: horizonStart.toISOString(), horizonDays: 7, dispatchRule: "PRIORITY", commit: true })).expect(201);
+      runId = res.body.runId;
+      expect(runId).toBeTruthy();
+
+      const op = res.body.operations.find((o: { workOrderId: string }) => o.workOrderId === workOrderId);
+      const stored = await prisma.workOrderOperation.findFirstOrThrow({ where: { workOrderId } });
+      expect(stored.plannedStartAt?.toISOString()).toBe(op.start);
+      expect(stored.plannedEndAt?.toISOString()).toBe(op.end);
+      expect(stored.schedulingRunId).toBe(runId);
+
+      const wo = await prisma.workOrder.findUniqueOrThrow({ where: { id: workOrderId } });
+      expect(wo.plannedStartDate?.toISOString()).toBe(op.start);
+      expect(wo.plannedEndDate?.toISOString()).toBe(op.end);
+
+      const queue = await auth(api().get(`/scheduling/machine-queue?from=${horizonStart.toISOString()}&to=${new Date(horizonStart.getTime() + 7 * 86_400_000).toISOString()}`)).expect(200);
+      const row = queue.body.find((r: { machineId: string }) => r.machineId === machineId);
+      expect(row).toBeDefined();
+      expect(row.operations.map((o: { workOrderId: string }) => o.workOrderId)).toContain(workOrderId);
+
+      const runs = await auth(api().get("/scheduling/runs")).expect(200);
+      expect(runs.body.find((r: { id: string }) => r.id === runId)).toMatchObject({ dispatchRule: "PRIORITY", committed: true });
+      const detail = await auth(api().get(`/scheduling/runs/${runId}`)).expect(200);
+      expect(detail.body.result.summary.scheduledOps).toBeGreaterThanOrEqual(1);
+    });
+
+    it("kapasite raporu artık uygulanmış operasyon penceresinin gününe yük yazar", async () => {
+      const capacity = await auth(api().get(`/scheduling/capacity?from=${horizonStart.toISOString()}&to=${new Date(horizonStart.getTime() + 7 * 86_400_000).toISOString()}`)).expect(200);
+      const rows = capacity.body.filter((r: { machineId: string }) => r.machineId === machineId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ date: "2030-01-07", loadMinutes: 100 });
+    });
+
+    it("geçersiz sevk kuralı 400 döner", async () => {
+      await auth(api().post("/scheduling/runs").send({ dispatchRule: "RANDOM", commit: false })).expect(400);
+    });
+
+    afterAll(async () => {
+      await prisma.workOrderOperation.updateMany({ where: { schedulingRunId: runId }, data: { schedulingRunId: null, plannedStartAt: null, plannedEndAt: null } }).catch(() => undefined);
+      await prisma.schedulingRun.deleteMany({ where: { id: runId } }).catch(() => undefined);
+    });
+  });
 });

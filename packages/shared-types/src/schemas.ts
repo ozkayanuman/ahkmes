@@ -44,6 +44,7 @@ import {
   MrpPlanningPolicySchema,
   MrpLotSizingRuleSchema,
   UomDimensionSchema,
+  SchedulingDispatchRuleSchema,
 } from "./enums";
 
 // ---- Ortak yardımcılar ----
@@ -1123,6 +1124,16 @@ export type ControllerObservationDto = z.infer<typeof controllerObservationSchem
 export type MachineTagValuesDto = z.infer<typeof machineTagValuesSchema>;
 
 // ---- Scheduling (basit Gantt, v1.0) ----
+/** MRP II finite-capacity scheduling run. `commit:false` simulates and persists nothing. */
+export const runFiniteScheduleSchema = z.object({
+  plantId: idSchema.optional(),
+  horizonStart: isoDate.optional(),
+  horizonDays: z.number().int().min(1).max(90).default(30),
+  dispatchRule: SchedulingDispatchRuleSchema.default("EDD"),
+  commit: z.boolean().default(false),
+});
+export type RunFiniteScheduleDto = z.infer<typeof runFiniteScheduleSchema>;
+
 export const scheduleWorkOrderSchema = z.object({
   plannedStartDate: isoDate.nullable(),
   plannedEndDate: isoDate.nullable(),
