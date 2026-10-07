@@ -29,6 +29,7 @@ Accepted evidence remains valid: CNC-V1-00/01/02/03R/04/06/07R are **VERIFIED_DO
 | OEE | VERIFIED_DONE | CNC-V1-08R supplies canonical planned-time, structured-loss and quality semantics, explicit context, OEE permissions, Digital Twin projection and a read-only operations cockpit. A fresh 79-migration PostgreSQL rehearsal passed the 50-machine benchmark, 8-suite/70-test V1 matrix, backup/restore and restored-OEE proof. |
 | Costing | VERIFIED_DONE (V1 scoped) | Released plant rate cards are frozen into an immutable WO baseline at engineering release; material/machine/labor actuals, planned/actual/variance, operation breakdown, unit cost and explicit missing-data reasons are available. Overhead, tooling/fixture, subcontract and finance policy remain P1/P2. |
 | Procurement/sales | FUNCTIONAL_PARTIAL | Optional single-plant Sales-line demand integrates traceably into MRP and release inherits plant; supplier lot returns closed 2026-09-23 (`SupplierLotReturn`, rejected material lots). Split fulfillment, broader supplier quality and advanced Procurement remain outside V1-03R. |
+| Finance (GL) | VERIFIED_DONE (V1 scoped) | Double-entry general ledger closed 2026-10-07 (`GlAccount`, `GlPostingAccount`, `FiscalPeriod`, `JournalEntry`/`JournalLine`): seedable Tek Düzen chart subset, monthly periods with close/reopen, draft→post→reverse journal (posted entries immutable), trial balance and account ledger, idempotent AR/AP → GL posting (customer/supplier invoices and payments; cancellations reversed once) through `(tenantId, sourceType, sourceId)` uniqueness, with explicit skip reasons (`MAPPING_MISSING`, `PERIOD_CLOSED`, `ZERO_AMOUNT`). VAT, multi-currency translation, cost centres, e-defter/e-fatura remain P2. |
 | Onboarding/import | VERIFIED_DONE (V1 scoped) | administrator-only, tenant-scoped dry-run/atomic-commit pack covers engineering, tooling/fixture, commercial, machine, warehouse and opening-stock masters; release remains in normal workflows. |
 
 ## Re-audited domain conclusions
@@ -87,7 +88,7 @@ No commercial-coupling defect or tenant/security integrity defect was found. Leg
 
 **P1 (still open):** richer HMI material UX; operator skill rules (distinct from the closed `OperatorMachineQualification` machine-qualification gate — this is broader cross-machine skill/competency management).
 
-**P2:** advanced QMS, APS, enterprise BI, DNC/remote start, automatic controller quantity posting, universal CNC adapters, payroll/finance/CRM automation.
+**P2:** advanced QMS, APS beyond the V1 finite scheduler (alternate machines, setup matrices, optimisation), enterprise BI, DNC/remote start, automatic controller quantity posting, universal CNC adapters, payroll, statutory finance (VAT, e-defter/e-fatura, multi-currency) and CRM automation.
 
 Dependency graph: V1-03R → V1-11R; V1-07R → V1-08R → V1-11R; V1-02/04/06 → V1-09R; V1-00/01/02 → V1-10R. M80 field acceptance runs in parallel with a named connected pilot.
 

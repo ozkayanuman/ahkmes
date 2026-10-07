@@ -89,6 +89,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/purchase-orders", label: "Satınalma", icon: ShoppingCart, page: "purchase-orders" },
       { to: "/ar", label: "Alacaklar (AR)", icon: Landmark, page: "ar" },
       { to: "/ap", label: "Borçlar (AP)", icon: Receipt, page: "ap" },
+      { to: "/gl", label: "Genel Muhasebe (GL)", icon: Landmark, page: "gl" },
       { to: "/users", label: "Kullanıcılar", icon: Wrench, page: "users", adminOnly: true },
       { to: "/onboarding-import", label: "Veri Onboarding", icon: FileDown, adminOnly: true },
       { to: "/labor", label: "İşçilik Takibi", icon: Clock, page: "labor" },

@@ -48,6 +48,7 @@ const PAGE_LABELS: Record<PageKey, string> = {
   alarms: "Alarmlar",
   ar: "Alacaklar (AR)",
   ap: "Borçlar (AP)",
+  gl: "Genel Muhasebe (GL)",
   genealogy: "Genealogy",
   scheduling: "Scheduling",
   "shift-report": "Vardiya Raporu",

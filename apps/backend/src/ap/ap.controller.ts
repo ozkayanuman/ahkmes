@@ -45,7 +45,7 @@ export class ApController {
   @Post("invoices/:id/cancel")
   @Roles("ADMIN", "PLANNER")
   cancelInvoice(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.cancelInvoice(user.tenantId, id);
+    return this.service.cancelInvoice(user.tenantId, id, user.userId);
   }
 
   @Get("payments")

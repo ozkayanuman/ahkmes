@@ -198,6 +198,140 @@ model SchedulingRun {
   @@index([tenantId, createdAt])
 }
 
+/// ---- Faz G+ General Ledger (çift taraflı genel muhasebe) ----
+/// V1 kapsamı: hesap planı, aylık mali dönem, yevmiye (taslak→kayıt→ters kayıt),
+/// mizan/hesap ekstresi ve AR/AP alt defterlerinden idempotent otomatik kayıt.
+/// KDV, çoklu para birimi çevrimi, masraf merkezi ve yasal e-defter kapsam dışıdır.
+enum GlAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum JournalEntryStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum GlSourceType {
+  MANUAL
+  CUSTOMER_INVOICE
+  SUPPLIER_INVOICE
+  CUSTOMER_PAYMENT
+  SUPPLIER_PAYMENT
+}
+
+/// Alt defter kayıtlarının hangi hesaplara yazılacağı tenant bazında eşlenir.
+enum GlPostingKey {
+  AR_RECEIVABLE
+  SALES_REVENUE
+  AP_PAYABLE
+  PURCHASE_EXPENSE
+  BANK
+}
+
+model GlAccount {
+  id             String        @id @default(uuid())
+  tenantId       String
+  code           String
+  name           String
+  type           GlAccountType
+  parentId       String?
+  isActive       Boolean       @default(true)
+  /// Yalnızca yaprak (kayıt yapılabilir) hesaplara yevmiye satırı yazılır.
+  postingAllowed Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  parent      GlAccount?         @relation("GlAccountParent", fields: [parentId], references: [id])
+  children    GlAccount[]        @relation("GlAccountParent")
+  lines       JournalLine[]
+  postingKeys GlPostingAccount[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type])
+}
+
+model GlPostingAccount {
+  id        String       @id @default(uuid())
+  tenantId  String
+  key       GlPostingKey
+  accountId String
+
+  account GlAccount @relation(fields: [accountId], references: [id])
+
+  @@unique([tenantId, key])
+}
+
+model FiscalPeriod {
+  id         String             @id @default(uuid())
+  tenantId   String
+  year       Int
+  month      Int
+  status     FiscalPeriodStatus @default(OPEN)
+  closedAt   DateTime?
+  closedById String?
+  createdAt  DateTime           @default(now())
+
+  closedBy User? @relation(fields: [closedById], references: [id])
+
+  @@unique([tenantId, year, month])
+}
+
+model JournalEntry {
+  id           String             @id @default(uuid())
+  tenantId     String
+  jeNo         String             @unique
+  entryDate    DateTime
+  description  String
+  status       JournalEntryStatus @default(DRAFT)
+  sourceType   GlSourceType       @default(MANUAL)
+  /// Alt defter belgesinin kimliği; (tenantId, sourceType, sourceId) tekilliği
+  /// aynı belgenin iki kez kaydedilmesini veritabanı seviyesinde engeller.
+  sourceId     String?
+  reversalOfId String?            @unique
+  postedAt     DateTime?
+  postedById   String?
+  createdById  String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  lines      JournalLine[]
+  reversalOf JournalEntry? @relation("JournalEntryReversal", fields: [reversalOfId], references: [id])
+  reversal   JournalEntry? @relation("JournalEntryReversal")
+  createdBy  User          @relation("JournalEntryCreatedBy", fields: [createdById], references: [id])
+  postedBy   User?         @relation("JournalEntryPostedBy", fields: [postedById], references: [id])
+
+  @@unique([tenantId, sourceType, sourceId])
+  @@index([tenantId, entryDate])
+  @@index([tenantId, status])
+}
+
+model JournalLine {
+  id             String  @id @default(uuid())
+  tenantId       String
+  journalEntryId String
+  accountId      String
+  lineNo         Int
+  debit          Decimal @default(0) @db.Decimal(18, 2)
+  credit         Decimal @default(0) @db.Decimal(18, 2)
+  description    String?
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account      GlAccount    @relation(fields: [accountId], references: [id])
+
+  @@index([tenantId, accountId])
+  @@index([journalEntryId])
+}
+
 enum WorkOrderOperationStatus {
   PENDING
   SETUP
@@ -1283,6 +1417,9 @@ model User {
   operatorSkillsRevoked            OperatorSkill[]                   @relation("OperatorSkillRevokedBy")
   copilotDraftsCreated             CopilotDraft[]                    @relation("CopilotDraftCreatedBy")
   schedulingRuns                   SchedulingRun[]
+  journalEntriesCreated            JournalEntry[]                    @relation("JournalEntryCreatedBy")
+  journalEntriesPosted             JournalEntry[]                    @relation("JournalEntryPostedBy")
+  fiscalPeriodsClosed              FiscalPeriod[]
   copilotDraftsApproved            CopilotDraft[]                    @relation("CopilotDraftApprovedBy")
   copilotDraftsRejected            CopilotDraft[]                    @relation("CopilotDraftRejectedBy")
   spcMeasurements                  SpcMeasurement[]

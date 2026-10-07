@@ -30,6 +30,7 @@ import { DigitalTwinModule } from "./digital-twin/digital-twin.module";
 import { OeeModule } from "./oee/oee.module";
 import { CostingModule } from "./costing/costing.module";
 import { SchedulingModule } from "./scheduling/scheduling.module";
+import { GlModule } from "./gl/gl.module";
 import { AuditLogModule } from "./audit-log/audit-log.module";
 import { ShiftReportModule } from "./shift-report/shift-report.module";
 import { LaborModule } from "./labor/labor.module";
@@ -119,6 +120,7 @@ import { CustomerReturnsModule } from "./customer-returns/customer-returns.modul
     OeeModule,
     CostingModule,
     SchedulingModule,
+    GlModule,
     AuditLogModule,
     ShiftReportModule,
     LaborModule,

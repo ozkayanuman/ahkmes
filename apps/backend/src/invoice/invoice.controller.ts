@@ -39,6 +39,6 @@ export class InvoiceController {
   @Patch(":id/cancel")
   @Roles("ADMIN", "SALES")
   cancel(@CurrentUser() user: AuthUser, @Param("id") id: string) {
-    return this.service.cancel(user.tenantId, id);
+    return this.service.cancel(user.tenantId, id, user.userId);
   }
 }

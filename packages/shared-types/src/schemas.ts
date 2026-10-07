@@ -45,6 +45,8 @@ import {
   MrpLotSizingRuleSchema,
   UomDimensionSchema,
   SchedulingDispatchRuleSchema,
+  GlAccountTypeSchema,
+  GlPostingKeySchema,
 } from "./enums";
 
 // ---- Ortak yardımcılar ----
@@ -1124,6 +1126,64 @@ export type ControllerObservationDto = z.infer<typeof controllerObservationSchem
 export type MachineTagValuesDto = z.infer<typeof machineTagValuesSchema>;
 
 // ---- Scheduling (basit Gantt, v1.0) ----
+// ---- General Ledger (Faz G+) ----
+export const createGlAccountSchema = z.object({
+  code: z.string().trim().min(1).max(20),
+  name: z.string().trim().min(1).max(200),
+  type: GlAccountTypeSchema,
+  parentId: idSchema.nullable().optional(),
+  postingAllowed: z.boolean().default(true),
+});
+export type CreateGlAccountDto = z.infer<typeof createGlAccountSchema>;
+
+export const updateGlAccountSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  isActive: z.boolean().optional(),
+  postingAllowed: z.boolean().optional(),
+  parentId: idSchema.nullable().optional(),
+});
+export type UpdateGlAccountDto = z.infer<typeof updateGlAccountSchema>;
+
+export const setGlPostingAccountSchema = z.object({
+  key: GlPostingKeySchema,
+  accountId: idSchema,
+});
+export type SetGlPostingAccountDto = z.infer<typeof setGlPostingAccountSchema>;
+
+const journalLineSchema = z
+  .object({
+    accountId: idSchema,
+    debit: z.number().min(0).default(0),
+    credit: z.number().min(0).default(0),
+    description: z.string().trim().max(500).optional(),
+  })
+  .refine((l) => (l.debit > 0) !== (l.credit > 0), { message: "Her satırda borç veya alacaktan yalnızca biri sıfırdan büyük olmalı" });
+
+/** A manual journal entry is created as DRAFT; posting is a separate command. */
+export const createJournalEntrySchema = z
+  .object({
+    entryDate: isoDate,
+    description: z.string().trim().min(1).max(500),
+    lines: z.array(journalLineSchema).min(2),
+  })
+  .refine(
+    (e) => Math.abs(e.lines.reduce((s, l) => s + l.debit, 0) - e.lines.reduce((s, l) => s + l.credit, 0)) < 0.005,
+    { message: "Borç ve alacak toplamları eşit olmalı" },
+  );
+export type CreateJournalEntryDto = z.infer<typeof createJournalEntrySchema>;
+
+export const reverseJournalEntrySchema = z.object({
+  entryDate: isoDate.optional(),
+  description: z.string().trim().max(500).optional(),
+});
+export type ReverseJournalEntryDto = z.infer<typeof reverseJournalEntrySchema>;
+
+export const fiscalPeriodRefSchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  month: z.number().int().min(1).max(12),
+});
+export type FiscalPeriodRefDto = z.infer<typeof fiscalPeriodRefSchema>;
+
 /** MRP II finite-capacity scheduling run. `commit:false` simulates and persists nothing. */
 export const runFiniteScheduleSchema = z.object({
   plantId: idSchema.optional(),

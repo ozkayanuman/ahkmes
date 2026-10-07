@@ -30,7 +30,8 @@ export async function nextDocNo(
     | "customerPayment"
     | "mrpProposal"
     | "purchaseRequisition"
-    | "customerReturn",
+    | "customerReturn"
+    | "journalEntry",
   field:
     | "quoteNo"
     | "woNo"
@@ -52,7 +53,8 @@ export async function nextDocNo(
     | "cpNo"
     | "proposalNo"
     | "prqNo"
-    | "rmaNo",
+    | "rmaNo"
+    | "jeNo",
   prefix: string,
 ): Promise<string> {
   const year = new Date().getFullYear();

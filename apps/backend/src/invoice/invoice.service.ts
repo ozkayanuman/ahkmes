@@ -1,7 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import type { CreateInvoiceDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { OutboxService } from "../outbox/outbox.service";
+import { GlService } from "../gl/gl.service";
 import { nextDocNo } from "../common/numbering";
 
 const INVOICE_INCLUDE = {
@@ -28,6 +29,8 @@ export class InvoiceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
+    /** Optional so unit tests and GL-less deployments keep working; posting failures never fail the command. */
+    @Optional() private readonly gl?: GlService,
   ) {}
 
   findAll(tenantId: string, salesOrderId?: string) {
@@ -101,10 +104,11 @@ export class InvoiceService {
       return invoice;
     });
 
+    await this.gl?.postSource(tenantId, userId, "CUSTOMER_INVOICE", created.id).catch(() => undefined);
     return created;
   }
 
-  async cancel(tenantId: string, id: string) {
+  async cancel(tenantId: string, id: string, userId?: string) {
     const invoice = await this.prisma.invoice.findFirst({ where: { id, tenantId }, include: { lines: true } });
     if (!invoice) throw new NotFoundException("Fatura bulunamadı");
     if (invoice.status !== "ISSUED") {
@@ -124,6 +128,7 @@ export class InvoiceService {
       return updated;
     });
 
+    if (userId) await this.gl?.postSource(tenantId, userId, "CUSTOMER_INVOICE", id).catch(() => undefined);
     return updated;
   }
 }

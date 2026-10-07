@@ -1,7 +1,8 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException, Optional } from "@nestjs/common";
 import type { CreateCustomerPaymentDto, ReconcilePaymentDto } from "@ahkmes/shared-types";
 import { PrismaService } from "../prisma/prisma.service";
 import { OutboxService } from "../outbox/outbox.service";
+import { GlService } from "../gl/gl.service";
 import { nextDocNo } from "../common/numbering";
 
 const PAYMENT_INCLUDE = {
@@ -21,6 +22,8 @@ export class ArService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
+    /** Optional so unit tests and GL-less deployments keep working; posting failures never fail the command. */
+    @Optional() private readonly gl?: GlService,
   ) {}
 
   findPayments(tenantId: string, customerId?: string, reconciled?: boolean) {
@@ -100,6 +103,8 @@ export class ArService {
       return payment;
     });
 
+    // GL subledger posting runs after the AR commit; anything it cannot post is surfaced by POST /gl/sync.
+    await this.gl?.postSource(tenantId, userId, "CUSTOMER_PAYMENT", created.id).catch(() => undefined);
     return created;
   }
 

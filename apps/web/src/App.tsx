@@ -37,6 +37,7 @@ import { RecipesPage } from "./pages/recipes";
 import { SpcPage } from "./pages/spc";
 import { AlarmsPage } from "./pages/alarms";
 import { ApPage } from "./pages/ap";
+import { GlPage } from "./pages/gl";
 import { ArPage } from "./pages/ar";
 import { WorkOrdersPage } from "./pages/work-orders";
 import { WorkOrderDetailPage } from "./pages/work-order-detail";
@@ -149,6 +150,7 @@ export function App() {
         <Route path="/alarms" element={<PageGuard page="alarms"><AlarmsPage /></PageGuard>} />
         <Route path="/ar" element={<PageGuard page="ar"><ArPage /></PageGuard>} />
         <Route path="/ap" element={<PageGuard page="ap"><ApPage /></PageGuard>} />
+        <Route path="/gl" element={<PageGuard page="gl"><GlPage /></PageGuard>} />
         <Route path="/machines" element={<PageGuard page="machines"><MachinesPage /></PageGuard>} />
         <Route path="/hierarchy" element={<PageGuard page="hierarchy"><HierarchyPage /></PageGuard>} />
         <Route path="/digital-twin" element={<PageGuard page="digital-twin"><DigitalTwinPage /></PageGuard>} />

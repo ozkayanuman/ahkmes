@@ -111,6 +111,16 @@ export const MrpLotSizingRuleSchema = z.enum(["LOT_FOR_LOT", "MINIMUM_QUANTITY",
 export type MrpLotSizingRule = z.infer<typeof MrpLotSizingRuleSchema>;
 export const MrpProposalStatusSchema = z.enum(["PROPOSED", "FIRMED", "CONVERTED", "CANCELLED", "SUPERSEDED"]);
 export type MrpProposalStatus = z.infer<typeof MrpProposalStatusSchema>;
+// ---- General Ledger (Faz G+) ----
+export const GlAccountTypeSchema = z.enum(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]);
+export type GlAccountType = z.infer<typeof GlAccountTypeSchema>;
+export const FiscalPeriodStatusSchema = z.enum(["OPEN", "CLOSED"]);
+export const JournalEntryStatusSchema = z.enum(["DRAFT", "POSTED", "REVERSED"]);
+export const GlSourceTypeSchema = z.enum(["MANUAL", "CUSTOMER_INVOICE", "SUPPLIER_INVOICE", "CUSTOMER_PAYMENT", "SUPPLIER_PAYMENT"]);
+export type GlSourceType = z.infer<typeof GlSourceTypeSchema>;
+export const GlPostingKeySchema = z.enum(["AR_RECEIVABLE", "SALES_REVENUE", "AP_PAYABLE", "PURCHASE_EXPENSE", "BANK"]);
+export type GlPostingKey = z.infer<typeof GlPostingKeySchema>;
+
 /** MRP II finite scheduling dispatch rules. PRIORITY treats a lower WorkOrder.priority number as more urgent. */
 export const SchedulingDispatchRuleSchema = z.enum(["EDD", "PRIORITY", "FIFO", "SPT"]);
 export type SchedulingDispatchRule = z.infer<typeof SchedulingDispatchRuleSchema>;
@@ -257,6 +267,7 @@ export const PAGE_KEYS = [
   "alarms",
   "ar",
   "ap",
+  "gl",
   "purchase-orders",
   "production",
   "parts",
@@ -292,7 +303,7 @@ export type PageKey = z.infer<typeof PageKeySchema>;
 export const PAGE_PRODUCT_MODULE: Record<PageKey, ProductModule | "PLATFORM_CORE"> = {
   customers: "ERP_MASTER_DATA", leads: "ERP_CRM_SALES", "service-tickets": "ERP_PROJECT_SERVICE",
   rfq: "ERP_PROCUREMENT", quotes: "ERP_CRM_SALES", "sales-orders": "ERP_CRM_SALES",
-  "purchase-orders": "ERP_PROCUREMENT", ar: "ERP_FINANCE", ap: "ERP_FINANCE",
+  "purchase-orders": "ERP_PROCUREMENT", ar: "ERP_FINANCE", ap: "ERP_FINANCE", gl: "ERP_FINANCE",
   projects: "ERP_PROJECT_SERVICE", labor: "MES_EXECUTION",
   users: "PLATFORM_CORE", "audit-log": "PLATFORM_CORE", "platform-modules": "PLATFORM_CORE",
   materials: "ERP_MASTER_DATA", parts: "ERP_MASTER_DATA", suppliers: "ERP_MASTER_DATA", hierarchy: "PLATFORM_CORE",
